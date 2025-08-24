@@ -47,6 +47,7 @@ from .audit import (
     AuditFilters
 )
 
+# Property schemas
 from .property import (
     PropertyBase,
     PropertyCreate,
@@ -56,6 +57,60 @@ from .property import (
     PropertyStats,
     PropertyWithStats,
     PropertyFilters
+)
+
+# Room Type schemas
+from .room_type import (
+    RoomTypeBase,
+    RoomTypeCreate,
+    RoomTypeUpdate,
+    RoomTypeResponse,
+    RoomTypeListResponse,
+    RoomTypeWithStats,
+    RoomTypeFilters
+)
+
+# Room schemas
+from .room import (
+    RoomBase,
+    RoomCreate,
+    RoomUpdate,
+    RoomResponse,
+    RoomListResponse,
+    RoomWithDetails,
+    RoomBulkUpdate,
+    RoomFilters,
+    RoomStats
+)
+
+# Guest schemas
+from .guest import (
+    GuestBase,
+    GuestCreate,
+    GuestUpdate,
+    GuestResponse,
+    GuestListResponse,
+    GuestWithStats,
+    GuestFilters
+)
+
+# Reservation schemas
+from .reservation import (
+    ReservationBase,
+    ReservationCreate,
+    ReservationUpdate,
+    ReservationResponse,
+    ReservationListResponse,
+    ReservationWithDetails,
+    ReservationRoomBase,
+    ReservationRoomCreate,
+    ReservationRoomResponse,
+    CheckInRequest,
+    CheckOutRequest,
+    CancelReservationRequest,
+    AvailabilityRequest,
+    AvailabilityResponse,
+    ReservationFilters
 )
 
 __all__ = [
@@ -98,4 +153,46 @@ __all__ = [
     "PropertyStats",
     "PropertyWithStats",
     "PropertyFilters",
+    # Room Type
+    "RoomTypeBase",
+    "RoomTypeCreate",
+    "RoomTypeUpdate",
+    "RoomTypeResponse",
+    "RoomTypeListResponse",
+    "RoomTypeWithStats",
+    "RoomTypeFilters",
+    # Room
+    "RoomBase",
+    "RoomCreate",
+    "RoomUpdate",
+    "RoomResponse",
+    "RoomListResponse",
+    "RoomWithDetails",
+    "RoomBulkUpdate",
+    "RoomFilters",
+    "RoomStats",
+    # Guest
+    "GuestBase",
+    "GuestCreate",
+    "GuestUpdate",
+    "GuestResponse",
+    "GuestListResponse",
+    "GuestWithStats",
+    "GuestFilters",
+    # Reservation
+    "ReservationBase",
+    "ReservationCreate",
+    "ReservationUpdate",
+    "ReservationResponse",
+    "ReservationListResponse",
+    "ReservationWithDetails",
+    "ReservationRoomBase",
+    "ReservationRoomCreate",
+    "ReservationRoomResponse",
+    "CheckInRequest",
+    "CheckOutRequest",
+    "CancelReservationRequest",
+    "AvailabilityRequest",
+    "AvailabilityResponse",
+    "ReservationFilters",
 ]

@@ -2,7 +2,10 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, users, tenants, audit, properties, room_types, rooms
+from app.api.v1.endpoints import (
+    auth, users, tenants, audit, properties, 
+    room_types, rooms, guests, reservations
+)
 
 api_router = APIRouter()
 
@@ -53,4 +56,18 @@ api_router.include_router(
     rooms.router,
     prefix="/rooms", 
     tags=["Quartos"]
+)
+
+# Incluir rotas de hóspedes
+api_router.include_router(
+    guests.router,
+    prefix="/guests", 
+    tags=["Hóspedes"]
+)
+
+# Incluir rotas de reservas
+api_router.include_router(
+    reservations.router,
+    prefix="/reservations", 
+    tags=["Reservas"]
 )
