@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: pms_postgres_dev
+    environment:
+      POSTGRES_DB: pms_db_dev
+      POSTGRES_USER: pms_user
+      POSTGRES_PASSWORD: pms_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    networks:
+      - pms_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: pms_redis_dev
+    ports:
+      - "6379:6379"
+    networks:
+      - pms_network
+
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: pms_backend_dev
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://pms_user:pms_password@postgres:5432/pms_db_dev
+      - REDIS_URL=redis://redis:6379
+      - SECRET_KEY=dev-secret-key-not-for-production
+      - ENVIRONMENT=development
+      - DEBUG=true
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./backend:/app
+      - /app/__pycache__
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - pms_network
+
+volumes:
+  postgres_dev_data:
+
+networks:
+  pms_network:
+    driver: bridge

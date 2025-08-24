@@ -1,0 +1,120 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: pms_postgres
+    environment:
+      POSTGRES_DB: pms_db
+      POSTGRES_USER: pms_user
+      POSTGRES_PASSWORD: pms_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - pms_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: pms_redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - pms_network
+
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pms_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://pms_user:pms_password@postgres:5432/pms_db
+      - REDIS_URL=redis://redis:6379
+      - SECRET_KEY=your-super-secret-key-change-in-production
+      - ENVIRONMENT=production
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    networks:
+      - pms_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pms_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NODE_ENV=production
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - pms_network
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pms_celery_worker
+    environment:
+      - DATABASE_URL=postgresql://pms_user:pms_password@postgres:5432/pms_db
+      - REDIS_URL=redis://redis:6379
+      - SECRET_KEY=your-super-secret-key-change-in-production
+    depends_on:
+      - postgres
+      - redis
+    command: celery -A app.tasks.celery_app worker --loglevel=info
+    restart: unless-stopped
+    networks:
+      - pms_network
+
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pms_celery_beat
+    environment:
+      - DATABASE_URL=postgresql://pms_user:pms_password@postgres:5432/pms_db
+      - REDIS_URL=redis://redis:6379
+      - SECRET_KEY=your-super-secret-key-change-in-production
+    depends_on:
+      - postgres
+      - redis
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    restart: unless-stopped
+    networks:
+      - pms_network
+
+  nginx:
+    image: nginx:alpine
+    container_name: pms_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf
+      - ./docker/ssl:/etc/ssl/certs
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+    networks:
+      - pms_network
+
+volumes:
+  postgres_data:
+
+networks:
+  pms_network:
+    driver: bridge
+
+---

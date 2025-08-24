@@ -1,0 +1,20 @@
+# backend/requirements-dev.txt
+
+# Incluir dependências de produção
+-r requirements.txt
+
+# Testes
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+httpx==0.25.2
+
+# Linting e formatação
+black==23.11.0
+isort==5.12.0
+flake8==6.1.0
+mypy==1.7.1
+
+# Debug e desenvolvimento
+ipython==8.17.2
+ipdb==0.13.13

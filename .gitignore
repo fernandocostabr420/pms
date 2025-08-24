@@ -1,0 +1,126 @@
+# ============================================
+# SISTEMA DE ARQUIVOS / LINUX
+# ============================================
+*.log
+*.pid
+*.seed
+*.pid.lock
+*.swp
+*.swo
+*.DS_Store
+Thumbs.db
+
+# ============================================
+# PYTHON
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ambientes virtuais
+.env
+.venv/
+env/
+venv/
+
+# Cache / compilação
+*.egg-info/
+.eggs/
+*.egg
+dist/
+build/
+develop-eggs/
+.installed.cfg
+
+# Configuração IDEs
+.vscode/
+.idea/
+*.iml
+
+# Testes
+.coverage
+.tox/
+.nox/
+.pytest_cache/
+htmlcov/
+.mypy_cache/
+
+# ============================================
+# NODE.JS
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+package-lock.json
+yarn.lock
+
+# Cache
+.cache/
+.next/
+out/
+
+# ============================================
+# DOCKER
+# ============================================
+/docker-compose.override.yml
+/docker-compose.local.yml
+*.pid
+*.seed
+*.pid.lock
+
+# ============================================
+# AMBIENTE / CONFIGURAÇÕES SENSÍVEIS
+# ============================================
+# Arquivos de configuração de ambiente
+*.env
+*.env.*
+.envrc
+secrets.json
+secret.key
+config.json
+
+# ============================================
+# LOGS
+# ============================================
+logs/
+*.log
+log.txt
+error.log
+
+# ============================================
+# BANCOS / ARQUIVOS TEMPORÁRIOS
+# ============================================
+*.sqlite3
+*.db
+*.sqlite
+*.sql
+*.tar
+*.gz
+*.zip
+*.bak
+
+# ============================================
+# FRONTEND (caso tenha React/Angular)
+# ============================================
+build/
+dist/
+.cache/
+coverage/
+*.tsbuildinfo
+
+# ============================================
+# DOCKER / CONTAINERS
+# ============================================
+/file/media_temp/
+/file/profile_pictures/
+/file/historico_usuarios/
+/file/active_by_user/
+/file/audios_received/
+/file/audios_converted/
+
+# ============================================
+# JUPYTER NOTEBOOK
+# ============================================
+.ipynb_checkpoints
