@@ -113,7 +113,7 @@ def delete_tenant(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Não é possível desativar seu próprio tenant"
         )
-    
+     
     # Soft delete
     tenant.is_active = False
     db.commit()

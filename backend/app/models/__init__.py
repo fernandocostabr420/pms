@@ -1,15 +1,9 @@
 # backend/app/models/__init__.py
-
 """Database models"""
 
-# Importar todos os modelos para registro no SQLAlchemy
 from .tenant import Tenant
 from .user import User
+from .audit_log import AuditLog
+from .property import Property  # ← ADICIONAR ESTA LINHA
 
-# Depois de criar outros modelos, adicionar aqui:
-# from .property import Property  
-# from .room import Room
-# from .reservation import Reservation
-# from .audit_log import AuditLog
-
-__all__ = ["Tenant", "User"]
+__all__ = ["Tenant", "User", "AuditLog", "Property"]  # ← ADICIONAR "Property"

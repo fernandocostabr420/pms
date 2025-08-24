@@ -38,6 +38,26 @@ from .common import (
     HealthCheck
 )
 
+# Audit schemas
+from .audit import (
+    AuditLogResponse,
+    AuditLogWithUser,
+    AuditTrailResponse,
+    AuditSummary,
+    AuditFilters
+)
+
+from .property import (
+    PropertyBase,
+    PropertyCreate,
+    PropertyUpdate,
+    PropertyResponse,
+    PropertyListResponse,
+    PropertyStats,
+    PropertyWithStats,
+    PropertyFilters
+)
+
 __all__ = [
     # Tenant
     "TenantBase",
@@ -63,4 +83,19 @@ __all__ = [
     "ErrorResponse",
     "PaginatedResponse",
     "HealthCheck",
+    # Audit
+    "AuditLogResponse",
+    "AuditLogWithUser",
+    "AuditTrailResponse",
+    "AuditSummary",
+    "AuditFilters",
+    # Property
+    "PropertyBase",
+    "PropertyCreate",
+    "PropertyUpdate", 
+    "PropertyResponse",
+    "PropertyListResponse",
+    "PropertyStats",
+    "PropertyWithStats",
+    "PropertyFilters",
 ]

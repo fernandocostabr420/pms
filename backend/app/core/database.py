@@ -80,7 +80,7 @@ def check_db_connection() -> bool:
 # Importar modelos para registro (deve vir depois da definição da Base)
 def register_models():
     """Importa todos os modelos para registro no SQLAlchemy"""
-    from app.models import Tenant, User  # noqa
+    from app.models import Tenant, User, AuditLog, Property  # noqa
     
 # Chamar na inicialização
 register_models()

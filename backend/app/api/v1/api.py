@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, users, tenants
+from app.api.v1.endpoints import auth, users, tenants, audit, properties
 
 api_router = APIRouter()
 
@@ -25,4 +25,17 @@ api_router.include_router(
     tenants.router,
     prefix="/tenants", 
     tags=["Tenants"]
+)
+
+# Incluir rotas de auditoria
+api_router.include_router(
+    audit.router,
+    prefix="/audit", 
+    tags=["Auditoria"]
+)
+
+api_router.include_router(
+    properties.router, 
+    prefix="/properties", 
+    tags=["Propriedades"]
 )
