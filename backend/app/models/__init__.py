@@ -4,6 +4,8 @@
 from .tenant import Tenant
 from .user import User
 from .audit_log import AuditLog
-from .property import Property  # ← ADICIONAR ESTA LINHA
+from .property import Property
+from .room_type import RoomType
+from .room import Room
 
-__all__ = ["Tenant", "User", "AuditLog", "Property"]  # ← ADICIONAR "Property"
+__all__ = ["Tenant", "User", "AuditLog", "Property", "RoomType", "Room"]

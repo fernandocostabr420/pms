@@ -83,4 +83,3 @@ def register_models():
     from app.models import Tenant, User, AuditLog, Property  # noqa
     
 # Chamar na inicialização
-register_models()
