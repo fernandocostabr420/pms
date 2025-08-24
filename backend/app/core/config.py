@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379"
     
     # CORS - string separada por vírgulas
-    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://72.60.50.223:3000"
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://72.60.50.223:3000,http://72.60.50.223:8000"
     
     # Email (para futuro)
     SMTP_HOST: Optional[str] = None
