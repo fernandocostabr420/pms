@@ -58,12 +58,13 @@ export default function PropertiesPage() {
   const loadProperties = async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams();
-      if (searchTerm) params.append('search', searchTerm);
-      if (propertyType) params.append('property_type', propertyType);
+      const params: any = {};
+      if (searchTerm) params.search = searchTerm;
+      if (propertyType) params.property_type = propertyType;
       
-      const response = await apiClient.get(`/api/v1/properties?${params.toString()}`);
-      setProperties(response.data.properties || []);
+      // Use o método específico que já existe na API
+      const data = await apiClient.getProperties(params);
+      setProperties(data.properties || []);
     } catch (error) {
       console.error('Erro ao carregar propriedades:', error);
       toast({
@@ -95,7 +96,7 @@ export default function PropertiesPage() {
     if (!propertyToDelete) return;
 
     try {
-      await apiClient.delete(`/api/v1/properties/${propertyToDelete.id}`);
+      await apiClient.deleteProperty(propertyToDelete.id); // Use o método específico
       toast({
         title: "Sucesso",
         description: "Propriedade excluída com sucesso",
@@ -154,23 +155,20 @@ export default function PropertiesPage() {
           <p className="text-gray-600">Gerencie suas propriedades hoteleiras</p>
         </div>
         
-        <Button 
-          onClick={handleCreateProperty}
-          className="bg-blue-600 hover:bg-blue-700"
-        >
-          <Plus className="h-4 w-4 mr-2" />
+        <Button onClick={handleCreateProperty} className="flex items-center gap-2">
+          <Plus className="h-4 w-4" />
           Nova Propriedade
         </Button>
       </div>
 
       {/* Filtros */}
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1 relative">
+            <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <Input
-                placeholder="Buscar por nome, cidade ou endereço..."
+                placeholder="Buscar propriedades..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10"
@@ -180,11 +178,11 @@ export default function PropertiesPage() {
             <select
               value={propertyType}
               onChange={(e) => setPropertyType(e.target.value)}
-              className="px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">Todos os tipos</option>
-              {Object.entries(PROPERTY_TYPES).map(([key, label]) => (
-                <option key={key} value={key}>{label}</option>
+              {Object.entries(PROPERTY_TYPES).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
               ))}
             </select>
           </div>
@@ -241,7 +239,7 @@ export default function PropertiesPage() {
                       </DropdownMenuItem>
                       <DropdownMenuItem 
                         onClick={() => handleDeleteProperty(property)}
-                        className="text-red-600"
+                        className="text-red-600 focus:text-red-600"
                       >
                         <Trash2 className="h-4 w-4 mr-2" />
                         Excluir
@@ -250,21 +248,25 @@ export default function PropertiesPage() {
                   </DropdownMenu>
                 </div>
               </CardHeader>
-              
-              <CardContent className="space-y-3">
-                {/* Endereço */}
-                <div className="flex items-start gap-2">
-                  <MapPin className="h-4 w-4 text-gray-400 mt-0.5 flex-shrink-0" />
-                  <div className="text-sm text-gray-600 leading-relaxed">
-                    {property.address_line_1}
-                    {property.address_line_2 && <br />}{property.address_line_2}
-                    <br />
-                    {property.city}, {property.state} - {property.postal_code}
-                  </div>
-                </div>
 
-                {/* Contatos */}
-                <div className="space-y-2">
+              <CardContent className="pt-0">
+                {/* Endereço */}
+                {property.address && (
+                  <div className="flex items-start gap-2 mb-3">
+                    <MapPin className="h-4 w-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                    <span className="text-sm text-gray-600 line-clamp-2">
+                      {[
+                        property.address,
+                        property.city,
+                        property.state
+                      ].filter(Boolean).join(', ')}
+                      {property.zip_code && ` - ${property.zip_code}`}
+                    </span>
+                  </div>
+                )}
+
+                {/* Contato */}
+                <div className="space-y-1 mb-3">
                   {property.phone && (
                     <div className="flex items-center gap-2">
                       <Phone className="h-4 w-4 text-gray-400" />

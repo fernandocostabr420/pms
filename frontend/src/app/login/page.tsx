@@ -84,14 +84,18 @@ export default function LoginPage() {
       <div className="relative max-w-md w-full space-y-8">
         {/* Logo e Header */}
         <div className="text-center">
-          <div className="mx-auto h-16 w-16 flex items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 shadow-lg shadow-blue-500/25">
-            <Hotel className="h-10 w-10 text-white" />
-          </div>
-          <h1 className="mt-6 text-4xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent">
-            PMS Hotel
-          </h1>
-          <p className="mt-2 text-base text-gray-500 font-medium">
-            Sistema de Gestão Hoteleira
+  <div className="mx-auto h-20 w-20 flex items-center justify-center">
+    <img 
+      src="/tucapms-logo.png" 
+      alt="TucaPMS Logo" 
+      className="h-20 w-20 object-contain"
+    />
+  </div>
+  <h1 className="mt-6 text-4xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent">
+    TucaPMS
+  </h1>
+<p className="mt-2 text-base text-gray-500 font-medium">
+  Sistema de Gestão Hoteleira
           </p>
           <p className="mt-1 text-sm text-gray-400">
             Faça login para acessar sua conta
@@ -190,7 +194,7 @@ export default function LoginPage() {
         {/* Footer */}
         <div className="text-center">
           <p className="text-xs text-gray-400">
-            © 2025 PMS Hotel. Todos os direitos reservados.
+            © 2025 TucaPMS. Todos os direitos reservados.
           </p>
         </div>
       </div>

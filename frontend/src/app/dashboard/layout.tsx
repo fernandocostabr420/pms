@@ -53,15 +53,19 @@ export default function DashboardLayout({
   }, [isAuthenticated, isLoading, router]);
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <Hotel className="h-8 w-8 animate-spin mx-auto text-blue-600" />
-          <p className="mt-2 text-gray-600">Carregando...</p>
-        </div>
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-center">
+        <img 
+          src="/tucapms-logo.png" 
+          alt="TucaPMS" 
+          className="h-12 w-12 mx-auto animate-pulse object-contain"
+        />
+        <p className="mt-2 text-gray-600">Carregando...</p>
       </div>
-    );
-  }
+    </div>
+  );
+}
 
   if (!isAuthenticated) {
     return null;
@@ -163,10 +167,14 @@ export default function DashboardLayout({
 
 function SidebarContent() {
   return (
-    <div className="flex flex-col flex-grow pt-5 pb-4 overflow-y-auto bg-white border-r border-gray-200">
+    <div className="flex flex-col h-full bg-white shadow-md">
       <div className="flex items-center flex-shrink-0 px-4">
-        <Hotel className="h-8 w-8 text-blue-600" />
-        <span className="ml-2 text-xl font-bold text-gray-900">PMS</span>
+        <img 
+          src="/tucapms-logo.png" 
+          alt="TucaPMS" 
+          className="h-10 w-10 object-contain"
+        />
+        <span className="ml-2 text-xl font-bold text-gray-900">TucaPMS</span>
       </div>
       
       <div className="mt-8 flex-grow flex flex-col">

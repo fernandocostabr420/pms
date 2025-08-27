@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     """Configurações da aplicação"""
     
     # Básico
-    APP_NAME: str = "PMS - Property Management System"
+    APP_NAME: str = "TucaPMS - Property Management System"
     VERSION: str = "1.0.0"
     DEBUG: bool = False
     ENVIRONMENT: str = "development"

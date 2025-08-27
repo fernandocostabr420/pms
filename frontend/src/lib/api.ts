@@ -15,7 +15,7 @@ class PMSApiClient {
   private baseURL: string;
 
   constructor() {
-    this.baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    this.baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://72.60.50.223:8000';
     
     this.client = axios.create({
       baseURL: `${this.baseURL}/api/v1`,
@@ -185,7 +185,7 @@ class PMSApiClient {
     search?: string;
     property_type?: string;
   }) {
-    const response = await this.client.get<PropertyListResponse>('/properties', { params });
+    const response = await this.client.get<PropertyListResponse>('/properties/', { params });
     return response.data;
   }
 
@@ -195,7 +195,19 @@ class PMSApiClient {
   }
 
   async createProperty(data: any) {
-    const response = await this.client.post('/properties', data);
+    // Normalizar dados para compatibilidade com backend
+    const normalizedData = {
+      ...data,
+      // Gerar slug automaticamente se não fornecido
+      slug: data.slug || data.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+      // Corrigir nome do campo de endereço
+      address_line1: data.address_line_1 || data.address_line1,
+    };
+    
+    // Remover campo com nome incorreto
+    delete normalizedData.address_line_1;
+    
+    const response = await this.client.post('/properties/', normalizedData);
     return response.data;
   }
 

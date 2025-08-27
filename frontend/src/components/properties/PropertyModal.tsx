@@ -48,13 +48,28 @@ interface PropertyModalProps {
   property?: PropertyResponse | null;
 }
 
+// CORRIGIDO: Tipos de propriedade aceitos pelo backend
 const PROPERTY_TYPES = [
   { value: 'hotel', label: 'Hotel' },
   { value: 'pousada', label: 'Pousada' },
-  { value: 'resort', label: 'Resort' },
   { value: 'hostel', label: 'Hostel' },
-  { value: 'apart_hotel', label: 'Apart Hotel' },
+  { value: 'apartamento', label: 'Apartamento' },
+  { value: 'resort', label: 'Resort' },
+  { value: 'flat', label: 'Flat' },
+  { value: 'casa', label: 'Casa' },
 ];
+
+// Função para gerar slug a partir do nome
+const generateSlug = (name: string): string => {
+  return name
+    .toLowerCase()
+    .normalize('NFD') // Decompor caracteres acentuados
+    .replace(/[\u0300-\u036f]/g, '') // Remover acentos
+    .replace(/[^a-z0-9\s-]/g, '') // Remover caracteres especiais
+    .trim()
+    .replace(/\s+/g, '-') // Substituir espaços por hífens
+    .replace(/-+/g, '-'); // Remover hífens duplos
+};
 
 export default function PropertyModal({ isOpen, onClose, property }: PropertyModalProps) {
   const [loading, setLoading] = useState(false);
@@ -104,21 +119,38 @@ export default function PropertyModal({ isOpen, onClose, property }: PropertyMod
       setLoading(true);
       setError(null);
 
-      // Limpar campos vazios
-      const cleanData = Object.fromEntries(
-        Object.entries(data).filter(([_, value]) => value !== '' && value !== null && value !== undefined)
+      // CORRIGIDO: Gerar slug automaticamente se não existir
+      const slug = property?.slug || generateSlug(data.name);
+
+      // CORRIGIDO: Transformar dados para formato do backend
+      const payload = {
+        ...data,
+        slug,
+        // Corrigir nomes dos campos de endereço
+        address_line1: data.address_line_1,
+        address_line2: data.address_line_2,
+        // Remover os campos com underscore do frontend
+        address_line_1: undefined,
+        address_line_2: undefined,
+      };
+
+      // Limpar campos vazios ou undefined
+      const cleanPayload = Object.fromEntries(
+        Object.entries(payload).filter(([_, value]) => 
+          value !== '' && value !== null && value !== undefined
+        )
       );
 
       if (property) {
         // Atualizar propriedade existente
-        await apiClient.put(`/api/v1/properties/${property.id}`, cleanData);
+        await apiClient.updateProperty(property.id, cleanPayload);
         toast({
           title: "Sucesso",
           description: "Propriedade atualizada com sucesso",
         });
       } else {
         // Criar nova propriedade
-        await apiClient.post('/api/v1/properties', cleanData);
+        await apiClient.createProperty(cleanPayload);
         toast({
           title: "Sucesso",
           description: "Propriedade criada com sucesso",
@@ -128,7 +160,24 @@ export default function PropertyModal({ isOpen, onClose, property }: PropertyMod
       onClose(true); // Indicar que precisa atualizar a lista
     } catch (err: any) {
       console.error('Erro ao salvar propriedade:', err);
-      const errorMessage = err.response?.data?.detail || 'Erro ao salvar propriedade';
+      
+      // Melhor tratamento de erros
+      let errorMessage = 'Erro ao salvar propriedade';
+      
+      if (err.response?.data?.detail) {
+        if (Array.isArray(err.response.data.detail)) {
+          // Erros de validação do Pydantic
+          errorMessage = err.response.data.detail.map((error: any) => 
+            `${error.loc?.[error.loc.length - 1] || 'Campo'}: ${error.msg}`
+          ).join(', ');
+        } else {
+          errorMessage = err.response.data.detail;
+        }
+      } else if (err.response?.data?.errors) {
+        // Outros formatos de erro
+        errorMessage = JSON.stringify(err.response.data.errors);
+      }
+
       setError(errorMessage);
       toast({
         title: "Erro",
