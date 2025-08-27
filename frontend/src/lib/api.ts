@@ -159,15 +159,58 @@ class PMSApiClient {
     return tenantData ? JSON.parse(tenantData) : null;
   }
 
-  // ===== API METHODS =====
+  // ===== GENERIC HTTP METHODS =====
   
-  // Properties
-  async getProperties(params?: { page?: number; per_page?: number; search?: string }) {
+  async get<T>(url: string, params?: any): Promise<AxiosResponse<T>> {
+    return this.client.get<T>(url, { params });
+  }
+
+  async post<T>(url: string, data?: any): Promise<AxiosResponse<T>> {
+    return this.client.post<T>(url, data);
+  }
+
+  async put<T>(url: string, data?: any): Promise<AxiosResponse<T>> {
+    return this.client.put<T>(url, data);
+  }
+
+  async delete<T>(url: string): Promise<AxiosResponse<T>> {
+    return this.client.delete<T>(url);
+  }
+
+  // ===== PROPERTIES API =====
+  
+  async getProperties(params?: { 
+    page?: number; 
+    per_page?: number; 
+    search?: string;
+    property_type?: string;
+  }) {
     const response = await this.client.get<PropertyListResponse>('/properties', { params });
     return response.data;
   }
 
-  // Reservations
+  async getProperty(id: number) {
+    const response = await this.client.get(`/properties/${id}`);
+    return response.data;
+  }
+
+  async createProperty(data: any) {
+    const response = await this.client.post('/properties', data);
+    return response.data;
+  }
+
+  async updateProperty(id: number, data: any) {
+    const response = await this.client.put(`/properties/${id}`, data);
+    return response.data;
+  }
+
+  async deleteProperty(id: number) {
+    const response = await this.client.delete(`/properties/${id}`);
+    return response.data;
+  }
+
+  // ===== RESERVATIONS API =====
+  
   async getReservations(params?: { 
     page?: number; 
     per_page?: number; 
@@ -184,13 +227,19 @@ class PMSApiClient {
     return response.data;
   }
 
-  // Guests
-  async getGuests(params?: { page?: number; per_page?: number; search?: string }) {
+  // ===== GUESTS API =====
+  
+  async getGuests(params?: { 
+    page?: number; 
+    per_page?: number; 
+    search?: string;
+  }) {
     const response = await this.client.get<GuestListResponse>('/guests', { params });
     return response.data;
   }
 
-  // Dashboard Stats
+  // ===== DASHBOARD STATS =====
+  
   async getDashboardStats() {
     try {
       const response = await this.client.get('/reservations/stats/dashboard');
@@ -208,7 +257,8 @@ class PMSApiClient {
     }
   }
 
-  // Generic request method
+  // ===== GENERIC REQUEST METHOD =====
+  
   async request<T>(endpoint: string, options?: AxiosRequestConfig): Promise<T> {
     const response: AxiosResponse<T> = await this.client.request({
       url: endpoint,
