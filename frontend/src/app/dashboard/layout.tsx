@@ -21,6 +21,7 @@ import {
   Users,
   Building,
   Bed,
+  Tag,
   Settings,
   LogOut,
   User,
@@ -35,6 +36,7 @@ const navigation = [
   { name: 'Reservas', href: '/dashboard/reservations', icon: Calendar },
   { name: 'Hóspedes', href: '/dashboard/guests', icon: Users },
   { name: 'Propriedades', href: '/dashboard/properties', icon: Building },
+  { name: 'Tipos de Quartos', href: '/dashboard/room-types', icon: Tag }, // ✅ NOVO ITEM
   { name: 'Quartos', href: '/dashboard/rooms', icon: Bed },
 ];
 
@@ -54,19 +56,19 @@ export default function DashboardLayout({
   }, [isAuthenticated, isLoading, router]);
 
   if (isLoading) {
-  return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="text-center">
-        <img 
-          src="/tucapms-logo.png" 
-          alt="TucaPMS" 
-          className="h-12 w-12 mx-auto animate-pulse object-contain"
-        />
-        <p className="mt-2 text-gray-600">Carregando...</p>
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <img 
+            src="/tucapms-logo.png" 
+            alt="TucaPMS" 
+            className="h-12 w-12 mx-auto animate-pulse object-contain"
+          />
+          <p className="mt-2 text-gray-600">Carregando...</p>
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
   if (!isAuthenticated) {
     return null;
@@ -107,21 +109,20 @@ export default function DashboardLayout({
           </button>
 
           <div className="flex-1 px-4 flex justify-between items-center">
-            <div>
+            <div className="flex-1 flex items-center">
               <h1 className="text-lg font-semibold text-gray-900">
-                {tenant?.name}
+                {tenant?.name || 'PMS Dashboard'}
               </h1>
             </div>
 
-            {/* User menu */}
             <div className="ml-4 flex items-center md:ml-6">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="relative h-8 w-8 rounded-full">
                     <Avatar className="h-8 w-8">
-                      <AvatarImage src="" alt={user?.full_name} />
+                      <AvatarImage src="" alt={user?.full_name || ''} />
                       <AvatarFallback>
-                        {user?.full_name?.split(' ').map(n => n[0]).join('').toUpperCase()}
+                        {user?.full_name?.charAt(0) || 'U'}
                       </AvatarFallback>
                     </Avatar>
                   </Button>
@@ -129,8 +130,12 @@ export default function DashboardLayout({
                 <DropdownMenuContent className="w-56" align="end" forceMount>
                   <DropdownMenuLabel className="font-normal">
                     <div className="flex flex-col space-y-1">
-                      <p className="text-sm font-medium">{user?.full_name}</p>
-                      <p className="text-xs text-muted-foreground">{user?.email}</p>
+                      <p className="text-sm font-medium leading-none">
+                        {user?.full_name}
+                      </p>
+                      <p className="text-xs leading-none text-muted-foreground">
+                        {user?.email}
+                      </p>
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
