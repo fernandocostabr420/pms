@@ -10,6 +10,19 @@ import type {
   MessageResponse 
 } from '@/types/api';
 
+import {
+  RoomAvailabilityResponse,
+  RoomAvailabilityCreate,
+  RoomAvailabilityUpdate,
+  RoomAvailabilityListResponse,
+  RoomAvailabilityFilters,
+  BulkAvailabilityUpdate,
+  CalendarAvailabilityRequest,
+  CalendarAvailabilityResponse,
+  AvailabilityStatsResponse,
+  RoomAvailabilityCheckResponse,
+} from '@/types/room-availability';
+
 
 
 class PMSApiClient {
@@ -394,6 +407,139 @@ async checkRoomNumberAvailability(roomNumber: string, propertyId: number): Promi
   return response.data;
 }
 
+  // ===== ROOM AVAILABILITY METHODS =====
+  
+  async getRoomAvailabilities(params?: {
+    page?: number;
+    per_page?: number;
+    room_id?: number;
+    property_id?: number;
+    room_type_id?: number;
+    date_from?: string;
+    date_to?: string;
+    is_available?: boolean;
+    is_blocked?: boolean;
+    is_out_of_order?: boolean;
+    is_maintenance?: boolean;
+    is_reserved?: boolean;
+    is_bookable?: boolean;
+    closed_to_arrival?: boolean;
+    closed_to_departure?: boolean;
+    has_rate_override?: boolean;
+    min_rate?: number;
+    max_rate?: number;
+    search?: string;
+  }): Promise<RoomAvailabilityListResponse> {
+    const response = await this.get<RoomAvailabilityListResponse>('/room-availability/', params);
+    return response.data;
+  }
+
+  async createRoomAvailability(data: RoomAvailabilityCreate): Promise<RoomAvailabilityResponse> {
+    const response = await this.post<RoomAvailabilityResponse>('/room-availability/', data);
+    return response.data;
+  }
+
+  async getRoomAvailability(id: number): Promise<RoomAvailabilityResponse> {
+    const response = await this.get<RoomAvailabilityResponse>(`/room-availability/${id}`);
+    return response.data;
+  }
+
+  async updateRoomAvailability(id: number, data: RoomAvailabilityUpdate): Promise<RoomAvailabilityResponse> {
+    const response = await this.put<RoomAvailabilityResponse>(`/room-availability/${id}`, data);
+    return response.data;
+  }
+
+  async deleteRoomAvailability(id: number): Promise<void> {
+    await this.delete(`/room-availability/${id}`);
+  }
+
+  async bulkUpdateAvailability(data: BulkAvailabilityUpdate): Promise<{ 
+    updated: number; 
+    created: number; 
+    message: string; 
+  }> {
+    const response = await this.post<{ 
+      updated: number; 
+      created: number; 
+      message: string; 
+    }>('/room-availability/bulk-update', data);
+    return response.data;
+  }
+
+  async getRoomCalendar(
+    roomId: number, 
+    dateFrom: string, 
+    dateTo: string
+  ): Promise<RoomAvailabilityResponse[]> {
+    const params = new URLSearchParams({
+      date_from: dateFrom,
+      date_to: dateTo,
+    });
+    
+    const response = await this.get<RoomAvailabilityResponse[]>(
+      `/room-availability/room/${roomId}/calendar?${params}`
+    );
+    return response.data;
+  }
+
+  async getCalendarRange(data: CalendarAvailabilityRequest): Promise<CalendarAvailabilityResponse[]> {
+    const response = await this.post<CalendarAvailabilityResponse[]>(
+      '/room-availability/calendar/range', 
+      data
+    );
+    return response.data;
+  }
+
+  async checkRoomAvailability(
+    roomId: number,
+    checkInDate: string,
+    checkOutDate: string
+  ): Promise<RoomAvailabilityCheckResponse> {
+    const params = new URLSearchParams({
+      check_in_date: checkInDate,
+      check_out_date: checkOutDate,
+    });
+
+    const response = await this.get<RoomAvailabilityCheckResponse>(
+      `/room-availability/check/${roomId}?${params}`
+    );
+    return response.data;
+  }
+
+  async getAvailabilityStats(params?: {
+    date_from?: string;
+    date_to?: string;
+    property_id?: number;
+  }): Promise<AvailabilityStatsResponse> {
+    const response = await this.get<AvailabilityStatsResponse>(
+      '/room-availability/stats/general', 
+      params
+    );
+    return response.data;
+  }
+
+  async getRoomAvailabilityByDate(
+    roomId: number, 
+    targetDate: string
+  ): Promise<RoomAvailabilityResponse> {
+    const response = await this.get<RoomAvailabilityResponse>(
+      `/room-availability/room/${roomId}/date/${targetDate}`
+    );
+    return response.data;
+  }
+
+  async searchRoomAvailabilities(
+    filters: RoomAvailabilityFilters, 
+    page = 1, 
+    per_page = 20
+  ): Promise<RoomAvailabilityListResponse> {
+    const response = await this.post<RoomAvailabilityListResponse>(
+      `/room-availability/search?page=${page}&per_page=${per_page}`, 
+      filters
+    );
+    return response.data;
+  }
+
   // ===== DASHBOARD STATS =====
   
   async getDashboardStats() {
@@ -569,6 +715,8 @@ async checkRoomNumberAvailability(roomNumber: string, propertyId: number): Promi
     return this.createReservation(reservationData);
   }
 }
+
+
 
 // Export singleton instance
 export const apiClient = new PMSApiClient();

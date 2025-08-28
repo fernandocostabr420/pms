@@ -36,8 +36,9 @@ const navigation = [
   { name: 'Reservas', href: '/dashboard/reservations', icon: Calendar },
   { name: 'Hóspedes', href: '/dashboard/guests', icon: Users },
   { name: 'Propriedades', href: '/dashboard/properties', icon: Building },
-  { name: 'Tipos de Quartos', href: '/dashboard/room-types', icon: Tag }, // ✅ NOVO ITEM
+  { name: 'Tipos de Quartos', href: '/dashboard/room-types', icon: Tag },
   { name: 'Quartos', href: '/dashboard/rooms', icon: Bed },
+  { name: 'Disponibilidade', href: '/dashboard/room-availability', icon: Calendar }, // ✅ NOVO ITEM
 ];
 
 export default function DashboardLayout({
