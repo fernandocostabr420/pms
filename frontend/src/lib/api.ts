@@ -236,21 +236,186 @@ class PMSApiClient {
     return response.data;
   }
 
-  // ===== RESERVATIONS API =====
-  
+   // ===== RESERVATIONS API (ATUALIZAR MÉTODOS EXISTENTES) =====
+
   async getReservations(params?: { 
     page?: number; 
     per_page?: number; 
     status?: string;
+    source?: string;
+    property_id?: number;
+    guest_id?: number;
+    check_in_from?: string;
+    check_in_to?: string;
+    check_out_from?: string;
+    check_out_to?: string;
+    created_from?: string;
+    created_to?: string;
+    min_amount?: number;
+    max_amount?: number;
+    is_paid?: boolean;
+    requires_deposit?: boolean;
+    is_group_reservation?: boolean;
     search?: string;
   }) {
-    const response = await this.client.get<ReservationListResponse>('/reservations', { params });
+    const response = await this.client.get<ReservationListResponse>('/reservations/', { params });
+    return response.data;
+  }
+
+  async createReservation(data: ReservationCreate) {
+    const response = await this.client.post<ReservationResponse>('/reservations/', data);
+    return response.data;
+  }
+
+  async getReservation(id: number) {
+    const response = await this.client.get<ReservationResponse>(`/reservations/${id}`);
+    return response.data;
+  }
+
+  async getReservationWithDetails(id: number) {
+    const response = await this.client.get<ReservationWithDetails>(`/reservations/${id}/details`);
+    return response.data;
+  }
+
+  async updateReservation(id: number, data: ReservationUpdate) {
+    const response = await this.client.put<ReservationResponse>(`/reservations/${id}`, data);
+    return response.data;
+  }
+
+  async getReservationByNumber(reservationNumber: string) {
+    const response = await this.client.get<ReservationResponse>(`/reservations/number/${reservationNumber}`);
     return response.data;
   }
 
   async getTodaysReservations(propertyId?: number) {
     const params = propertyId ? { property_id: propertyId } : {};
     const response = await this.client.get('/reservations/today', { params });
+    return response.data;
+  }
+
+  async checkAvailability(data: AvailabilityRequest): Promise<AvailabilityResponse> {
+    const response = await this.client.post<AvailabilityResponse>('/reservations/check-availability', data);
+    return response.data;
+  }
+
+  async confirmReservation(reservationId: number): Promise<ReservationResponse> {
+    const response = await this.client.patch<ReservationResponse>(`/reservations/${reservationId}/confirm`);
+    return response.data;
+  }
+
+  async checkInReservation(
+    reservationId: number,
+    data: CheckInRequest
+  ): Promise<ReservationResponse> {
+    const response = await this.client.post<ReservationResponse>(`/reservations/${reservationId}/check-in`, data);
+    return response.data;
+  }
+
+  async checkOutReservation(
+    reservationId: number,
+    data: CheckOutRequest
+  ): Promise<ReservationResponse> {
+    const response = await this.client.post<ReservationResponse>(`/reservations/${reservationId}/check-out`, data);
+    return response.data;
+  }
+
+  async cancelReservation(
+    reservationId: number,
+    data: CancelReservationRequest
+  ): Promise<ReservationResponse> {
+    const response = await this.client.post<ReservationResponse>(`/reservations/${reservationId}/cancel`, data);
+    return response.data;
+  }
+
+  async getCalendarMonth(
+    year: number,
+    month: number,
+    propertyId?: number
+  ): Promise<ReservationResponse[]> {
+    const params = new URLSearchParams({
+      year: year.toString(),
+      month: month.toString(),
+    });
+
+    if (propertyId) {
+      params.append('property_id', propertyId.toString());
+    }
+
+    const response = await this.client.get(`/reservations/calendar/month?${params}`);
+    return response.data;
+  }
+
+  async getCalendarRange(
+    startDate: string,
+    endDate: string,
+    propertyId?: number,
+    status?: string
+  ): Promise<ReservationResponse[]> {
+    const params = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate,
+    });
+
+    if (propertyId) {
+      params.append('property_id', propertyId.toString());
+    }
+
+    if (status) {
+      params.append('status', status);
+    }
+
+    const response = await this.client.get(`/reservations/calendar/range?${params}`);
+    return response.data;
+  }
+
+  async getReservationStats(propertyId?: number): Promise<ReservationStats> {
+    const params = propertyId ? { property_id: propertyId } : {};
+    const response = await this.client.get<ReservationStats>('/reservations/stats/general', { params });
+    return response.data;
+  }
+
+  async getDashboardStats(propertyId?: number, daysBack?: number): Promise<CalendarStatsResponse> {
+    const params = new URLSearchParams();
+    if (propertyId) {
+      params.append('property_id', propertyId.toString());
+    }
+    if (daysBack) {
+      params.append('days_back', daysBack.toString());
+    }
+
+    const response = await this.client.get(`/reservations/stats/dashboard?${params}`);
+    return response.data;
+  }
+
+  async advancedSearchReservations(
+    filters: ReservationFilters,
+    page = 1,
+    per_page = 20
+  ): Promise<ReservationListResponse> {
+    const response = await this.client.post<ReservationListResponse>(
+      `/reservations/advanced-search?page=${page}&per_page=${per_page}`, 
+      filters
+    );
+    return response.data;
+  }
+
+  async getOccupancyAnalysis(
+    propertyId?: number,
+    startDate?: string,
+    endDate?: string
+  ) {
+    const params = new URLSearchParams();
+    if (propertyId) {
+      params.append('property_id', propertyId.toString());
+    }
+    if (startDate) {
+      params.append('start_date', startDate);
+    }
+    if (endDate) {
+      params.append('end_date', endDate);
+    }
+
+    const response = await this.client.get(`/reservations/analysis/occupancy?${params}`);
     return response.data;
   }
 
