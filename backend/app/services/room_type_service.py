@@ -3,7 +3,7 @@
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import and_, or_, func
+from sqlalchemy import and_, or_, func, Integer
 from fastapi import Request
 
 from app.models.room_type import RoomType
@@ -83,7 +83,7 @@ class RoomTypeService:
             RoomType.is_active == True
         )
         
-        # Aplicar mesmos filtros da busca
+        # Aplicar mesmos filtros da busca (simplificado)
         if filters:
             if filters.is_bookable is not None:
                 query = query.filter(RoomType.is_bookable == filters.is_bookable)
@@ -92,7 +92,9 @@ class RoomTypeService:
             if filters.max_capacity:
                 query = query.filter(RoomType.max_capacity <= filters.max_capacity)
             if filters.has_amenity:
-                query = query.filter(RoomType.amenities.op('?')(filters.has_amenity.lower()))
+                query = query.filter(
+                    RoomType.amenities.op('?')(filters.has_amenity.lower())
+                )
             if filters.search:
                 search_term = f"%{filters.search}%"
                 query = query.filter(
@@ -113,42 +115,33 @@ class RoomTypeService:
     ) -> RoomType:
         """Cria novo tipo de quarto com auditoria automática"""
         
-        # Verificar se slug já existe no tenant
-        existing_room_type = self.get_room_type_by_slug(room_type_data.slug, tenant_id)
-        if existing_room_type:
-            raise ValueError("Slug já está em uso neste tenant")
-
-        # Criar tipo de quarto
-        db_room_type = RoomType(
-            name=room_type_data.name,
-            slug=room_type_data.slug,
-            description=room_type_data.description,
-            base_capacity=room_type_data.base_capacity,
-            max_capacity=room_type_data.max_capacity,
-            size_m2=room_type_data.size_m2,
-            bed_configuration=room_type_data.bed_configuration,
-            amenities=room_type_data.amenities,
-            settings=room_type_data.settings,
-            is_bookable=room_type_data.is_bookable,
+        # Verificar se já existe tipo com mesmo slug no tenant
+        existing = self.get_room_type_by_slug(room_type_data.slug, tenant_id)
+        if existing:
+            raise ValueError("Já existe um tipo de quarto com este slug")
+        
+        # Criar room_type
+        room_type_obj = RoomType(
+            **room_type_data.dict(),
             tenant_id=tenant_id
         )
-
+        
         try:
-            self.db.add(db_room_type)
+            self.db.add(room_type_obj)
             self.db.commit()
-            self.db.refresh(db_room_type)
+            self.db.refresh(room_type_obj)
             
             # Registrar auditoria
+            new_values = _extract_model_data(room_type_obj)
             with AuditContext(self.db, current_user, request) as audit:
-                new_values = _extract_model_data(db_room_type)
                 audit.log_create(
                     "room_types", 
-                    db_room_type.id, 
-                    new_values, 
-                    f"Tipo de quarto '{db_room_type.name}' criado"
+                    room_type_obj.id, 
+                    new_values,
+                    f"Tipo de quarto '{room_type_obj.name}' criado"
                 )
             
-            return db_room_type
+            return room_type_obj
             
         except IntegrityError:
             self.db.rollback()
@@ -307,8 +300,8 @@ class RoomTypeService:
 
         stats = self.db.query(
             func.count(Room.id).label('total_rooms'),
-            func.sum(func.cast(Room.is_operational, type_=None)).label('operational_rooms'),
-            func.sum(func.cast(Room.is_out_of_order, type_=None)).label('out_of_order_rooms')
+            func.sum(func.cast(Room.is_operational, Integer)).label('operational_rooms'),
+            func.sum(func.cast(Room.is_out_of_order, Integer)).label('out_of_order_rooms')
         ).filter(
             Room.room_type_id == room_type_id,
             Room.tenant_id == tenant_id,

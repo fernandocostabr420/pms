@@ -3,7 +3,7 @@
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import and_, or_, func
+from sqlalchemy import and_, or_, func, Integer
 from fastapi import Request
 
 from app.models.room import Room
@@ -45,7 +45,7 @@ class RoomService:
         self, 
         tenant_id: int, 
         filters: Optional[RoomFilters] = None,
-        skip: int = 0, 
+        skip: int = 0,
         limit: int = 100
     ) -> List[Room]:
         """Lista quartos com filtros opcionais"""
@@ -77,7 +77,7 @@ class RoomService:
                 query = query.filter(Room.is_out_of_order == filters.is_out_of_order)
             
             if filters.is_available_for_booking is not None:
-                # Filtro complexo - precisa ser operacional E tipo ser bookable
+                # Disponível para reserva = ativo + operacional + não fora de ordem + tipo reservável
                 if filters.is_available_for_booking:
                     query = query.join(RoomType).filter(
                         Room.is_operational == True,
@@ -94,14 +94,11 @@ class RoomService:
                     )
             
             if filters.min_occupancy:
-                # Considerar capacidade específica do quarto ou do tipo
+                # Considerar tanto max_occupancy do quarto quanto max_capacity do tipo
                 query = query.outerjoin(RoomType).filter(
                     or_(
                         Room.max_occupancy >= filters.min_occupancy,
-                        and_(
-                            Room.max_occupancy.is_(None),
-                            RoomType.max_capacity >= filters.min_occupancy
-                        )
+                        and_(Room.max_occupancy.is_(None), RoomType.max_capacity >= filters.min_occupancy)
                     )
                 )
             
@@ -109,17 +106,14 @@ class RoomService:
                 query = query.outerjoin(RoomType).filter(
                     or_(
                         Room.max_occupancy <= filters.max_occupancy,
-                        and_(
-                            Room.max_occupancy.is_(None),
-                            RoomType.max_capacity <= filters.max_occupancy
-                        )
+                        and_(Room.max_occupancy.is_(None), RoomType.max_capacity <= filters.max_occupancy)
                     )
                 )
             
             if filters.has_amenity:
-                # Buscar em comodidades do tipo + adicionais - removidas
+                # Buscar amenidade nas comodidades base do tipo ou adiconais do quarto
                 amenity_lower = filters.has_amenity.lower()
-                query = query.join(RoomType).filter(
+                query = query.outerjoin(RoomType).filter(
                     or_(
                         RoomType.amenities.op('?')(amenity_lower),
                         Room.additional_amenities.op('?')(amenity_lower)
@@ -186,73 +180,50 @@ class RoomService:
     ) -> Room:
         """Cria novo quarto com auditoria automática"""
         
-        # Validar se propriedade existe no tenant
-        property_exists = self.db.query(Property).filter(
+        # Verificar se já existe quarto com mesmo número na propriedade
+        existing = self.get_room_by_number(room_data.room_number, room_data.property_id, tenant_id)
+        if existing:
+            raise ValueError("Já existe um quarto com este número nesta propriedade")
+        
+        # Verificar se propriedade e room_type existem e pertencem ao tenant
+        property_obj = self.db.query(Property).filter(
             Property.id == room_data.property_id,
             Property.tenant_id == tenant_id,
             Property.is_active == True
         ).first()
+        if not property_obj:
+            raise ValueError("Propriedade não encontrada")
         
-        if not property_exists:
-            raise ValueError("Propriedade não encontrada neste tenant")
-
-        # Validar se room_type existe no tenant
-        room_type_exists = self.db.query(RoomType).filter(
+        room_type_obj = self.db.query(RoomType).filter(
             RoomType.id == room_data.room_type_id,
             RoomType.tenant_id == tenant_id,
             RoomType.is_active == True
         ).first()
-        
-        if not room_type_exists:
-            raise ValueError("Tipo de quarto não encontrado neste tenant")
+        if not room_type_obj:
+            raise ValueError("Tipo de quarto não encontrado")
 
-        # Verificar se room_number já existe na propriedade
-        existing_room = self.get_room_by_number(
-            room_data.room_number, 
-            room_data.property_id, 
-            tenant_id
-        )
-        
-        if existing_room:
-            raise ValueError("Número de quarto já existe nesta propriedade")
-
-        # Criar quarto
-        db_room = Room(
-            name=room_data.name,
-            room_number=room_data.room_number,
-            property_id=room_data.property_id,
-            room_type_id=room_data.room_type_id,
-            floor=room_data.floor,
-            building=room_data.building,
-            max_occupancy=room_data.max_occupancy,
-            bed_configuration=room_data.bed_configuration,
-            additional_amenities=room_data.additional_amenities,
-            removed_amenities=room_data.removed_amenities,
-            is_operational=room_data.is_operational,
-            is_out_of_order=room_data.is_out_of_order,
-            notes=room_data.notes,
-            maintenance_notes=room_data.maintenance_notes,
-            housekeeping_notes=room_data.housekeeping_notes,
-            settings=room_data.settings,
+        # Criar room
+        room_obj = Room(
+            **room_data.dict(),
             tenant_id=tenant_id
         )
-
+        
         try:
-            self.db.add(db_room)
+            self.db.add(room_obj)
             self.db.commit()
-            self.db.refresh(db_room)
+            self.db.refresh(room_obj)
             
             # Registrar auditoria
+            new_values = _extract_model_data(room_obj)
             with AuditContext(self.db, current_user, request) as audit:
-                new_values = _extract_model_data(db_room)
                 audit.log_create(
                     "rooms", 
-                    db_room.id, 
-                    new_values, 
-                    f"Quarto '{db_room.room_number}' criado na propriedade {property_exists.name}"
+                    room_obj.id, 
+                    new_values,
+                    f"Quarto '{room_obj.room_number}' criado na propriedade '{property_obj.name}'"
                 )
             
-            return db_room
+            return room_obj
             
         except IntegrityError:
             self.db.rollback()
@@ -278,26 +249,11 @@ class RoomService:
         # Verificar dados que serão atualizados
         update_data = room_data.dict(exclude_unset=True)
 
-        # Validações específicas
-        if 'room_type_id' in update_data:
-            room_type_exists = self.db.query(RoomType).filter(
-                RoomType.id == update_data['room_type_id'],
-                RoomType.tenant_id == tenant_id,
-                RoomType.is_active == True
-            ).first()
-            
-            if not room_type_exists:
-                raise ValueError("Tipo de quarto não encontrado")
-
-        # Se room_number for alterado, verificar se não existe na propriedade
+        # Se room_number for alterado, verificar duplicação
         if 'room_number' in update_data and update_data['room_number'] != room_obj.room_number:
-            existing = self.get_room_by_number(
-                update_data['room_number'], 
-                room_obj.property_id, 
-                tenant_id
-            )
+            existing = self.get_room_by_number(update_data['room_number'], room_obj.property_id, tenant_id)
             if existing and existing.id != room_id:
-                raise ValueError("Número de quarto já existe nesta propriedade")
+                raise ValueError("Já existe um quarto com este número nesta propriedade")
 
         # Aplicar alterações apenas nos campos fornecidos
         for field, value in update_data.items():
@@ -498,8 +454,8 @@ class RoomService:
 
         stats = query.with_entities(
             func.count(Room.id).label('total_rooms'),
-            func.sum(func.cast(Room.is_operational, type_=None)).label('operational_rooms'),
-            func.sum(func.cast(Room.is_out_of_order, type_=None)).label('out_of_order_rooms')
+            func.sum(func.cast(Room.is_operational, Integer)).label('operational_rooms'),
+            func.sum(func.cast(Room.is_out_of_order, Integer)).label('out_of_order_rooms')
         ).first()
 
         maintenance_count = query.filter(
