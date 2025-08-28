@@ -116,8 +116,9 @@ export default function ReservationFiltersComponent({
     value !== undefined && value !== null && value !== ''
   );
 
+  // ✅ CORRIGIDO - Usar valores válidos ao invés de string vazia
   const statusOptions = [
-    { value: '', label: 'Todos os Status' },
+    { value: 'all', label: 'Todos os Status' },
     { value: 'pending', label: 'Pendente' },
     { value: 'confirmed', label: 'Confirmada' },
     { value: 'checked_in', label: 'Check-in Feito' },
@@ -127,7 +128,7 @@ export default function ReservationFiltersComponent({
   ];
 
   const sourceOptions = [
-    { value: '', label: 'Todos os Canais' },
+    { value: 'all', label: 'Todos os Canais' },
     { value: 'direct', label: 'Direto' },
     { value: 'booking', label: 'Booking.com' },
     { value: 'airbnb', label: 'Airbnb' },
@@ -162,8 +163,8 @@ export default function ReservationFiltersComponent({
             <div className="min-w-[160px]">
               <Label>Status</Label>
               <Select
-                value={filters.status || ''}
-                onValueChange={(value) => handleFilterChange('status', value)}
+                value={filters.status || 'all'}
+                onValueChange={(value) => handleFilterChange('status', value === 'all' ? undefined : value)}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Status" />
@@ -182,14 +183,14 @@ export default function ReservationFiltersComponent({
             <div className="min-w-[160px]">
               <Label>Propriedade</Label>
               <Select
-                value={filters.property_id?.toString() || ''}
-                onValueChange={(value) => handleFilterChange('property_id', value ? parseInt(value) : undefined)}
+                value={filters.property_id?.toString() || 'all'}
+                onValueChange={(value) => handleFilterChange('property_id', value === 'all' ? undefined : parseInt(value))}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Propriedade" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Todas</SelectItem>
+                  <SelectItem value="all">Todas</SelectItem>
                   {properties.map((property) => (
                     <SelectItem key={property.id} value={property.id.toString()}>
                       {property.name}
@@ -199,22 +200,24 @@ export default function ReservationFiltersComponent({
               </Select>
             </div>
 
-            {/* Advanced Toggle */}
+            {/* Toggle Advanced */}
             <Button
+              type="button"
               variant="outline"
               onClick={() => setShowAdvanced(!showAdvanced)}
-              className={cn(showAdvanced && "bg-blue-50 border-blue-200")}
+              disabled={loading}
             >
               <Filter className="h-4 w-4 mr-2" />
-              Filtros Avançados
+              {showAdvanced ? 'Menos' : 'Mais'} Filtros
             </Button>
 
             {/* Clear Filters */}
             {hasActiveFilters && (
               <Button
-                variant="ghost"
+                type="button"
+                variant="outline"
                 onClick={onClearFilters}
-                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                disabled={loading}
               >
                 <X className="h-4 w-4 mr-2" />
                 Limpar
@@ -224,115 +227,111 @@ export default function ReservationFiltersComponent({
 
           {/* Advanced Filters */}
           {showAdvanced && (
-            <div className="border-t pt-4 space-y-4">
-              {/* Date Filters Row */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Check-in From */}
-                <div>
-                  <Label>Check-in A Partir De</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "w-full justify-start text-left font-normal",
-                          !checkInFrom && "text-muted-foreground"
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {checkInFrom ? format(checkInFrom, "dd/MM/yyyy", { locale: ptBR }) : "Selecionar"}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
-                      <Calendar
-                        mode="single"
-                        selected={checkInFrom}
-                        onSelect={(date) => handleDateChange('check_in_from', date)}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
+            <div className="space-y-4 pt-4 border-t">
+              {/* Date Ranges */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Check-in Range */}
+                <div className="space-y-2">
+                  <Label>Período de Check-in</Label>
+                  <div className="flex gap-2">
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "flex-1 justify-start text-left font-normal",
+                            !checkInFrom && "text-muted-foreground"
+                          )}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {checkInFrom ? format(checkInFrom, "dd/MM/yyyy", { locale: ptBR }) : "De"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
+                        <Calendar
+                          mode="single"
+                          selected={checkInFrom}
+                          onSelect={(date) => handleDateChange('check_in_from', date)}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "flex-1 justify-start text-left font-normal",
+                            !checkInTo && "text-muted-foreground"
+                          )}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {checkInTo ? format(checkInTo, "dd/MM/yyyy", { locale: ptBR }) : "Até"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
+                        <Calendar
+                          mode="single"
+                          selected={checkInTo}
+                          onSelect={(date) => handleDateChange('check_in_to', date)}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
                 </div>
 
-                {/* Check-in To */}
-                <div>
-                  <Label>Check-in Até</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "w-full justify-start text-left font-normal",
-                          !checkInTo && "text-muted-foreground"
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {checkInTo ? format(checkInTo, "dd/MM/yyyy", { locale: ptBR }) : "Selecionar"}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
-                      <Calendar
-                        mode="single"
-                        selected={checkInTo}
-                        onSelect={(date) => handleDateChange('check_in_to', date)}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
+                {/* Check-out Range */}
+                <div className="space-y-2">
+                  <Label>Período de Check-out</Label>
+                  <div className="flex gap-2">
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "flex-1 justify-start text-left font-normal",
+                            !checkOutFrom && "text-muted-foreground"
+                          )}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {checkOutFrom ? format(checkOutFrom, "dd/MM/yyyy", { locale: ptBR }) : "De"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
+                        <Calendar
+                          mode="single"
+                          selected={checkOutFrom}
+                          onSelect={(date) => handleDateChange('check_out_from', date)}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
 
-                {/* Check-out From */}
-                <div>
-                  <Label>Check-out A Partir De</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "w-full justify-start text-left font-normal",
-                          !checkOutFrom && "text-muted-foreground"
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {checkOutFrom ? format(checkOutFrom, "dd/MM/yyyy", { locale: ptBR }) : "Selecionar"}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
-                      <Calendar
-                        mode="single"
-                        selected={checkOutFrom}
-                        onSelect={(date) => handleDateChange('check_out_from', date)}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-
-                {/* Check-out To */}
-                <div>
-                  <Label>Check-out Até</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "w-full justify-start text-left font-normal",
-                          !checkOutTo && "text-muted-foreground"
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {checkOutTo ? format(checkOutTo, "dd/MM/yyyy", { locale: ptBR }) : "Selecionar"}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
-                      <Calendar
-                        mode="single"
-                        selected={checkOutTo}
-                        onSelect={(date) => handleDateChange('check_out_to', date)}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "flex-1 justify-start text-left font-normal",
+                            !checkOutTo && "text-muted-foreground"
+                          )}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {checkOutTo ? format(checkOutTo, "dd/MM/yyyy", { locale: ptBR }) : "Até"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
+                        <Calendar
+                          mode="single"
+                          selected={checkOutTo}
+                          onSelect={(date) => handleDateChange('check_out_to', date)}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
                 </div>
               </div>
 
@@ -342,8 +341,8 @@ export default function ReservationFiltersComponent({
                 <div>
                   <Label>Canal</Label>
                   <Select
-                    value={filters.source || ''}
-                    onValueChange={(value) => handleFilterChange('source', value)}
+                    value={filters.source || 'all'}
+                    onValueChange={(value) => handleFilterChange('source', value === 'all' ? undefined : value)}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Canal" />
@@ -394,14 +393,14 @@ export default function ReservationFiltersComponent({
                 <div>
                   <Label>Pagamento</Label>
                   <Select
-                    value={filters.is_paid?.toString() || ''}
-                    onValueChange={(value) => handleFilterChange('is_paid', value ? value === 'true' : undefined)}
+                    value={filters.is_paid === undefined ? 'all' : filters.is_paid.toString()}
+                    onValueChange={(value) => handleFilterChange('is_paid', value === 'all' ? undefined : value === 'true')}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Pagamento" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Todos</SelectItem>
+                      <SelectItem value="all">Todos</SelectItem>
                       <SelectItem value="true">Pago</SelectItem>
                       <SelectItem value="false">Pendente</SelectItem>
                     </SelectContent>
@@ -412,14 +411,14 @@ export default function ReservationFiltersComponent({
                 <div>
                   <Label>Tipo</Label>
                   <Select
-                    value={filters.is_group_reservation?.toString() || ''}
-                    onValueChange={(value) => handleFilterChange('is_group_reservation', value ? value === 'true' : undefined)}
+                    value={filters.is_group_reservation === undefined ? 'all' : filters.is_group_reservation.toString()}
+                    onValueChange={(value) => handleFilterChange('is_group_reservation', value === 'all' ? undefined : value === 'true')}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Tipo" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Todos</SelectItem>
+                      <SelectItem value="all">Todos</SelectItem>
                       <SelectItem value="false">Individual</SelectItem>
                       <SelectItem value="true">Grupo</SelectItem>
                     </SelectContent>

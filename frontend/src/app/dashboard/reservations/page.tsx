@@ -1,4 +1,5 @@
 // frontend/src/app/dashboard/reservations/page.tsx
+
 'use client';
 
 import { useState } from 'react';
@@ -67,6 +68,14 @@ export default function ReservationsPage() {
 
   const { toast } = useToast();
 
+  // ✅ CORRIGIDO - Função para extrair a ação do loading state
+  const getActionLoadingForReservation = (reservationId: number): string | null => {
+    if (!actionLoading) return null;
+    
+    const [action, id] = actionLoading.split('-');
+    return parseInt(id) === reservationId ? action : null;
+  };
+
   // Handlers para ações rápidas
   const handleQuickAction = async (reservation: ReservationResponse, action: string) => {
     setActionLoading(`${action}-${reservation.id}`);
@@ -81,6 +90,9 @@ export default function ReservationsPage() {
           break;
         case 'check-out':
           await checkOutReservation(reservation.id, {});
+          break;
+        case 'cancel':
+          await cancelReservation(reservation.id, {});
           break;
         default:
           break;
@@ -204,7 +216,7 @@ export default function ReservationsPage() {
                     onView={() => handleViewReservation(reservation)}
                     onEdit={() => handleEditReservation(reservation)}
                     onQuickAction={(action) => handleQuickAction(reservation, action)}
-                    actionLoading={actionLoading === `${action}-${reservation.id}` ? action : null}
+                    actionLoading={getActionLoadingForReservation(reservation.id)}
                   />
                 ))}
               </div>
@@ -278,7 +290,7 @@ export default function ReservationsPage() {
             handleQuickAction(reservationDetails, action);
           }
         }}
-        actionLoading={actionLoading}
+        actionLoading={reservationDetails ? getActionLoadingForReservation(reservationDetails.id) : null}
       />
     </div>
   );

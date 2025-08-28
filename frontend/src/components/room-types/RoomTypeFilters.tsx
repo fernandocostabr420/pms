@@ -1,5 +1,4 @@
 // frontend/src/components/room-types/RoomTypeFilters.tsx
-'use client';
 
 import { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -14,8 +13,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Search, Filter, X, Users, CheckCircle } from 'lucide-react';
-import { RoomTypeFilters } from '@/types/rooms';
+import { 
+  Search, 
+  Filter, 
+  X, 
+  Building, 
+  Users,
+  DollarSign,
+} from 'lucide-react';
+import { RoomTypeFilters } from '@/types/room-type';
 import apiClient from '@/lib/api';
 
 interface RoomTypeFiltersProps {
@@ -106,37 +112,38 @@ export default function RoomTypeFiltersComponent({
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos os Status</SelectItem>
-                  <SelectItem value="true">Reserváveis</SelectItem>
-                  <SelectItem value="false">Não Reserváveis</SelectItem>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="true">Disponível para Reserva</SelectItem>
+                  <SelectItem value="false">Indisponível</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {/* Botão filtros avançados */}
+            {/* Toggle Advanced */}
             <Button
+              type="button"
               variant="outline"
               onClick={() => setShowAdvanced(!showAdvanced)}
               disabled={loading}
             >
-              <Filter className="mr-2 h-4 w-4" />
-              Filtros
+              <Filter className="h-4 w-4 mr-2" />
+              {showAdvanced ? 'Menos' : 'Mais'} Filtros
               {activeFiltersCount > 0 && (
-                <Badge variant="secondary" className="ml-2">
+                <Badge variant="secondary" className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs">
                   {activeFiltersCount}
                 </Badge>
               )}
             </Button>
 
-            {/* Limpar filtros */}
+            {/* Clear Filters */}
             {activeFiltersCount > 0 && (
               <Button
-                variant="ghost"
+                type="button"
+                variant="outline"
                 onClick={handleClearFilters}
                 disabled={loading}
-                size="sm"
               >
-                <X className="mr-2 h-4 w-4" />
+                <X className="h-4 w-4 mr-2" />
                 Limpar
               </Button>
             )}
@@ -144,66 +151,101 @@ export default function RoomTypeFiltersComponent({
 
           {/* Filtros avançados */}
           {showAdvanced && (
-            <div className="border-t pt-4">
+            <div className="space-y-4 pt-4 border-t">
+              {/* Capacidade e preços */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Capacidade Mínima */}
-                <div className="space-y-2">
-                  <Label htmlFor="min_capacity">Capacidade Mínima</Label>
+                <div>
+                  <Label htmlFor="min-capacity">Capacidade Mínima</Label>
                   <div className="relative">
                     <Users className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input
-                      id="min_capacity"
+                      id="min-capacity"
                       type="number"
-                      min="1"
-                      max="20"
-                      placeholder="Mín."
-                      value={filters.min_capacity || ''}
-                      onChange={(e) => {
-                        const value = e.target.value ? parseInt(e.target.value) : undefined;
-                        onFiltersChange({ min_capacity: value });
-                      }}
+                      placeholder="Pessoas"
+                      value={filters.min_capacity?.toString() || ''}
+                      onChange={(e) => onFiltersChange({ 
+                        min_capacity: e.target.value ? parseInt(e.target.value) : undefined 
+                      })}
                       className="pl-10"
                       disabled={loading}
+                      min="1"
                     />
                   </div>
                 </div>
 
-                {/* Capacidade Máxima */}
-                <div className="space-y-2">
-                  <Label htmlFor="max_capacity">Capacidade Máxima</Label>
+                <div>
+                  <Label htmlFor="max-capacity">Capacidade Máxima</Label>
                   <div className="relative">
                     <Users className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input
-                      id="max_capacity"
+                      id="max-capacity"
                       type="number"
-                      min="1"
-                      max="20"
-                      placeholder="Máx."
-                      value={filters.max_capacity || ''}
-                      onChange={(e) => {
-                        const value = e.target.value ? parseInt(e.target.value) : undefined;
-                        onFiltersChange({ max_capacity: value });
-                      }}
+                      placeholder="Pessoas"
+                      value={filters.max_capacity?.toString() || ''}
+                      onChange={(e) => onFiltersChange({ 
+                        max_capacity: e.target.value ? parseInt(e.target.value) : undefined 
+                      })}
                       className="pl-10"
                       disabled={loading}
+                      min="1"
                     />
                   </div>
                 </div>
 
-                {/* Comodidade */}
-                <div className="space-y-2">
-                  <Label htmlFor="amenity">Tem Comodidade</Label>
+                <div>
+                  <Label htmlFor="min-base-rate">Tarifa Mínima</Label>
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input
+                      id="min-base-rate"
+                      type="number"
+                      placeholder="0,00"
+                      value={filters.min_base_rate?.toString() || ''}
+                      onChange={(e) => onFiltersChange({ 
+                        min_base_rate: e.target.value ? parseFloat(e.target.value) : undefined 
+                      })}
+                      className="pl-10"
+                      disabled={loading}
+                      min="0"
+                      step="0.01"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="max-base-rate">Tarifa Máxima</Label>
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input
+                      id="max-base-rate"
+                      type="number"
+                      placeholder="0,00"
+                      value={filters.max_base_rate?.toString() || ''}
+                      onChange={(e) => onFiltersChange({ 
+                        max_base_rate: e.target.value ? parseFloat(e.target.value) : undefined 
+                      })}
+                      className="pl-10"
+                      disabled={loading}
+                      min="0"
+                      step="0.01"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Comodidades */}
+              {availableAmenities.length > 0 && (
+                <div>
+                  <Label>Comodidades</Label>
                   <Select
                     value={filters.has_amenity || 'all'}
-                    onValueChange={(value) => {
-                      onFiltersChange({
-                        has_amenity: value === 'all' ? undefined : value
-                      });
-                    }}
+                    onValueChange={(value) => onFiltersChange({ 
+                      has_amenity: value === 'all' ? undefined : value 
+                    })}
                     disabled={loading}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecione" />
+                      <SelectValue placeholder="Selecionar comodidade" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Todas as Comodidades</SelectItem>
@@ -215,56 +257,65 @@ export default function RoomTypeFiltersComponent({
                     </SelectContent>
                   </Select>
                 </div>
+              )}
 
-                {/* Espaço reservado para futuras expansões */}
-                <div className="space-y-2">
-                  <Label className="text-gray-400">Mais filtros em breve</Label>
-                  <div className="text-xs text-gray-500">
-                    Novos filtros serão adicionados conforme necessário.
-                  </div>
+              {/* Outros filtros específicos */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <Label>Quartos Ativos</Label>
+                  <Select
+                    value={filters.has_active_rooms === undefined ? 'all' : filters.has_active_rooms.toString()}
+                    onValueChange={(value) => onFiltersChange({ 
+                      has_active_rooms: value === 'all' ? undefined : value === 'true'
+                    })}
+                    disabled={loading}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Todos" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="true">Com Quartos Ativos</SelectItem>
+                      <SelectItem value="false">Sem Quartos Ativos</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-              </div>
-            </div>
-          )}
 
-          {/* Resumo dos filtros ativos */}
-          {activeFiltersCount > 0 && (
-            <div className="border-t pt-4">
-              <div className="flex flex-wrap gap-2">
-                <span className="text-sm text-gray-600">Filtros ativos:</span>
-                
-                {filters.search && (
-                  <Badge variant="secondary">
-                    Busca: "{filters.search}"
-                  </Badge>
-                )}
-                
-                {filters.is_bookable !== undefined && (
-                  <Badge variant="secondary">
-                    <CheckCircle className="mr-1 h-3 w-3" />
-                    {filters.is_bookable ? 'Reserváveis' : 'Não Reserváveis'}
-                  </Badge>
-                )}
-                
-                {filters.min_capacity && (
-                  <Badge variant="secondary">
-                    <Users className="mr-1 h-3 w-3" />
-                    Min: {filters.min_capacity}
-                  </Badge>
-                )}
-                
-                {filters.max_capacity && (
-                  <Badge variant="secondary">
-                    <Users className="mr-1 h-3 w-3" />
-                    Max: {filters.max_capacity}
-                  </Badge>
-                )}
-                
-                {filters.has_amenity && (
-                  <Badge variant="secondary">
-                    Comodidade: {filters.has_amenity}
-                  </Badge>
-                )}
+                <div>
+                  <Label>Ordem</Label>
+                  <Select
+                    value={filters.sort_by || 'name'}
+                    onValueChange={(value) => onFiltersChange({ sort_by: value })}
+                    disabled={loading}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Ordenar por" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="name">Nome</SelectItem>
+                      <SelectItem value="capacity">Capacidade</SelectItem>
+                      <SelectItem value="base_rate">Tarifa Base</SelectItem>
+                      <SelectItem value="created_date">Data de Criação</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label>Direção</Label>
+                  <Select
+                    value={filters.sort_direction || 'asc'}
+                    onValueChange={(value) => onFiltersChange({ sort_direction: value as 'asc' | 'desc' })}
+                    disabled={loading}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Direção" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="asc">Crescente</SelectItem>
+                      <SelectItem value="desc">Decrescente</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
           )}

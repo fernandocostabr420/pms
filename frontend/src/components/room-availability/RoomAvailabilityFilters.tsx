@@ -1,5 +1,5 @@
 // frontend/src/components/room-availability/RoomAvailabilityFilters.tsx
-// 🔧 VERSÃO CORRIGIDA - Substituir o arquivo anterior por este
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -77,7 +77,7 @@ export default function RoomAvailabilityFiltersComponent({
   }).length;
 
   const handleDateChange = (field: 'date_from' | 'date_to', value: string) => {
-    onFiltersChange({ [field]: value || undefined });  // ✅ Converter string vazia para undefined
+    onFiltersChange({ [field]: value || undefined });
   };
 
   const handleStatusChange = (field: string, checked: boolean) => {
@@ -85,70 +85,48 @@ export default function RoomAvailabilityFiltersComponent({
   };
 
   const handleNumberChange = (field: string, value: string) => {
+    const numValue = value === '' ? undefined : parseInt(value);
+    onFiltersChange({ [field]: numValue });
+  };
+
+  const handlePriceChange = (field: string, value: string) => {
     const numValue = value === '' ? undefined : parseFloat(value);
     onFiltersChange({ [field]: numValue });
   };
 
   return (
     <Card>
-      <CardContent className="p-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Filter className="h-5 w-5 text-gray-500" />
-            <h3 className="text-lg font-medium">Filtros</h3>
-            {activeFiltersCount > 0 && (
-              <Badge variant="secondary" className="ml-2">
-                {activeFiltersCount}
-              </Badge>
-            )}
-          </div>
-          
-          <div className="flex gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-            >
-              {showAdvanced ? 'Simples' : 'Avançado'}
-            </Button>
-            
-            {activeFiltersCount > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onClearFilters}
-                disabled={loading}
-              >
-                <X className="h-4 w-4 mr-1" />
-                Limpar
-              </Button>
-            )}
-          </div>
-        </div>
-
+      <CardContent className="p-4">
         <div className="space-y-4">
-          {/* Busca textual */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="search">Busca</Label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+          {/* Basic Filters Row */}
+          <div className="flex flex-wrap gap-4 items-end">
+            {/* Date Range */}
+            <div className="flex gap-2">
+              <div>
+                <Label htmlFor="date-from">Data Inicial</Label>
                 <Input
-                  id="search"
-                  placeholder="Buscar por quarto, propriedade..."
-                  value={filters.search || ''}
-                  onChange={(e) => onFiltersChange({ search: e.target.value || undefined })}
-                  className="pl-10"
+                  id="date-from"
+                  type="date"
+                  value={filters.date_from || ''}
+                  onChange={(e) => handleDateChange('date_from', e.target.value)}
                   disabled={loading}
+                  className="w-40"
+                />
+              </div>
+              <div>
+                <Label htmlFor="date-to">Data Final</Label>
+                <Input
+                  id="date-to"
+                  type="date"
+                  value={filters.date_to || ''}
+                  onChange={(e) => handleDateChange('date_to', e.target.value)}
+                  disabled={loading}
+                  className="w-40"
                 />
               </div>
             </div>
-          </div>
 
-          {/* Filtros básicos */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Propriedade - ✅ CORRIGIDO */}
+            {/* Property */}
             <div>
               <Label htmlFor="property">Propriedade</Label>
               <Select
@@ -173,7 +151,7 @@ export default function RoomAvailabilityFiltersComponent({
               </Select>
             </div>
 
-            {/* Tipo de Quarto - ✅ CORRIGIDO */}
+            {/* Room Type */}
             <div>
               <Label htmlFor="room-type">Tipo de Quarto</Label>
               <Select
@@ -189,186 +167,195 @@ export default function RoomAvailabilityFiltersComponent({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos os tipos</SelectItem>
-                  {roomTypes.map(type => (
-                    <SelectItem key={type.id} value={type.id.toString()}>
-                      {type.name}
+                  {roomTypes.map(roomType => (
+                    <SelectItem key={roomType.id} value={roomType.id.toString()}>
+                      {roomType.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Toggle Advanced */}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              disabled={loading}
+            >
+              <Filter className="h-4 w-4 mr-2" />
+              {showAdvanced ? 'Menos' : 'Mais'} Filtros
+              {activeFiltersCount > 0 && (
+                <Badge variant="secondary" className="ml-2 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs">
+                  {activeFiltersCount}
+                </Badge>
+              )}
+            </Button>
+
+            {/* Clear Filters */}
+            {activeFiltersCount > 0 && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onClearFilters}
+                disabled={loading}
+              >
+                <X className="h-4 w-4 mr-2" />
+                Limpar
+              </Button>
+            )}
           </div>
 
-          {/* Filtros de data */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="date_from">Data Inicial</Label>
-              <div className="relative">
-                <CalendarDays className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                <Input
-                  id="date_from"
-                  type="date"
-                  value={filters.date_from || ''}
-                  onChange={(e) => handleDateChange('date_from', e.target.value)}
-                  className="pl-10"
-                  disabled={loading}
-                />
-              </div>
-            </div>
-            
-            <div>
-              <Label htmlFor="date_to">Data Final</Label>
-              <div className="relative">
-                <CalendarDays className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                <Input
-                  id="date_to"
-                  type="date"
-                  value={filters.date_to || ''}
-                  onChange={(e) => handleDateChange('date_to', e.target.value)}
-                  className="pl-10"
-                  disabled={loading}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Filtros avançados */}
+          {/* Advanced Filters */}
           {showAdvanced && (
-            <>
-              {/* Status de disponibilidade */}
-              <div className="border-t pt-4">
-                <Label className="text-base font-medium mb-3 block">Status de Disponibilidade</Label>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="space-y-4 pt-4 border-t">
+              {/* Status Filters */}
+              <div className="space-y-3">
+                <Label className="text-sm font-medium">Status dos Quartos</Label>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="flex items-center space-x-2">
                     <Switch
-                      id="is_available"
-                      checked={filters.is_available === true}
+                      id="available"
+                      checked={filters.is_available || false}
                       onCheckedChange={(checked) => handleStatusChange('is_available', checked)}
                       disabled={loading}
                     />
-                    <Label htmlFor="is_available" className="text-sm">Disponível</Label>
+                    <Label htmlFor="available" className="text-sm">Disponível</Label>
                   </div>
-                  
+
                   <div className="flex items-center space-x-2">
                     <Switch
-                      id="is_blocked"
-                      checked={filters.is_blocked === true}
+                      id="occupied"
+                      checked={filters.is_occupied || false}
+                      onCheckedChange={(checked) => handleStatusChange('is_occupied', checked)}
+                      disabled={loading}
+                    />
+                    <Label htmlFor="occupied" className="text-sm">Ocupado</Label>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="blocked"
+                      checked={filters.is_blocked || false}
                       onCheckedChange={(checked) => handleStatusChange('is_blocked', checked)}
                       disabled={loading}
                     />
-                    <Label htmlFor="is_blocked" className="text-sm">Bloqueado</Label>
+                    <Label htmlFor="blocked" className="text-sm">Bloqueado</Label>
                   </div>
-                  
+
                   <div className="flex items-center space-x-2">
                     <Switch
-                      id="is_reserved"
-                      checked={filters.is_reserved === true}
-                      onCheckedChange={(checked) => handleStatusChange('is_reserved', checked)}
-                      disabled={loading}
-                    />
-                    <Label htmlFor="is_reserved" className="text-sm">Reservado</Label>
-                  </div>
-                  
-                  <div className="flex items-center space-x-2">
-                    <Switch
-                      id="is_maintenance"
-                      checked={filters.is_maintenance === true}
+                      id="maintenance"
+                      checked={filters.is_maintenance || false}
                       onCheckedChange={(checked) => handleStatusChange('is_maintenance', checked)}
                       disabled={loading}
                     />
-                    <Label htmlFor="is_maintenance" className="text-sm">Manutenção</Label>
-                  </div>
-                  
-                  <div className="flex items-center space-x-2">
-                    <Switch
-                      id="is_out_of_order"
-                      checked={filters.is_out_of_order === true}
-                      onCheckedChange={(checked) => handleStatusChange('is_out_of_order', checked)}
-                      disabled={loading}
-                    />
-                    <Label htmlFor="is_out_of_order" className="text-sm">Fora de Ordem</Label>
+                    <Label htmlFor="maintenance" className="text-sm">Manutenção</Label>
                   </div>
                 </div>
               </div>
 
-              {/* Restrições */}
-              <div className="border-t pt-4">
-                <Label className="text-base font-medium mb-3 block">Restrições</Label>
+              {/* Capacity and Price Filters */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <Label htmlFor="min-capacity">Capacidade Mín.</Label>
+                  <Input
+                    id="min-capacity"
+                    type="number"
+                    placeholder="Pessoas"
+                    value={filters.min_capacity || ''}
+                    onChange={(e) => handleNumberChange('min_capacity', e.target.value)}
+                    disabled={loading}
+                    min="1"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="max-capacity">Capacidade Máx.</Label>
+                  <Input
+                    id="max-capacity"
+                    type="number"
+                    placeholder="Pessoas"
+                    value={filters.max_capacity || ''}
+                    onChange={(e) => handleNumberChange('max_capacity', e.target.value)}
+                    disabled={loading}
+                    min="1"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="min-price">Preço Mínimo</Label>
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input
+                      id="min-price"
+                      type="number"
+                      placeholder="0,00"
+                      value={filters.min_price || ''}
+                      onChange={(e) => handlePriceChange('min_price', e.target.value)}
+                      disabled={loading}
+                      className="pl-10"
+                      min="0"
+                      step="0.01"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="max-price">Preço Máximo</Label>
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input
+                      id="max-price"
+                      type="number"
+                      placeholder="0,00"
+                      value={filters.max_price || ''}
+                      onChange={(e) => handlePriceChange('max_price', e.target.value)}
+                      disabled={loading}
+                      className="pl-10"
+                      min="0"
+                      step="0.01"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Additional Options */}
+              <div className="space-y-3">
+                <Label className="text-sm font-medium">Opções Adicionais</Label>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   <div className="flex items-center space-x-2">
                     <Switch
-                      id="closed_to_arrival"
-                      checked={filters.closed_to_arrival === true}
-                      onCheckedChange={(checked) => handleStatusChange('closed_to_arrival', checked)}
+                      id="show-rates"
+                      checked={filters.show_rates || false}
+                      onCheckedChange={(checked) => handleStatusChange('show_rates', checked)}
                       disabled={loading}
                     />
-                    <Label htmlFor="closed_to_arrival" className="text-sm">Fechado para Chegada</Label>
+                    <Label htmlFor="show-rates" className="text-sm">Mostrar Tarifas</Label>
                   </div>
-                  
-                  <div className="flex items-center space-x-2">
-                    <Switch
-                      id="closed_to_departure"
-                      checked={filters.closed_to_departure === true}
-                      onCheckedChange={(checked) => handleStatusChange('closed_to_departure', checked)}
-                      disabled={loading}
-                    />
-                    <Label htmlFor="closed_to_departure" className="text-sm">Fechado para Saída</Label>
-                  </div>
-                  
-                  <div className="flex items-center space-x-2">
-                    <Switch
-                      id="has_rate_override"
-                      checked={filters.has_rate_override === true}
-                      onCheckedChange={(checked) => handleStatusChange('has_rate_override', checked)}
-                      disabled={loading}
-                    />
-                    <Label htmlFor="has_rate_override" className="text-sm">Com Preço Especial</Label>
-                  </div>
-                </div>
-              </div>
 
-              {/* Filtros de preço */}
-              <div className="border-t pt-4">
-                <Label className="text-base font-medium mb-3 block">Faixa de Preço</Label>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="min_rate">Preço Mínimo</Label>
-                    <div className="relative">
-                      <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                      <Input
-                        id="min_rate"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="0.00"
-                        value={filters.min_rate || ''}
-                        onChange={(e) => handleNumberChange('min_rate', e.target.value)}
-                        className="pl-10"
-                        disabled={loading}
-                      />
-                    </div>
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="group-by-type"
+                      checked={filters.group_by_type || false}
+                      onCheckedChange={(checked) => handleStatusChange('group_by_type', checked)}
+                      disabled={loading}
+                    />
+                    <Label htmlFor="group-by-type" className="text-sm">Agrupar por Tipo</Label>
                   </div>
-                  
-                  <div>
-                    <Label htmlFor="max_rate">Preço Máximo</Label>
-                    <div className="relative">
-                      <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                      <Input
-                        id="max_rate"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="999.99"
-                        value={filters.max_rate || ''}
-                        onChange={(e) => handleNumberChange('max_rate', e.target.value)}
-                        className="pl-10"
-                        disabled={loading}
-                      />
-                    </div>
+
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="show-weekends"
+                      checked={filters.show_weekends_only || false}
+                      onCheckedChange={(checked) => handleStatusChange('show_weekends_only', checked)}
+                      disabled={loading}
+                    />
+                    <Label htmlFor="show-weekends" className="text-sm">Apenas Fins de Semana</Label>
                   </div>
                 </div>
               </div>
-            </>
+            </div>
           )}
         </div>
       </CardContent>

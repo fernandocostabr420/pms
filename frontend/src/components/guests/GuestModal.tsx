@@ -1,4 +1,5 @@
 // frontend/src/components/guests/GuestModal.tsx
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -59,7 +60,9 @@ interface GuestModalProps {
   onSuccess: () => void;
 }
 
+// ✅ CORRIGIDO - Remover opção com value vazio
 const DOCUMENT_TYPES = [
+  { value: 'none', label: 'Não informado' },
   { value: 'cpf', label: 'CPF' },
   { value: 'passport', label: 'Passaporte' },
   { value: 'rg', label: 'RG' },
@@ -102,7 +105,7 @@ export default function GuestModal({
       last_name: '',
       email: '',
       phone: '',
-      document_type: '',
+      document_type: 'none',
       document_number: '',
       date_of_birth: '',
       nationality: 'Brasil',
@@ -129,7 +132,7 @@ export default function GuestModal({
           last_name: guest.last_name,
           email: guest.email || '',
           phone: guest.phone || '',
-          document_type: guest.document_type || '',
+          document_type: guest.document_type || 'none',
           document_number: guest.document_number || '',
           date_of_birth: guest.date_of_birth || '',
           nationality: guest.nationality,
@@ -148,7 +151,7 @@ export default function GuestModal({
           last_name: '',
           email: '',
           phone: '',
-          document_type: '',
+          document_type: 'none',
           document_number: '',
           date_of_birth: '',
           nationality: 'Brasil',
@@ -167,49 +170,45 @@ export default function GuestModal({
     }
   }, [isOpen, guest, reset]);
 
-  // Verificação de email - SUBSTITUIR o useEffect existente
-useEffect(() => {
-  if (emailValue && emailValue.includes('@') && emailValue.trim().length > 5) {
+  // Check email availability
+  useEffect(() => {
+    if (!emailValue || !emailValue.includes('@') || checkingEmail) return;
+
     const timeoutId = setTimeout(async () => {
-      setCheckingEmail(true);
       try {
-        const response = await apiClient.checkEmailAvailability(emailValue.trim(), guest?.id);
-        setEmailAvailable(response.available);
+        setCheckingEmail(true);
+        const response = await apiClient.get(`/guests/check-email-availability?email=${encodeURIComponent(emailValue)}${guest?.id ? `&exclude_guest_id=${guest.id}` : ''}`);
+        setEmailAvailable(response.data.available);
       } catch (error) {
         console.error('Erro ao verificar email:', error);
-        setEmailAvailable(null); // Em caso de erro, não mostrar indicador
+        setEmailAvailable(null);
       } finally {
         setCheckingEmail(false);
       }
-    }, 1000);
+    }, 500);
 
     return () => clearTimeout(timeoutId);
-  } else {
-    setEmailAvailable(null);
-  }
-}, [emailValue, guest?.id]);
+  }, [emailValue, guest?.id]);
 
-  // Verificação de documento
+  // Check document availability
   useEffect(() => {
-  if (documentValue && documentValue.trim().length >= 3) {
+    if (!documentValue || documentValue.length < 3 || checkingDocument) return;
+
     const timeoutId = setTimeout(async () => {
-      setCheckingDocument(true);
       try {
-        const response = await apiClient.checkDocumentAvailability(documentValue.trim(), guest?.id);
-        setDocumentAvailable(response.available);
+        setCheckingDocument(true);
+        const response = await apiClient.get(`/guests/check-document-availability?document_number=${encodeURIComponent(documentValue)}${guest?.id ? `&exclude_guest_id=${guest.id}` : ''}`);
+        setDocumentAvailable(response.data.available);
       } catch (error) {
         console.error('Erro ao verificar documento:', error);
-        setDocumentAvailable(null); // Em caso de erro, não mostrar indicador
+        setDocumentAvailable(null);
       } finally {
         setCheckingDocument(false);
       }
-    }, 1000);
+    }, 500);
 
     return () => clearTimeout(timeoutId);
-  } else {
-    setDocumentAvailable(null);
-  }
-}, [documentValue, guest?.id]);
+  }, [documentValue, guest?.id]);
 
   const onSubmit = async (data: GuestFormData) => {
     // Verificar disponibilidade antes de submeter
@@ -234,9 +233,9 @@ useEffect(() => {
     try {
       setLoading(true);
 
-      // Limpar campos vazios
+      // Limpar campos vazios e preparar dados
       const submitData = Object.entries(data).reduce((acc, [key, value]) => {
-        if (value !== '') {
+        if (value !== '' && !(key === 'document_type' && value === 'none')) {
           acc[key] = value;
         }
         return acc;
@@ -278,16 +277,16 @@ useEffect(() => {
           </DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-          <Tabs defaultValue="personal" className="w-full">
+        <form onSubmit={handleSubmit(onSubmit)}>
+          <Tabs defaultValue="basic" className="w-full">
             <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="personal">Dados Pessoais</TabsTrigger>
-              <TabsTrigger value="contact">Contato</TabsTrigger>
+              <TabsTrigger value="basic">Básico</TabsTrigger>
+              <TabsTrigger value="address">Endereço</TabsTrigger>
               <TabsTrigger value="additional">Adicional</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="personal" className="space-y-4">
-              {/* Nome */}
+            <TabsContent value="basic" className="space-y-4">
+              {/* Nome completo */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="first_name">Nome *</Label>
@@ -320,12 +319,59 @@ useEffect(() => {
                 </div>
               </div>
 
-              {/* Documento */}
+              {/* Contato */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="document_type">Tipo do Documento</Label>
+                  <Label htmlFor="email">Email</Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input
+                      {...register('email')}
+                      id="email"
+                      type="email"
+                      placeholder="joao@exemplo.com"
+                      className="pl-10"
+                      disabled={loading}
+                    />
+                    {checkingEmail && (
+                      <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin text-gray-400" />
+                    )}
+                    {!checkingEmail && emailAvailable === true && (
+                      <CheckCircle className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-green-500" />
+                    )}
+                    {!checkingEmail && emailAvailable === false && (
+                      <AlertCircle className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-red-500" />
+                    )}
+                  </div>
+                  {errors.email && (
+                    <p className="text-sm text-red-600 mt-1">{errors.email.message}</p>
+                  )}
+                  {emailAvailable === false && (
+                    <p className="text-sm text-red-600 mt-1">Email já em uso</p>
+                  )}
+                </div>
+
+                <div>
+                  <Label htmlFor="phone">Telefone</Label>
+                  <div className="relative">
+                    <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input
+                      {...register('phone')}
+                      id="phone"
+                      placeholder="(11) 99999-9999"
+                      className="pl-10"
+                      disabled={loading}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Documentos */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="document_type">Tipo de Documento</Label>
                   <Select
-                    value={watch('document_type') || ''}
+                    value={watch('document_type') || 'none'}
                     onValueChange={(value) => setValue('document_type', value)}
                     disabled={loading}
                   >
@@ -394,53 +440,7 @@ useEffect(() => {
               </div>
             </TabsContent>
 
-            <TabsContent value="contact" className="space-y-4">
-              {/* Email */}
-              <div>
-                <Label htmlFor="email">Email</Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input
-                    {...register('email')}
-                    id="email"
-                    type="email"
-                    placeholder="joao@email.com"
-                    className="pl-10"
-                    disabled={loading}
-                  />
-                  {checkingEmail && (
-                    <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin text-gray-400" />
-                  )}
-                  {!checkingEmail && emailAvailable === true && (
-                    <CheckCircle className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-green-500" />
-                  )}
-                  {!checkingEmail && emailAvailable === false && (
-                    <AlertCircle className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-red-500" />
-                  )}
-                </div>
-                {errors.email && (
-                  <p className="text-sm text-red-600 mt-1">{errors.email.message}</p>
-                )}
-                {emailAvailable === false && (
-                  <p className="text-sm text-red-600 mt-1">Email já em uso</p>
-                )}
-              </div>
-
-              {/* Telefone */}
-              <div>
-                <Label htmlFor="phone">Telefone</Label>
-                <div className="relative">
-                  <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input
-                    {...register('phone')}
-                    id="phone"
-                    placeholder="(11) 99999-9999"
-                    className="pl-10"
-                    disabled={loading}
-                  />
-                </div>
-              </div>
-
+            <TabsContent value="address" className="space-y-4">
               {/* Endereço */}
               <div>
                 <Label htmlFor="address_line1">Endereço</Label>
@@ -461,12 +461,12 @@ useEffect(() => {
                 <Input
                   {...register('address_line2')}
                   id="address_line2"
-                  placeholder="Apto 45"
+                  placeholder="Apto 45, Bloco B"
                   disabled={loading}
                 />
               </div>
 
-              {/* Cidade, Estado e CEP */}
+              {/* Cidade, Estado, CEP */}
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <Label htmlFor="city">Cidade</Label>

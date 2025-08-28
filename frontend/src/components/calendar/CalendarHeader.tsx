@@ -1,4 +1,5 @@
 // frontend/src/components/calendar/CalendarHeader.tsx
+
 'use client';
 
 import { Button } from '@/components/ui/button';
@@ -11,65 +12,51 @@ import {
 } from '@/components/ui/select';
 import { 
   ChevronLeft, 
-  ChevronRight,
+  ChevronRight, 
   Calendar as CalendarIcon,
-  Filter,
-  Building
+  Building,
+  Filter
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { CalendarFilters } from '@/types/calendar';
-import { useEffect, useState } from 'react';
-import apiClient from '@/lib/api';
 import { PropertyResponse } from '@/types/api';
+
+interface CalendarFilters {
+  property_id?: number;
+  status?: string;
+}
 
 interface CalendarHeaderProps {
   currentDate: Date;
-  onPreviousMonth: () => void;
+  onPrevMonth: () => void;
   onNextMonth: () => void;
   onToday: () => void;
   filters: CalendarFilters;
   onFiltersChange: (filters: Partial<CalendarFilters>) => void;
-  loading: boolean;
+  properties: PropertyResponse[];
+  loading?: boolean;
+  loadingProperties?: boolean;
 }
 
 export default function CalendarHeader({
   currentDate,
-  onPreviousMonth,
+  onPrevMonth,
   onNextMonth,
   onToday,
   filters,
   onFiltersChange,
-  loading
+  properties,
+  loading = false,
+  loadingProperties = false
 }: CalendarHeaderProps) {
-  const [properties, setProperties] = useState<PropertyResponse[]>([]);
-  const [loadingProperties, setLoadingProperties] = useState(false);
-
-  // Carregar propriedades para filtro
-  useEffect(() => {
-    const loadProperties = async () => {
-      try {
-        setLoadingProperties(true);
-        const response = await apiClient.getProperties({ page: 1, per_page: 100 });
-        setProperties(response.properties);
-      } catch (error) {
-        console.error('Erro ao carregar propriedades:', error);
-      } finally {
-        setLoadingProperties(false);
-      }
-    };
-
-    loadProperties();
-  }, []);
-
   return (
-    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 bg-white border rounded-lg">
-      {/* Navegação de Mês */}
+    <div className="flex items-center justify-between p-4 border-b bg-white">
+      {/* Navegação do calendário */}
       <div className="flex items-center gap-2">
         <Button
           variant="outline"
           size="sm"
-          onClick={onPreviousMonth}
+          onClick={onPrevMonth}
           disabled={loading}
         >
           <ChevronLeft className="h-4 w-4" />
@@ -133,10 +120,10 @@ export default function CalendarHeader({
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-gray-500" />
           <Select
-            value={filters.status || 'active'}
+            value={filters.status || 'all'}
             onValueChange={(value) => 
               onFiltersChange({ 
-                status: value === 'active' ? undefined : value 
+                status: value === 'all' ? undefined : value 
               })
             }
             disabled={loading}
@@ -145,7 +132,7 @@ export default function CalendarHeader({
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="active">Ativas</SelectItem>
+              <SelectItem value="all">Todas</SelectItem>
               <SelectItem value="pending">Pendente</SelectItem>
               <SelectItem value="confirmed">Confirmada</SelectItem>
               <SelectItem value="checked_in">Check-in</SelectItem>
