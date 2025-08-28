@@ -119,6 +119,15 @@ def audit_operation(table_name: str, action: str, description: Optional[str] = N
     return decorator
 
 
+# Alias para compatibilidade com novos módulos que usam @audit_action
+def audit_action(action: str, table_name: str, description: Optional[str] = None):
+    """
+    Alias para audit_operation com ordem diferente dos parâmetros.
+    Mantém compatibilidade com código que usa @audit_action("CREATE", "table_name")
+    """
+    return audit_operation(table_name, action, description)
+
+
 def _extract_model_data(model_instance) -> Dict[str, Any]:
     """
     Extrai dados de um modelo SQLAlchemy para auditoria.
@@ -134,7 +143,20 @@ def _extract_model_data(model_instance) -> Dict[str, Any]:
         for column in model_instance.__table__.columns:
             column_name = column.name
             value = getattr(model_instance, column_name, None)
-            data[column_name] = value
+            
+            # Converter tipos especiais para JSON serializable
+            if hasattr(value, 'isoformat'):  # datetime, date, time
+                data[column_name] = value.isoformat()
+            elif hasattr(value, '__float__'):  # Decimal
+                data[column_name] = float(value)
+            elif value is None:
+                data[column_name] = None
+            else:
+                # Tentar converter para tipos básicos
+                try:
+                    data[column_name] = value
+                except:
+                    data[column_name] = str(value)
     
     return data
 
@@ -240,3 +262,27 @@ def with_audit_logging(func: Callable) -> Callable:
         print(f"[AUDIT] {func.__name__} executado com sucesso")
         return result
     return wrapper
+
+
+# Funções auxiliares adicionais para o sistema RoomAvailability
+def should_audit_field(field_name: str, old_value: Any, new_value: Any) -> bool:
+    """Determina se um campo deve ser auditado"""
+    # Ignorar campos de sistema
+    if field_name in ['updated_at', 'created_at']:
+        return False
+    
+    # Auditar apenas se houve mudança
+    return old_value != new_value
+
+
+def format_audit_description(action: str, table_name: str, changes: Dict[str, Any]) -> str:
+    """Formata descrição da auditoria"""
+    if action == "CREATE":
+        return f"Criado novo registro em {table_name}"
+    elif action == "UPDATE":
+        changed_fields = list(changes.keys())
+        return f"Atualizado {table_name}: {', '.join(changed_fields)}"
+    elif action == "DELETE":
+        return f"Removido registro de {table_name}"
+    else:
+        return f"Ação {action} em {table_name}"

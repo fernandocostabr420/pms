@@ -1,0 +1,491 @@
+# backend/app/services/room_availability_service.py
+
+from typing import Optional, List, Dict, Any, Tuple
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy import and_, or_, func, case, text
+from datetime import datetime, date, timedelta
+from decimal import Decimal
+
+from app.models.room_availability import RoomAvailability
+from app.models.room import Room
+from app.models.room_type import RoomType
+from app.models.property import Property
+from app.models.reservation import Reservation, ReservationRoom
+from app.schemas.room_availability import (
+    RoomAvailabilityCreate,
+    RoomAvailabilityUpdate,
+    RoomAvailabilityFilters,
+    BulkAvailabilityUpdate,
+    CalendarAvailabilityRequest
+)
+from app.utils.decorators import audit_operation
+
+
+class RoomAvailabilityService:
+    """Serviço para operações com disponibilidade de quartos"""
+    
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get_availability_by_id(self, availability_id: int, tenant_id: int) -> Optional[RoomAvailability]:
+        """Busca disponibilidade por ID dentro do tenant"""
+        return self.db.query(RoomAvailability).options(
+            joinedload(RoomAvailability.room).joinedload(Room.room_type),
+            joinedload(RoomAvailability.room).joinedload(Room.property_obj),
+            joinedload(RoomAvailability.reservation)
+        ).filter(
+            RoomAvailability.id == availability_id,
+            RoomAvailability.tenant_id == tenant_id,
+            RoomAvailability.is_active == True
+        ).first()
+
+    def get_availability_by_room_date(
+        self, 
+        room_id: int, 
+        date: date, 
+        tenant_id: int
+    ) -> Optional[RoomAvailability]:
+        """Busca disponibilidade específica de um quarto em uma data"""
+        return self.db.query(RoomAvailability).filter(
+            RoomAvailability.room_id == room_id,
+            RoomAvailability.date == date,
+            RoomAvailability.tenant_id == tenant_id,
+            RoomAvailability.is_active == True
+        ).first()
+
+    def get_availabilities(
+        self, 
+        tenant_id: int, 
+        filters: RoomAvailabilityFilters,
+        skip: int = 0,
+        limit: int = 20
+    ) -> List[RoomAvailability]:
+        """Lista disponibilidades com filtros"""
+        query = self.db.query(RoomAvailability).options(
+            joinedload(RoomAvailability.room).joinedload(Room.room_type),
+            joinedload(RoomAvailability.room).joinedload(Room.property_obj)
+        ).join(Room).join(RoomType).join(Property)
+        
+        # Aplicar filtros
+        query = self._apply_filters(query, tenant_id, filters)
+        
+        return query.offset(skip).limit(limit).all()
+
+    def count_availabilities(self, tenant_id: int, filters: RoomAvailabilityFilters) -> int:
+        """Conta disponibilidades com filtros"""
+        query = self.db.query(func.count(RoomAvailability.id)).join(Room).join(RoomType).join(Property)
+        query = self._apply_filters(query, tenant_id, filters)
+        return query.scalar()
+
+    @audit_operation("room_availability", "CREATE")
+    def create_availability(
+        self, 
+        availability_data: RoomAvailabilityCreate, 
+        tenant_id: int
+    ) -> RoomAvailability:
+        """Cria nova disponibilidade"""
+        
+        # Verificar se quarto existe no tenant
+        room = self.db.query(Room).filter(
+            Room.id == availability_data.room_id,
+            Room.tenant_id == tenant_id,
+            Room.is_active == True
+        ).first()
+        
+        if not room:
+            raise ValueError("Quarto não encontrado")
+        
+        # Verificar duplicação
+        existing = self.get_availability_by_room_date(
+            availability_data.room_id, 
+            availability_data.date, 
+            tenant_id
+        )
+        
+        if existing:
+            raise ValueError(f"Disponibilidade já existe para este quarto na data {availability_data.date}")
+        
+        # Criar disponibilidade
+        db_availability = RoomAvailability(
+            tenant_id=tenant_id,
+            **availability_data.model_dump()
+        )
+        
+        try:
+            self.db.add(db_availability)
+            self.db.commit()
+            self.db.refresh(db_availability)
+            return db_availability
+        except IntegrityError as e:
+            self.db.rollback()
+            raise ValueError(f"Erro ao criar disponibilidade: {str(e)}")
+
+    @audit_operation("room_availability", "UPDATE")
+    def update_availability(
+        self, 
+        availability_id: int, 
+        availability_data: RoomAvailabilityUpdate, 
+        tenant_id: int
+    ) -> Optional[RoomAvailability]:
+        """Atualiza disponibilidade existente"""
+        
+        availability = self.get_availability_by_id(availability_id, tenant_id)
+        if not availability:
+            return None
+        
+        # Aplicar atualizações
+        update_data = availability_data.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(availability, field, value)
+        
+        availability.updated_at = datetime.utcnow()
+        
+        try:
+            self.db.commit()
+            self.db.refresh(availability)
+            return availability
+        except IntegrityError as e:
+            self.db.rollback()
+            raise ValueError(f"Erro ao atualizar disponibilidade: {str(e)}")
+
+    @audit_operation("room_availability", "DELETE")
+    def delete_availability(self, availability_id: int, tenant_id: int) -> bool:
+        """Remove disponibilidade (soft delete)"""
+        availability = self.get_availability_by_id(availability_id, tenant_id)
+        if not availability:
+            return False
+        
+        availability.is_active = False
+        availability.updated_at = datetime.utcnow()
+        
+        self.db.commit()
+        return True
+
+    def bulk_update_availability(
+        self, 
+        bulk_data: BulkAvailabilityUpdate, 
+        tenant_id: int
+    ) -> Dict[str, Any]:
+        """Atualização em massa de disponibilidades"""
+        
+        # Validar quartos pertencem ao tenant
+        valid_rooms = self.db.query(Room.id).filter(
+            Room.id.in_(bulk_data.room_ids),
+            Room.tenant_id == tenant_id,
+            Room.is_active == True
+        ).all()
+        
+        valid_room_ids = [room.id for room in valid_rooms]
+        if not valid_room_ids:
+            raise ValueError("Nenhum quarto válido encontrado")
+        
+        # Gerar lista de datas
+        current_date = bulk_data.date_from
+        dates = []
+        while current_date <= bulk_data.date_to:
+            dates.append(current_date)
+            current_date += timedelta(days=1)
+        
+        created_count = 0
+        updated_count = 0
+        errors = []
+        
+        # Preparar dados de atualização
+        update_data = bulk_data.model_dump(exclude={'room_ids', 'date_from', 'date_to'}, exclude_unset=True)
+        
+        for room_id in valid_room_ids:
+            for target_date in dates:
+                try:
+                    existing = self.get_availability_by_room_date(room_id, target_date, tenant_id)
+                    
+                    if existing:
+                        # Atualizar existente
+                        for field, value in update_data.items():
+                            setattr(existing, field, value)
+                        existing.updated_at = datetime.utcnow()
+                        updated_count += 1
+                    else:
+                        # Criar novo
+                        new_availability = RoomAvailability(
+                            tenant_id=tenant_id,
+                            room_id=room_id,
+                            date=target_date,
+                            **update_data
+                        )
+                        self.db.add(new_availability)
+                        created_count += 1
+                        
+                except Exception as e:
+                    errors.append(f"Erro no quarto {room_id}, data {target_date}: {str(e)}")
+        
+        try:
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            raise ValueError(f"Erro ao salvar atualizações em massa: {str(e)}")
+        
+        return {
+            "created": created_count,
+            "updated": updated_count,
+            "errors": errors,
+            "total_processed": created_count + updated_count
+        }
+
+    def get_calendar_availability(
+        self, 
+        request: CalendarAvailabilityRequest, 
+        tenant_id: int
+    ) -> List[Dict[str, Any]]:
+        """Busca disponibilidade para calendário"""
+        
+        # Query base
+        query = self.db.query(RoomAvailability).options(
+            joinedload(RoomAvailability.room).joinedload(Room.room_type),
+            joinedload(RoomAvailability.room).joinedload(Room.property_obj)
+        ).join(Room).join(RoomType).join(Property)
+        
+        # Filtros básicos
+        query = query.filter(
+            RoomAvailability.tenant_id == tenant_id,
+            RoomAvailability.is_active == True,
+            RoomAvailability.date >= request.date_from,
+            RoomAvailability.date <= request.date_to
+        )
+        
+        # Filtros específicos
+        if request.room_ids:
+            query = query.filter(RoomAvailability.room_id.in_(request.room_ids))
+        
+        if request.property_id:
+            query = query.filter(Property.id == request.property_id)
+        
+        if request.room_type_id:
+            query = query.filter(RoomType.id == request.room_type_id)
+        
+        if not request.include_reserved:
+            query = query.filter(RoomAvailability.is_reserved == False)
+        
+        # Agrupar por data
+        availabilities = query.order_by(RoomAvailability.date, Room.room_number).all()
+        
+        # Organizar por data
+        calendar_data = {}
+        for availability in availabilities:
+            date_key = availability.date.isoformat()
+            if date_key not in calendar_data:
+                calendar_data[date_key] = {
+                    'date': availability.date,
+                    'availabilities': [],
+                    'summary': {
+                        'total': 0,
+                        'available': 0,
+                        'blocked': 0,
+                        'reserved': 0,
+                        'maintenance': 0,
+                        'out_of_order': 0
+                    }
+                }
+            
+            calendar_data[date_key]['availabilities'].append(availability)
+            calendar_data[date_key]['summary']['total'] += 1
+            
+            # Contar por status
+            status = availability.status
+            if status in calendar_data[date_key]['summary']:
+                calendar_data[date_key]['summary'][status] += 1
+        
+        return list(calendar_data.values())
+
+    def get_availability_stats(
+        self, 
+        tenant_id: int,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        property_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Estatísticas de disponibilidade"""
+        
+        if not date_from:
+            date_from = date.today()
+        if not date_to:
+            date_to = date_from + timedelta(days=30)
+        
+        # Query base
+        query = self.db.query(RoomAvailability).join(Room).join(Property)
+        query = query.filter(
+            RoomAvailability.tenant_id == tenant_id,
+            RoomAvailability.is_active == True,
+            RoomAvailability.date >= date_from,
+            RoomAvailability.date <= date_to
+        )
+        
+        if property_id:
+            query = query.filter(Property.id == property_id)
+        
+        # Contar por status
+        stats_query = query.with_entities(
+            func.count(RoomAvailability.id).label('total'),
+            func.sum(case((RoomAvailability.is_available == True, 1), else_=0)).label('available'),
+            func.sum(case((RoomAvailability.is_blocked == True, 1), else_=0)).label('blocked'),
+            func.sum(case((RoomAvailability.is_reserved == True, 1), else_=0)).label('reserved'),
+            func.sum(case((RoomAvailability.is_maintenance == True, 1), else_=0)).label('maintenance'),
+            func.sum(case((RoomAvailability.is_out_of_order == True, 1), else_=0)).label('out_of_order')
+        )
+        
+        result = stats_query.first()
+        
+        total = result.total or 0
+        available = result.available or 0
+        reserved = result.reserved or 0
+        
+        occupancy_rate = (reserved / total * 100) if total > 0 else 0
+        availability_rate = (available / total * 100) if total > 0 else 0
+        
+        return {
+            'total_rooms': total,
+            'available_rooms': available,
+            'blocked_rooms': result.blocked or 0,
+            'reserved_rooms': reserved,
+            'maintenance_rooms': result.maintenance or 0,
+            'out_of_order_rooms': result.out_of_order or 0,
+            'occupancy_rate': round(occupancy_rate, 2),
+            'availability_rate': round(availability_rate, 2)
+        }
+
+    def check_room_availability(
+        self, 
+        room_id: int, 
+        check_in_date: date, 
+        check_out_date: date, 
+        tenant_id: int
+    ) -> Dict[str, Any]:
+        """Verifica disponibilidade de um quarto em período específico"""
+        
+        # Gerar lista de datas (excluindo check-out)
+        current_date = check_in_date
+        dates = []
+        while current_date < check_out_date:
+            dates.append(current_date)
+            current_date += timedelta(days=1)
+        
+        # Buscar disponibilidades
+        availabilities = self.db.query(RoomAvailability).filter(
+            RoomAvailability.room_id == room_id,
+            RoomAvailability.date.in_(dates),
+            RoomAvailability.tenant_id == tenant_id,
+            RoomAvailability.is_active == True
+        ).all()
+        
+        # Verificar cada data
+        conflicts = []
+        total_rate = Decimal('0.00')
+        
+        for target_date in dates:
+            availability = next(
+                (a for a in availabilities if a.date == target_date), 
+                None
+            )
+            
+            if not availability:
+                # Assumir disponível se não há registro específico
+                continue
+            
+            if not availability.is_bookable:
+                conflicts.append({
+                    'date': target_date.isoformat(),
+                    'reason': availability.reason or f"Status: {availability.status}"
+                })
+            
+            # Somar tarifas
+            if availability.rate_override:
+                total_rate += availability.rate_override
+        
+        is_available = len(conflicts) == 0
+        
+        return {
+            'available': is_available,
+            'conflicts': conflicts,
+            'nights': len(dates),
+            'total_rate': total_rate,
+            'details': [
+                {
+                    'date': a.date.isoformat(),
+                    'status': a.status,
+                    'rate': a.rate_override,
+                    'is_bookable': a.is_bookable
+                }
+                for a in availabilities
+            ]
+        }
+
+    def _apply_filters(self, query, tenant_id: int, filters: RoomAvailabilityFilters):
+        """Aplica filtros na query"""
+        query = query.filter(
+            RoomAvailability.tenant_id == tenant_id,
+            RoomAvailability.is_active == True
+        )
+        
+        if filters.room_id:
+            query = query.filter(RoomAvailability.room_id == filters.room_id)
+        
+        if filters.property_id:
+            query = query.filter(Property.id == filters.property_id)
+        
+        if filters.room_type_id:
+            query = query.filter(RoomType.id == filters.room_type_id)
+        
+        if filters.date_from:
+            query = query.filter(RoomAvailability.date >= filters.date_from)
+        
+        if filters.date_to:
+            query = query.filter(RoomAvailability.date <= filters.date_to)
+        
+        # Filtros de status
+        if filters.is_available is not None:
+            query = query.filter(RoomAvailability.is_available == filters.is_available)
+        
+        if filters.is_blocked is not None:
+            query = query.filter(RoomAvailability.is_blocked == filters.is_blocked)
+        
+        if filters.is_out_of_order is not None:
+            query = query.filter(RoomAvailability.is_out_of_order == filters.is_out_of_order)
+        
+        if filters.is_maintenance is not None:
+            query = query.filter(RoomAvailability.is_maintenance == filters.is_maintenance)
+        
+        if filters.is_reserved is not None:
+            query = query.filter(RoomAvailability.is_reserved == filters.is_reserved)
+        
+        if filters.closed_to_arrival is not None:
+            query = query.filter(RoomAvailability.closed_to_arrival == filters.closed_to_arrival)
+        
+        if filters.closed_to_departure is not None:
+            query = query.filter(RoomAvailability.closed_to_departure == filters.closed_to_departure)
+        
+        # Filtros de preço
+        if filters.has_rate_override is not None:
+            if filters.has_rate_override:
+                query = query.filter(RoomAvailability.rate_override.isnot(None))
+            else:
+                query = query.filter(RoomAvailability.rate_override.is_(None))
+        
+        if filters.min_rate:
+            query = query.filter(RoomAvailability.rate_override >= filters.min_rate)
+        
+        if filters.max_rate:
+            query = query.filter(RoomAvailability.rate_override <= filters.max_rate)
+        
+        # Busca textual
+        if filters.search:
+            search_term = f"%{filters.search}%"
+            query = query.filter(
+                or_(
+                    Room.name.ilike(search_term),
+                    Room.room_number.ilike(search_term),
+                    RoomAvailability.reason.ilike(search_term),
+                    RoomAvailability.notes.ilike(search_term)
+                )
+            )
+        
+        return query
