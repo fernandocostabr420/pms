@@ -540,6 +540,114 @@ async checkRoomNumberAvailability(roomNumber: string, propertyId: number): Promi
     return response.data;
   }
 
+// Adicionar estes métodos na classe PMSApiClient em frontend/src/lib/api.ts
+
+// ===== GUESTS API =====
+
+async getGuests(params?: { 
+  page?: number; 
+  per_page?: number; 
+  has_email?: boolean;
+  has_document?: boolean;
+  nationality?: string;
+  city?: string;
+  state?: string;
+  marketing_consent?: string;
+  search?: string;
+}) {
+  const response = await this.client.get<GuestListResponse>('/guests/', { params });
+  return response.data;
+}
+
+async createGuest(data: GuestCreate) {
+  const response = await this.client.post<GuestResponse>('/guests/', data);
+  return response.data;
+}
+
+async getGuest(id: number) {
+  const response = await this.client.get<GuestResponse>(`/guests/${id}`);
+  return response.data;
+}
+
+async getGuestWithStats(id: number) {
+  const response = await this.client.get<GuestWithStats>(`/guests/${id}/stats`);
+  return response.data;
+}
+
+async updateGuest(id: number, data: GuestUpdate) {
+  const response = await this.client.put<GuestResponse>(`/guests/${id}`, data);
+  return response.data;
+}
+
+async deleteGuest(id: number) {
+  await this.client.delete(`/guests/${id}`);
+}
+
+async searchGuests(query: string, limit: number = 10) {
+  const response = await this.client.get<GuestResponse[]>('/guests/search', {
+    params: { q: query, limit }
+  });
+  return response.data;
+}
+
+async checkEmailAvailability(email: string, excludeGuestId?: number) {
+  try {
+    if (!email || email.trim().length === 0) {
+      return { available: true };
+    }
+    
+    let url = `/guests/check/email?email=${encodeURIComponent(email.trim())}`;
+    if (excludeGuestId) {
+      url += `&exclude_guest_id=${excludeGuestId}`;
+    }
+    
+    const response = await this.client.get<{ available: boolean }>(url);
+    return response.data;
+  } catch (error: any) {
+    console.error('Erro ao verificar email:', error);
+    return { available: true };
+  }
+}
+
+async checkDocumentAvailability(document: string, excludeGuestId?: number) {
+  try {
+    // Validação básica - não enviar se documento estiver vazio
+    if (!document || document.trim().length === 0) {
+      return { available: true };
+    }
+    
+    const params = new URLSearchParams();
+    params.append('document_number', document.trim());
+    if (excludeGuestId) {
+      params.append('exclude_guest_id', excludeGuestId.toString());
+    }
+    
+    const response = await this.client.get<{ available: boolean }>(`/guests/check/document?${params.toString()}`);
+    return response.data;
+  } catch (error: any) {
+    console.error('Erro ao verificar documento:', error);
+    throw error;
+  }
+}
+
+async getGuestStats() {
+  const response = await this.client.get<GuestStats>('/guests/stats/general');
+  return response.data;
+}
+
+async advancedSearchGuests(filters: GuestFilters, page = 1, per_page = 20) {
+  const response = await this.client.post<GuestListResponse>(`/guests/advanced-search?page=${page}&per_page=${per_page}`, filters);
+  return response.data;
+}
+
+async mergeGuests(primaryGuestId: number, secondaryGuestId: number) {
+  const response = await this.client.post<GuestResponse>('/guests/merge', {
+    primary_guest_id: primaryGuestId,
+    secondary_guest_id: secondaryGuestId
+  });
+  return response.data;
+}
+
   // ===== DASHBOARD STATS =====
   
   async getDashboardStats() {

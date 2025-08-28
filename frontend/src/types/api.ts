@@ -214,3 +214,6 @@ export interface TodaysReservationsResponse {
   departures_count: number;
   current_guests_count: number;
 }
+
+// ===== GUEST TYPES IMPORT =====
+export * from './guest';
