@@ -1,4 +1,4 @@
-// src/lib/api.ts
+// frontend/src/lib/api.ts
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import Cookies from 'js-cookie';
 import type { 
@@ -9,6 +9,21 @@ import type {
   GuestListResponse,
   MessageResponse 
 } from '@/types/api';
+import type { 
+  RoomListResponse, 
+  RoomResponse, 
+  RoomWithDetails, 
+  RoomCreate, 
+  RoomUpdate, 
+  RoomFilters, 
+  RoomStats, 
+  RoomBulkUpdate,
+  RoomTypeListResponse,
+  RoomTypeResponse,
+  RoomTypeCreate,
+  RoomTypeUpdate,
+  RoomTypeFilters
+} from '@/types/rooms';
 
 class PMSApiClient {
   private client: AxiosInstance;
@@ -221,6 +236,146 @@ class PMSApiClient {
     return response.data;
   }
 
+  // ===== ROOM TYPES API =====
+
+  async getRoomTypes(params?: {
+    page?: number;
+    per_page?: number;
+    is_bookable?: boolean;
+    min_capacity?: number;
+    max_capacity?: number;
+    has_amenity?: string;
+    search?: string;
+  }): Promise<RoomTypeListResponse> {
+    const response = await this.get<RoomTypeListResponse>('/room-types/', params);
+    return response.data;
+  }
+
+  async createRoomType(data: RoomTypeCreate): Promise<RoomTypeResponse> {
+    const response = await this.post<RoomTypeResponse>('/room-types/', data);
+    return response.data;
+  }
+
+  async getRoomType(id: number): Promise<RoomTypeResponse> {
+    const response = await this.get<RoomTypeResponse>(`/room-types/${id}`);
+    return response.data;
+  }
+
+  async updateRoomType(id: number, data: RoomTypeUpdate): Promise<RoomTypeResponse> {
+    const response = await this.put<RoomTypeResponse>(`/room-types/${id}`, data);
+    return response.data;
+  }
+
+  async deleteRoomType(id: number): Promise<void> {
+    await this.delete(`/room-types/${id}`);
+  }
+
+  async getRoomTypeBySlug(slug: string): Promise<RoomTypeResponse> {
+    const response = await this.get<RoomTypeResponse>(`/room-types/slug/${slug}`);
+    return response.data;
+  }
+
+  async toggleRoomTypeBookable(id: number): Promise<RoomTypeResponse> {
+    const response = await this.client.patch<RoomTypeResponse>(`/room-types/${id}/toggle-bookable`);
+    return response.data;
+  }
+
+  async getRoomTypeStats(id: number): Promise<any> {
+    const response = await this.get<any>(`/room-types/${id}/stats`);
+    return response.data;
+  }
+
+  async getAvailableAmenities(): Promise<string[]> {
+    const response = await this.get<{ amenities: string[] }>('/room-types/meta/amenities');
+    return response.data.amenities;
+  }
+
+  async searchRoomTypes(filters: RoomTypeFilters, page = 1, per_page = 20): Promise<RoomTypeListResponse> {
+    const response = await this.post<RoomTypeListResponse>(`/room-types/search?page=${page}&per_page=${per_page}`, filters);
+    return response.data;
+  }
+
+  // ===== ROOMS API =====
+
+  async getRooms(params?: {
+    page?: number;
+    per_page?: number;
+    property_id?: number;
+    room_type_id?: number;
+    floor?: number;
+    building?: string;
+    is_operational?: boolean;
+    is_out_of_order?: boolean;
+    is_available_for_booking?: boolean;
+    min_occupancy?: number;
+    max_occupancy?: number;
+    has_amenity?: string;
+    search?: string;
+  }): Promise<RoomListResponse> {
+    const response = await this.get<RoomListResponse>('/rooms/', params);
+    return response.data;
+  }
+
+  async createRoom(data: RoomCreate): Promise<RoomResponse> {
+    const response = await this.post<RoomResponse>('/rooms/', data);
+    return response.data;
+  }
+
+  async getRoom(id: number): Promise<RoomResponse> {
+    const response = await this.get<RoomResponse>(`/rooms/${id}`);
+    return response.data;
+  }
+
+  async getRoomWithDetails(id: number): Promise<RoomWithDetails> {
+    const response = await this.get<RoomWithDetails>(`/rooms/${id}/details`);
+    return response.data;
+  }
+
+  async updateRoom(id: number, data: RoomUpdate): Promise<RoomResponse> {
+    const response = await this.put<RoomResponse>(`/rooms/${id}`, data);
+    return response.data;
+  }
+
+  async deleteRoom(id: number): Promise<void> {
+    await this.delete(`/rooms/${id}`);
+  }
+
+  async toggleRoomOperational(id: number): Promise<RoomResponse> {
+    const response = await this.client.patch<RoomResponse>(`/rooms/${id}/toggle-operational`);
+    return response.data;
+  }
+
+  async bulkUpdateRooms(data: RoomBulkUpdate): Promise<any> {
+    const response = await this.post<any>('/rooms/bulk-update', data);
+    return response.data;
+  }
+
+  async getRoomsByProperty(propertyId: number): Promise<RoomResponse[]> {
+    const response = await this.get<RoomResponse[]>(`/rooms/by-property/${propertyId}`);
+    return response.data;
+  }
+
+  async getRoomsByType(roomTypeId: number): Promise<RoomResponse[]> {
+    const response = await this.get<RoomResponse[]>(`/rooms/by-type/${roomTypeId}`);
+    return response.data;
+  }
+
+  async getRoomStats(propertyId?: number): Promise<RoomStats> {
+    const params = propertyId ? { property_id: propertyId } : undefined;
+    const response = await this.get<RoomStats>('/rooms/stats/general', params);
+    return response.data;
+  }
+
+  async searchRooms(filters: RoomFilters, page = 1, per_page = 20): Promise<RoomListResponse> {
+    const response = await this.post<RoomListResponse>(`/rooms/search?page=${page}&per_page=${per_page}`, filters);
+    return response.data;
+  }
+
+  async checkRoomNumberAvailability(roomNumber: string, propertyId: number): Promise<{ available: boolean }> {
+    const response = await this.get<{ available: boolean }>(`/rooms/check-number/${roomNumber}`, { property_id: propertyId });
+    return response.data;
+  }
+
   // ===== RESERVATIONS API =====
   
   async getReservations(params?: { 
@@ -233,9 +388,74 @@ class PMSApiClient {
     return response.data;
   }
 
+  async createReservation(data: any) {
+    const response = await this.client.post('/reservations/', data);
+    return response.data;
+  }
+
+  async updateReservation(id: number, data: any) {
+    const response = await this.client.put(`/reservations/${id}`, data);
+    return response.data;
+  }
+
+  async deleteReservation(id: number) {
+    const response = await this.client.delete(`/reservations/${id}`);
+    return response.data;
+  }
+
+  async getReservation(id: number) {
+    const response = await this.client.get(`/reservations/${id}`);
+    return response.data;
+  }
+
+  async checkInReservation(id: number, data?: any) {
+    const response = await this.client.post(`/reservations/${id}/check-in`, data);
+    return response.data;
+  }
+
+  async checkOutReservation(id: number, data?: any) {
+    const response = await this.client.post(`/reservations/${id}/check-out`, data);
+    return response.data;
+  }
+
+  async cancelReservation(id: number, reason?: string) {
+    const response = await this.client.post(`/reservations/${id}/cancel`, { reason });
+    return response.data;
+  }
+
   async getTodaysReservations(propertyId?: number) {
     const params = propertyId ? { property_id: propertyId } : {};
     const response = await this.client.get('/reservations/today', { params });
+    return response.data;
+  }
+
+  // ===== CALENDAR API =====
+
+  async getCalendarMonth(year: number, month: number, propertyId?: number) {
+    const params = propertyId ? { property_id: propertyId } : {};
+    const response = await this.client.get(`/calendar/month/${year}/${month}`, { params });
+    return response.data;
+  }
+
+  async getCalendarRange(startDate: string, endDate: string, propertyId?: number) {
+    const params = { 
+      start_date: startDate,
+      end_date: endDate,
+      ...(propertyId && { property_id: propertyId })
+    };
+    const response = await this.client.get('/calendar/range', { params });
+    return response.data;
+  }
+
+  async checkAvailability(data: {
+    property_id: number;
+    check_in_date: string;
+    check_out_date: string;
+    adults?: number;
+    children?: number;
+    room_type_id?: number;
+  }) {
+    const response = await this.client.post('/calendar/availability', data);
     return response.data;
   }
 
@@ -246,138 +466,40 @@ class PMSApiClient {
     per_page?: number; 
     search?: string;
   }) {
-    const response = await this.client.get<GuestListResponse>('/guests', { params });
+    const response = await this.client.get<GuestListResponse>('/guests/', { params });
     return response.data;
   }
 
-  // ===== DASHBOARD STATS =====
-  
-  async getDashboardStats() {
-    try {
-      const response = await this.client.get('/reservations/stats/dashboard');
-      return response.data;
-    } catch (error) {
-      console.error('Dashboard stats error:', error);
-      return {
-        total_reservations: 0,
-        arrivals_today: 0,
-        departures_today: 0,
-        current_guests: 0,
-        total_revenue: 0,
-        pending_revenue: 0
-      };
-    }
-  }
-
-  // ===== GENERIC REQUEST METHOD =====
-
-  async request<T>(endpoint: string, options?: AxiosRequestConfig): Promise<T> {
-    const response: AxiosResponse<T> = await this.client.request({
-      url: endpoint,
-      ...options,
-    });
+  async createGuest(data: any) {
+    const response = await this.client.post('/guests/', data);
     return response.data;
   }
 
-  // ===== CALENDAR METHODS =====
-
-  async getCalendarMonth(
-    year: number,
-    month: number,
-    propertyId?: number
-  ): Promise<ReservationResponse[]> {
-    const params = new URLSearchParams({
-      year: year.toString(),
-      month: month.toString(),
-    });
-
-    if (propertyId) {
-      params.append('property_id', propertyId.toString());
-    }
-
-    const response = await this.client.get(`/reservations/calendar/month?${params}`);
+  async updateGuest(id: number, data: any) {
+    const response = await this.client.put(`/guests/${id}`, data);
     return response.data;
   }
 
-  async getCalendarRange(
-    startDate: string,
-    endDate: string,
-    propertyId?: number,
-    status?: string
-  ): Promise<ReservationResponse[]> {
-    const params = new URLSearchParams({
-      start_date: startDate,
-      end_date: endDate,
-    });
-
-    if (propertyId) {
-      params.append('property_id', propertyId.toString());
-    }
-
-    if (status) {
-      params.append('status', status);
-    }
-
-    const response = await this.client.get(`/reservations/calendar/range?${params}`);
+  async deleteGuest(id: number) {
+    const response = await this.client.delete(`/guests/${id}`);
     return response.data;
   }
 
-  async checkAvailability(data: AvailabilityCheckRequest): Promise<AvailabilityCheckResponse> {
-    const response = await this.client.post('/reservations/check-availability', data);
+  async getGuest(id: number) {
+    const response = await this.client.get(`/guests/${id}`);
     return response.data;
   }
 
-  async getDashboardStats(propertyId?: number): Promise<CalendarStatsResponse> {
-    const params = new URLSearchParams();
-    if (propertyId) {
-      params.append('property_id', propertyId.toString());
-    }
+  // ===== DASHBOARD API =====
 
-    const response = await this.client.get(`/reservations/stats/dashboard?${params}`);
+  async getDashboardStats(propertyId?: number) {
+    const params = propertyId ? { property_id: propertyId } : {};
+    const response = await this.client.get('/dashboard/stats', { params });
     return response.data;
   }
 
-  async getTodaysReservations(propertyId?: number): Promise<TodaysReservationsResponse> {
-    const params = new URLSearchParams();
-    if (propertyId) {
-      params.append('property_id', propertyId.toString());
-    }
-
-    const response = await this.client.get(`/reservations/today?${params}`);
-    return response.data;
-  }
-
-  async confirmReservation(reservationId: number): Promise<ReservationResponse> {
-    const response = await this.client.patch(`/reservations/${reservationId}/confirm`);
-    return response.data;
-  }
-
-  async checkInReservation(
-    reservationId: number,
-    data: { notes?: string; actual_check_in_time?: string }
-  ): Promise<ReservationResponse> {
-    const response = await this.client.post(`/reservations/${reservationId}/check-in`, data);
-    return response.data;
-  }
-
-  async checkOutReservation(
-    reservationId: number,
-    data: { notes?: string; actual_check_out_time?: string; final_charges?: number }
-  ): Promise<ReservationResponse> {
-    const response = await this.client.post(`/reservations/${reservationId}/check-out`, data);
-    return response.data;
-  }
-
-  async cancelReservation(
-    reservationId: number,
-    data: { cancellation_reason: string; refund_amount?: number; notes?: string }
-  ): Promise<ReservationResponse> {
-    const response = await this.client.post(`/reservations/${reservationId}/cancel`, data);
-    return response.data;
-  }
-
-  // Criar reserva rápida (usando endpoint existente)
-  async createQuickReservation(data: {
+  // ===== QUICK BOOKING =====
+  async quickBooking(data: {
     guest_id?: number;
     guest_name?: string;
     guest_email?: string;
@@ -391,7 +513,7 @@ class PMSApiClient {
     total_amount?: number;
     source?: string;
     guest_requests?: string;
-  }): Promise<ReservationResponse> {
+  }) {
     // Se não tem guest_id, cria o hóspede primeiro
     let guestId = data.guest_id;
 
