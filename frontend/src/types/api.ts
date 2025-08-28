@@ -151,3 +151,66 @@ export interface ReservationListResponse extends PaginatedResponse<ReservationRe
 export interface GuestListResponse extends PaginatedResponse<GuestResponse> {
   guests: GuestResponse[];
 }
+
+// ===== CALENDAR API TYPES =====
+export interface CalendarMonthRequest {
+  year: number;
+  month: number;
+  property_id?: number;
+}
+
+export interface CalendarRangeRequest {
+  start_date: string;
+  end_date: string;
+  property_id?: number;
+  status?: string;
+}
+
+export interface AvailabilityCheckRequest {
+  property_id: number;
+  check_in_date: string;
+  check_out_date: string;
+  adults?: number;
+  children?: number;
+  room_type_id?: number;
+}
+
+export interface AvailableRoom {
+  id: number;
+  room_number: string;
+  name?: string;
+  room_type_id: number;
+  room_type_name?: string;
+  max_occupancy: number;
+  floor?: number;
+  building?: string;
+}
+
+export interface AvailabilityCheckResponse {
+  available: boolean;
+  available_rooms: AvailableRoom[];
+  total_available_rooms: number;
+  conflicting_reservations?: string[];
+}
+
+export interface CalendarStatsResponse {
+  total_reservations: number;
+  confirmed_reservations: number;
+  checked_in_reservations: number;
+  pending_reservations: number;
+  cancelled_reservations: number;
+  total_revenue: number;
+  occupancy_rate: number;
+  available_rooms: number;
+  occupied_rooms: number;
+}
+
+export interface TodaysReservationsResponse {
+  date: string;
+  arrivals: ReservationResponse[];
+  departures: ReservationResponse[];
+  current_guests: ReservationResponse[];
+  arrivals_count: number;
+  departures_count: number;
+  current_guests_count: number;
+}

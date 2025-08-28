@@ -270,13 +270,159 @@ class PMSApiClient {
   }
 
   // ===== GENERIC REQUEST METHOD =====
-  
+
   async request<T>(endpoint: string, options?: AxiosRequestConfig): Promise<T> {
     const response: AxiosResponse<T> = await this.client.request({
       url: endpoint,
       ...options,
     });
     return response.data;
+  }
+
+  // ===== CALENDAR METHODS =====
+
+  async getCalendarMonth(
+    year: number,
+    month: number,
+    propertyId?: number
+  ): Promise<ReservationResponse[]> {
+    const params = new URLSearchParams({
+      year: year.toString(),
+      month: month.toString(),
+    });
+
+    if (propertyId) {
+      params.append('property_id', propertyId.toString());
+    }
+
+    const response = await this.client.get(`/reservations/calendar/month?${params}`);
+    return response.data;
+  }
+
+  async getCalendarRange(
+    startDate: string,
+    endDate: string,
+    propertyId?: number,
+    status?: string
+  ): Promise<ReservationResponse[]> {
+    const params = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate,
+    });
+
+    if (propertyId) {
+      params.append('property_id', propertyId.toString());
+    }
+
+    if (status) {
+      params.append('status', status);
+    }
+
+    const response = await this.client.get(`/reservations/calendar/range?${params}`);
+    return response.data;
+  }
+
+  async checkAvailability(data: AvailabilityCheckRequest): Promise<AvailabilityCheckResponse> {
+    const response = await this.client.post('/reservations/check-availability', data);
+    return response.data;
+  }
+
+  async getDashboardStats(propertyId?: number): Promise<CalendarStatsResponse> {
+    const params = new URLSearchParams();
+    if (propertyId) {
+      params.append('property_id', propertyId.toString());
+    }
+
+    const response = await this.client.get(`/reservations/stats/dashboard?${params}`);
+    return response.data;
+  }
+
+  async getTodaysReservations(propertyId?: number): Promise<TodaysReservationsResponse> {
+    const params = new URLSearchParams();
+    if (propertyId) {
+      params.append('property_id', propertyId.toString());
+    }
+
+    const response = await this.client.get(`/reservations/today?${params}`);
+    return response.data;
+  }
+
+  async confirmReservation(reservationId: number): Promise<ReservationResponse> {
+    const response = await this.client.patch(`/reservations/${reservationId}/confirm`);
+    return response.data;
+  }
+
+  async checkInReservation(
+    reservationId: number,
+    data: { notes?: string; actual_check_in_time?: string }
+  ): Promise<ReservationResponse> {
+    const response = await this.client.post(`/reservations/${reservationId}/check-in`, data);
+    return response.data;
+  }
+
+  async checkOutReservation(
+    reservationId: number,
+    data: { notes?: string; actual_check_out_time?: string; final_charges?: number }
+  ): Promise<ReservationResponse> {
+    const response = await this.client.post(`/reservations/${reservationId}/check-out`, data);
+    return response.data;
+  }
+
+  async cancelReservation(
+    reservationId: number,
+    data: { cancellation_reason: string; refund_amount?: number; notes?: string }
+  ): Promise<ReservationResponse> {
+    const response = await this.client.post(`/reservations/${reservationId}/cancel`, data);
+    return response.data;
+  }
+
+  // Criar reserva rápida (usando endpoint existente)
+  async createQuickReservation(data: {
+    guest_id?: number;
+    guest_name?: string;
+    guest_email?: string;
+    guest_phone?: string;
+    property_id: number;
+    check_in_date: string;
+    check_out_date: string;
+    adults: number;
+    children: number;
+    rooms: { room_id: number; rate_per_night?: number }[];
+    total_amount?: number;
+    source?: string;
+    guest_requests?: string;
+  }): Promise<ReservationResponse> {
+    // Se não tem guest_id, cria o hóspede primeiro
+    let guestId = data.guest_id;
+
+    if (!guestId && data.guest_name) {
+      const guest = await this.createGuest({
+        first_name: data.guest_name.split(' ')[0] || data.guest_name,
+        last_name: data.guest_name.split(' ').slice(1).join(' ') || '',
+        email: data.guest_email || '',
+        phone: data.guest_phone || '',
+      });
+      guestId = guest.id;
+    }
+
+    if (!guestId) {
+      throw new Error('Guest ID or guest information is required');
+    }
+
+    const reservationData = {
+      guest_id: guestId,
+      property_id: data.property_id,
+      check_in_date: data.check_in_date,
+      check_out_date: data.check_out_date,
+      adults: data.adults,
+      children: data.children,
+      rooms: data.rooms,
+      total_amount: data.total_amount || 0,
+      source: data.source || 'direct',
+      guest_requests: data.guest_requests,
+    };
+
+    return this.createReservation(reservationData);
   }
 }
 

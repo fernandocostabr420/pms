@@ -103,3 +103,212 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
 }
+
+/* ADICIONAR AO FINAL DO ARQUIVO frontend/src/app/globals.css */
+
+/* ===== CALENDAR STYLES ===== */
+
+/* Estilos customizados para o calendário */
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+  background-color: #e5e7eb;
+}
+
+.calendar-day {
+  background-color: white;
+  min-height: 120px;
+  padding: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  position: relative;
+  overflow: hidden;
+}
+
+.calendar-day:hover {
+  background-color: #f9fafb;
+  transform: scale(1.01);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+}
+
+.calendar-day.today {
+  background-color: #eff6ff;
+  border-left: 4px solid #3b82f6;
+}
+
+.calendar-day.other-month {
+  background-color: #f9fafb;
+  color: #9ca3af;
+}
+
+.calendar-day.weekend {
+  background-color: #fafafa;
+}
+
+/* Estilos para os cards de reserva no calendário */
+.reservation-card-compact {
+  font-size: 0.75rem;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  border: 1px solid;
+}
+
+.reservation-card-compact:hover {
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 20;
+}
+
+/* Status específicos para reservas */
+.reservation-pending {
+  @apply bg-yellow-100 text-yellow-800 border-yellow-200;
+}
+
+.reservation-confirmed {
+  @apply bg-blue-100 text-blue-800 border-blue-200;
+}
+
+.reservation-checked-in {
+  @apply bg-green-100 text-green-800 border-green-200;
+}
+
+.reservation-checked-out {
+  @apply bg-gray-100 text-gray-800 border-gray-200;
+}
+
+.reservation-cancelled {
+  @apply bg-red-100 text-red-800 border-red-200;
+}
+
+/* Animações para loading */
+.calendar-loading {
+  @apply animate-pulse;
+}
+
+.calendar-loading .calendar-day {
+  @apply bg-gray-200;
+}
+
+/* Estilos responsivos */
+@media (max-width: 640px) {
+  .calendar-day {
+    min-height: 80px;
+    padding: 4px;
+    font-size: 0.75rem;
+  }
+  
+  .reservation-card-compact {
+    font-size: 0.65rem;
+    padding: 4px 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  .calendar-day {
+    min-height: 60px;
+    padding: 2px;
+  }
+  
+  .reservation-card-compact {
+    font-size: 0.6rem;
+    padding: 2px 4px;
+  }
+}
+
+/* Transições suaves para mudanças de mês */
+.calendar-transition {
+  transition: opacity 0.3s ease-in-out;
+}
+
+.calendar-transition.loading {
+  opacity: 0.6;
+}
+
+/* Estilos para indicadores de chegada/saída */
+.arrival-indicator {
+  @apply bg-green-100 text-green-700 border-green-300 text-xs px-1 py-0.5 rounded;
+}
+
+.departure-indicator {
+  @apply bg-orange-100 text-orange-700 border-orange-300 text-xs px-1 py-0.5 rounded;
+}
+
+/* Melhorias visuais para o header do calendário */
+.calendar-header {
+  @apply bg-gradient-to-r from-blue-50 to-indigo-50 border-b;
+}
+
+.calendar-weekday {
+  @apply font-semibold text-gray-700 text-center py-3 bg-gray-50;
+}
+
+.calendar-weekday.weekend {
+  @apply bg-gray-100;
+}
+
+/* Estilos para ocupação */
+.occupancy-counter {
+  @apply absolute bottom-1 right-1 bg-gray-800 text-white text-xs px-2 py-1 rounded-full min-w-5 text-center font-medium;
+}
+
+.occupancy-high {
+  @apply bg-red-600;
+}
+
+.occupancy-medium {
+  @apply bg-yellow-600;
+}
+
+.occupancy-low {
+  @apply bg-green-600;
+}
+
+/* Hover effects para botões do calendário */
+.calendar-nav-button {
+  @apply transition-all duration-200 hover:scale-110 hover:bg-blue-50;
+}
+
+/* Estilos para modais */
+.reservation-modal {
+  @apply max-h-[90vh] overflow-y-auto;
+}
+
+.quick-booking-modal {
+  @apply max-h-[90vh] overflow-y-auto;
+}
+
+/* Print styles */
+@media print {
+  .calendar-day:hover {
+    transform: none;
+    box-shadow: none;
+  }
+  
+  .reservation-card-compact:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+/* Dark mode support (opcional) */
+@media (prefers-color-scheme: dark) {
+  .calendar-day {
+    @apply bg-gray-800 text-gray-100;
+  }
+  
+  .calendar-day:hover {
+    @apply bg-gray-700;
+  }
+  
+  .calendar-day.today {
+    @apply bg-blue-900 border-l-blue-400;
+  }
+  
+  .calendar-weekday {
+    @apply bg-gray-800 text-gray-200;
+  }
+}
