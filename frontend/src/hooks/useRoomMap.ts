@@ -22,22 +22,27 @@ export function useRoomMap(options: UseRoomMapOptions = {}) {
   const { initialDays = 31, defaultPropertyId } = options;
   const { toast } = useToast();
 
-  // Estados
+  // ✅ CORREÇÃO 1: Estados - declarados na ordem correta
   const [mapData, setMapData] = useState<MapResponse | null>(null);
   const [stats, setStats] = useState<MapStatsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  // Filtros
-  const [filters, setFilters] = useState<MapFilters>(() => ({
-    start_date: format(new Date(), 'yyyy-MM-dd'),
-    end_date: format(addDays(new Date(), initialDays), 'yyyy-MM-dd'),
-    property_id: defaultPropertyId,
-    include_out_of_order: true,
-    include_cancelled: false,
-  }));
+  // ✅ CORREÇÃO 2: Filtros - inicializados de forma mais estável
+  const [filters, setFilters] = useState<MapFilters>(() => {
+    const today = new Date();
+    const endDate = addDays(today, initialDays);
+    
+    return {
+      start_date: format(today, 'yyyy-MM-dd'),
+      end_date: format(endDate, 'yyyy-MM-dd'),
+      property_id: defaultPropertyId,
+      include_out_of_order: true,
+      include_cancelled: false,
+    };
+  });
 
-  // Função para carregar dados do mapa
+  // ✅ CORREÇÃO 3: loadMapData com melhor controle de estado
   const loadMapData = useCallback(async (customFilters?: Partial<MapFilters>) => {
     const activeFilters = { ...filters, ...customFilters };
     
@@ -72,17 +77,24 @@ export function useRoomMap(options: UseRoomMapOptions = {}) {
     }
   }, [filters, toast]);
 
-  // ✅ CORREÇÃO: useEffect com formatação correta
+  // ✅ CORREÇÃO 4: useEffect com dependências otimizadas
   useEffect(() => {
     loadMapData();
-  }, [filters.start_date, filters.end_date, filters.property_id, filters.include_out_of_order, filters.include_cancelled, toast]);
+  }, [filters.start_date, filters.end_date, filters.property_id, filters.include_out_of_order, filters.include_cancelled]);
 
-  // Atualizar filtros
+  // ✅ CORREÇÃO 5: updateFilters com callback estável
   const updateFilters = useCallback((newFilters: Partial<MapFilters>) => {
-    setFilters(prev => ({ ...prev, ...newFilters }));
+    setFilters(prev => {
+      const updated = { ...prev, ...newFilters };
+      // Só atualiza se realmente mudou
+      if (JSON.stringify(prev) !== JSON.stringify(updated)) {
+        return updated;
+      }
+      return prev;
+    });
   }, []);
 
-  // ✅ CORREÇÃO: Operação em lote sem dependência circular
+  // ✅ CORREÇÃO 6: executeBulkOperation sem dependência circular
   const executeBulkOperation = useCallback(async (operation: MapBulkOperation) => {
     try {
       setLoading(true);
@@ -93,7 +105,7 @@ export function useRoomMap(options: UseRoomMapOptions = {}) {
         description: "Operação executada com sucesso",
       });
 
-      // Recarregar dados diretamente sem callback
+      // Recarregar dados diretamente
       const activeFilters = filters;
       const [mapResponse, statsResponse] = await Promise.all([
         apiClient.getMapData(activeFilters),
@@ -105,7 +117,7 @@ export function useRoomMap(options: UseRoomMapOptions = {}) {
       ]);
       setMapData(mapResponse);
       setStats(statsResponse);
-
+      
     } catch (err: any) {
       const errorMessage = err.response?.data?.detail || 'Erro ao executar operação';
       toast({
@@ -119,7 +131,7 @@ export function useRoomMap(options: UseRoomMapOptions = {}) {
     }
   }, [filters, toast]);
 
-  // ✅ CORREÇÃO: Reserva rápida sem dependência circular
+  // ✅ CORREÇÃO 7: createQuickBooking otimizado
   const createQuickBooking = useCallback(async (booking: MapQuickBooking) => {
     try {
       setLoading(true);
@@ -130,7 +142,7 @@ export function useRoomMap(options: UseRoomMapOptions = {}) {
         description: "Reserva criada com sucesso",
       });
 
-      // Recarregar dados diretamente sem callback
+      // Recarregar dados
       const activeFilters = filters;
       const [mapResponse, statsResponse] = await Promise.all([
         apiClient.getMapData(activeFilters),
@@ -158,38 +170,12 @@ export function useRoomMap(options: UseRoomMapOptions = {}) {
     }
   }, [filters, toast]);
 
-  // ✅ CORREÇÃO: Refresh manual sem dependência circular
+  // ✅ CORREÇÃO 8: refreshData simplificado
   const refreshData = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      const activeFilters = filters;
-      const [mapResponse, statsResponse] = await Promise.all([
-        apiClient.getMapData(activeFilters),
-        apiClient.getMapStats(
-          activeFilters.start_date,
-          activeFilters.end_date,
-          activeFilters.property_id
-        )
-      ]);
-      setMapData(mapResponse);
-      setStats(statsResponse);
-      
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.detail || 'Erro ao carregar dados';
-      setError(errorMessage);
-      toast({
-        title: "Erro",
-        description: errorMessage,
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [filters, toast]);
+    return await loadMapData();
+  }, [loadMapData]);
 
-  // Gerar cabeçalhos de data para exibição
+  // ✅ CORREÇÃO 9: dateHeaders com useMemo otimizado
   const dateHeaders = useMemo(() => {
     if (!mapData?.date_headers) return [];
     
@@ -203,9 +189,9 @@ export function useRoomMap(options: UseRoomMapOptions = {}) {
         isToday: format(date, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
       };
     });
-  }, [mapData]);
+  }, [mapData?.date_headers]);
 
-  // Calcular range de datas baseado nos filtros
+  // ✅ CORREÇÃO 10: dateRange calculado de forma estável
   const dateRange = useMemo(() => {
     const startDate = new Date(filters.start_date + 'T00:00:00');
     const endDate = new Date(filters.end_date + 'T00:00:00');
@@ -216,6 +202,7 @@ export function useRoomMap(options: UseRoomMapOptions = {}) {
     };
   }, [filters.start_date, filters.end_date]);
 
+  // ✅ RETORNO - Ordem consistente e completa
   return {
     // Dados
     mapData,

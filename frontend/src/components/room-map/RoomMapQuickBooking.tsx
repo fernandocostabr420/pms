@@ -6,12 +6,20 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format, addDays } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter
 } from '@/components/ui/dialog';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -25,16 +33,19 @@ import {
 } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
 import { 
   Loader2, 
   Users, 
-  Calendar, 
+  Calendar as CalendarIcon, 
   User, 
   Phone, 
   Mail,
   DollarSign,
-  Bed
+  Bed,
+  AlertTriangle
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { MapRoomData, MapQuickBooking } from '@/types/room-map';
 import { PropertyResponse } from '@/types/api';
 import { useToast } from '@/hooks/use-toast';
@@ -77,9 +88,14 @@ export default function RoomMapQuickBooking({
   properties = [],
   loading = false
 }: RoomMapQuickBookingProps) {
+  // ✅ CORREÇÃO 1: TODOS os hooks devem ser declarados SEMPRE, independente de condições
   const [submitting, setSubmitting] = useState(false);
+  const [checkInDate, setCheckInDate] = useState<Date | undefined>();
+  const [checkOutDate, setCheckOutDate] = useState<Date | undefined>();
+  
   const { toast } = useToast();
 
+  // ✅ CORREÇÃO 2: useForm SEMPRE executado, sem condições
   const {
     register,
     handleSubmit,
@@ -101,6 +117,7 @@ export default function RoomMapQuickBooking({
     }
   });
 
+  // ✅ CORREÇÃO 3: watch hooks SEMPRE executados
   const watchedRoomId = watch('room_id');
   const watchedAdults = watch('adults');
   const watchedChildren = watch('children');
@@ -108,15 +125,40 @@ export default function RoomMapQuickBooking({
   const watchedCheckOut = watch('check_out_date');
   const watchedRate = watch('rate');
 
-  // Definir quarto selecionado quando o modal abre
+  // ✅ CORREÇÃO 4: useEffect para sincronizar datas com estado local
   useEffect(() => {
-    if (isOpen && selectedRoom) {
+    if (watchedCheckIn) {
+      setCheckInDate(new Date(watchedCheckIn));
+    }
+    if (watchedCheckOut) {
+      setCheckOutDate(new Date(watchedCheckOut));
+    }
+  }, [watchedCheckIn, watchedCheckOut]);
+
+  // ✅ CORREÇÃO 5: useEffect para definir quarto selecionado - executado sempre
+  useEffect(() => {
+    if (isOpen && selectedRoom && selectedRoom.id) {
       setValue('room_id', selectedRoom.id);
       clearErrors('room_id');
     }
   }, [isOpen, selectedRoom, setValue, clearErrors]);
 
-  // Calcular valor total automaticamente
+  // ✅ CORREÇÃO 6: useEffect para sincronizar datas do props - executado sempre
+  useEffect(() => {
+    if (isOpen) {
+      const defaultCheckIn = selectedDate ? new Date(selectedDate) : new Date();
+      const defaultCheckOut = selectedDate 
+        ? addDays(new Date(selectedDate), 1) 
+        : addDays(new Date(), 1);
+
+      setCheckInDate(defaultCheckIn);
+      setCheckOutDate(defaultCheckOut);
+      setValue('check_in_date', format(defaultCheckIn, 'yyyy-MM-dd'));
+      setValue('check_out_date', format(defaultCheckOut, 'yyyy-MM-dd'));
+    }
+  }, [isOpen, selectedDate, setValue]);
+
+  // ✅ CORREÇÃO 7: useEffect para calcular valor total - executado sempre
   useEffect(() => {
     if (watchedRate && watchedCheckIn && watchedCheckOut) {
       const checkIn = new Date(watchedCheckIn);
@@ -129,18 +171,48 @@ export default function RoomMapQuickBooking({
     }
   }, [watchedRate, watchedCheckIn, watchedCheckOut, setValue]);
 
-  // Reset form quando modal fecha
+  // ✅ CORREÇÃO 8: useEffect para reset - executado sempre
   useEffect(() => {
     if (!isOpen) {
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         reset();
-      }, 300); // Aguarda animação do modal
+        setCheckInDate(undefined);
+        setCheckOutDate(undefined);
+        setSubmitting(false);
+      }, 300);
+      
+      return () => clearTimeout(timeoutId);
     }
   }, [isOpen, reset]);
 
-  const currentRoom = selectedRoom || availableRooms.find(r => r.id === watchedRoomId);
+  // ✅ CORREÇÃO 9: Cálculos sempre executados (não condicionais)
+  const currentRoom = selectedRoom || (availableRooms.find(r => r.id === watchedRoomId) || null);
   const totalGuests = watchedAdults + watchedChildren;
-  const isOverCapacity = currentRoom && totalGuests > currentRoom.max_occupancy;
+  const isOverCapacity = currentRoom ? totalGuests > currentRoom.max_occupancy : false;
+  const nights = checkInDate && checkOutDate 
+    ? Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24))
+    : 0;
+
+  // ✅ CORREÇÃO 10: Handlers definidos sempre
+  const handleCheckInSelect = (date: Date | undefined) => {
+    setCheckInDate(date);
+    if (date) {
+      setValue('check_in_date', format(date, 'yyyy-MM-dd'));
+      // Ajustar check-out para pelo menos 1 dia depois se necessário
+      if (!checkOutDate || checkOutDate <= date) {
+        const newCheckOut = addDays(date, 1);
+        setCheckOutDate(newCheckOut);
+        setValue('check_out_date', format(newCheckOut, 'yyyy-MM-dd'));
+      }
+    }
+  };
+
+  const handleCheckOutSelect = (date: Date | undefined) => {
+    setCheckOutDate(date);
+    if (date) {
+      setValue('check_out_date', format(date, 'yyyy-MM-dd'));
+    }
+  };
 
   const onFormSubmit = async (data: QuickBookingFormData) => {
     try {
@@ -189,18 +261,23 @@ export default function RoomMapQuickBooking({
 
     } catch (error: any) {
       console.error('Erro ao criar reserva:', error);
-      // O erro já é tratado no hook
+      // O erro já é tratado no hook useRoomMap
     } finally {
       setSubmitting(false);
     }
   };
 
+  // ✅ RENDER - Sempre renderizar o JSX completo, sem early returns antes dos hooks
+  if (!isOpen) {
+    return null;
+  }
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Calendar className="h-5 w-5" />
+            <CalendarIcon className="h-5 w-5" />
             Reserva Rápida
             {currentRoom && (
               <Badge variant="outline">
@@ -229,35 +306,41 @@ export default function RoomMapQuickBooking({
                 <SelectContent>
                   {selectedRoom ? (
                     <SelectItem value={selectedRoom.id.toString()}>
-                      {selectedRoom.room_number} - {selectedRoom.name}
-                      <Badge variant="outline" className="ml-2">
-                        Max {selectedRoom.max_occupancy}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Bed className="h-4 w-4" />
+                        Quarto {selectedRoom.room_number} - {selectedRoom.name}
+                        <Badge variant="outline" className="ml-2">
+                          {selectedRoom.max_occupancy} pessoas
+                        </Badge>
+                      </div>
                     </SelectItem>
                   ) : (
                     availableRooms.map((room) => (
                       <SelectItem key={room.id} value={room.id.toString()}>
-                        {room.room_number} - {room.name}
-                        <Badge variant="outline" className="ml-2">
-                          Max {room.max_occupancy}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Bed className="h-4 w-4" />
+                          Quarto {room.room_number} - {room.name}
+                          <Badge variant="outline" className="ml-2">
+                            {room.max_occupancy} pessoas
+                          </Badge>
+                        </div>
                       </SelectItem>
                     ))
                   )}
                 </SelectContent>
               </Select>
               {errors.room_id && (
-                <p className="text-sm text-red-600">{errors.room_id.message}</p>
+                <p className="text-sm text-red-600 mt-1">{errors.room_id.message}</p>
               )}
             </div>
           </div>
 
-          {/* Hóspede */}
+          {/* Informações do Hóspede */}
           <div className="space-y-4">
-            <h4 className="font-medium flex items-center gap-2">
-              <User className="h-4 w-4" />
-              Dados do Hóspede
-            </h4>
+            <div className="flex items-center gap-2 text-lg font-medium">
+              <User className="h-5 w-5" />
+              Informações do Hóspede
+            </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -265,91 +348,155 @@ export default function RoomMapQuickBooking({
                 <Input
                   id="guest_name"
                   {...register('guest_name')}
+                  disabled={submitting}
                   placeholder="Nome do hóspede"
                 />
                 {errors.guest_name && (
-                  <p className="text-sm text-red-600">{errors.guest_name.message}</p>
+                  <p className="text-sm text-red-600 mt-1">{errors.guest_name.message}</p>
                 )}
               </div>
 
               <div>
-                <Label htmlFor="guest_email" className="flex items-center gap-2">
-                  <Mail className="h-4 w-4" />
-                  Email
-                </Label>
+                <Label htmlFor="guest_phone">Telefone</Label>
+                <Input
+                  id="guest_phone"
+                  {...register('guest_phone')}
+                  disabled={submitting}
+                  placeholder="(11) 99999-9999"
+                />
+                {errors.guest_phone && (
+                  <p className="text-sm text-red-600 mt-1">{errors.guest_phone.message}</p>
+                )}
+              </div>
+
+              <div className="md:col-span-2">
+                <Label htmlFor="guest_email">Email</Label>
                 <Input
                   id="guest_email"
                   type="email"
                   {...register('guest_email')}
+                  disabled={submitting}
                   placeholder="email@exemplo.com"
                 />
                 {errors.guest_email && (
-                  <p className="text-sm text-red-600">{errors.guest_email.message}</p>
+                  <p className="text-sm text-red-600 mt-1">{errors.guest_email.message}</p>
                 )}
               </div>
-            </div>
-
-            <div>
-              <Label htmlFor="guest_phone" className="flex items-center gap-2">
-                <Phone className="h-4 w-4" />
-                Telefone
-              </Label>
-              <Input
-                id="guest_phone"
-                {...register('guest_phone')}
-                placeholder="(11) 99999-9999"
-              />
             </div>
           </div>
 
-          {/* Reserva */}
+          {/* Datas da Reserva */}
           <div className="space-y-4">
-            <h4 className="font-medium flex items-center gap-2">
-              <Calendar className="h-4 w-4" />
-              Detalhes da Reserva
-            </h4>
+            <div className="flex items-center gap-2 text-lg font-medium">
+              <CalendarIcon className="h-5 w-5" />
+              Período da Estadia
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Check-in */}
               <div>
-                <Label htmlFor="check_in_date">Check-in *</Label>
-                <Input
-                  id="check_in_date"
-                  type="date"
-                  {...register('check_in_date')}
-                />
+                <Label>Data de Check-in *</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !checkInDate && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {checkInDate 
+                        ? format(checkInDate, "dd/MM/yyyy", { locale: ptBR }) 
+                        : "Selecionar data"
+                      }
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={checkInDate}
+                      onSelect={handleCheckInSelect}
+                      disabled={(date) => date < new Date(new Date().toDateString())}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
                 {errors.check_in_date && (
-                  <p className="text-sm text-red-600">{errors.check_in_date.message}</p>
+                  <p className="text-sm text-red-600 mt-1">{errors.check_in_date.message}</p>
                 )}
               </div>
 
+              {/* Check-out */}
               <div>
-                <Label htmlFor="check_out_date">Check-out *</Label>
-                <Input
-                  id="check_out_date"
-                  type="date"
-                  {...register('check_out_date')}
-                />
+                <Label>Data de Check-out *</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !checkOutDate && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {checkOutDate 
+                        ? format(checkOutDate, "dd/MM/yyyy", { locale: ptBR }) 
+                        : "Selecionar data"
+                      }
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={checkOutDate}
+                      onSelect={handleCheckOutSelect}
+                      disabled={(date) => !checkInDate || date <= checkInDate}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
                 {errors.check_out_date && (
-                  <p className="text-sm text-red-600">{errors.check_out_date.message}</p>
+                  <p className="text-sm text-red-600 mt-1">{errors.check_out_date.message}</p>
                 )}
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Resumo da estadia */}
+            {nights > 0 && (
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between text-sm">
+                    <span>Período da estadia:</span>
+                    <span className="font-medium">
+                      {nights} noite{nights !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Ocupação */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-lg font-medium">
+              <Users className="h-5 w-5" />
+              Ocupação
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="adults" className="flex items-center gap-2">
-                  <Users className="h-4 w-4" />
-                  Adultos *
-                </Label>
+                <Label htmlFor="adults">Adultos *</Label>
                 <Input
                   id="adults"
                   type="number"
                   min="1"
                   max="10"
                   {...register('adults', { valueAsNumber: true })}
+                  disabled={submitting}
                 />
                 {errors.adults && (
-                  <p className="text-sm text-red-600">{errors.adults.message}</p>
+                  <p className="text-sm text-red-600 mt-1">{errors.adults.message}</p>
                 )}
               </div>
 
@@ -361,29 +508,20 @@ export default function RoomMapQuickBooking({
                   min="0"
                   max="10"
                   {...register('children', { valueAsNumber: true })}
+                  disabled={submitting}
                 />
                 {errors.children && (
-                  <p className="text-sm text-red-600">{errors.children.message}</p>
+                  <p className="text-sm text-red-600 mt-1">{errors.children.message}</p>
                 )}
-              </div>
-
-              <div className="flex items-end">
-                <div className="text-sm text-gray-600">
-                  Total: {totalGuests} hóspede{totalGuests !== 1 ? 's' : ''}
-                  {currentRoom && (
-                    <div className="text-xs">
-                      Capacidade: {currentRoom.max_occupancy}
-                    </div>
-                  )}
-                </div>
               </div>
             </div>
 
+            {/* Alerta de capacidade */}
             {isOverCapacity && (
               <Alert variant="destructive">
                 <AlertTriangle className="h-4 w-4" />
                 <AlertDescription>
-                  Número de hóspedes ({totalGuests}) excede a capacidade do quarto ({currentRoom?.max_occupancy})
+                  O número de hóspedes ({totalGuests}) excede a capacidade máxima do quarto ({currentRoom?.max_occupancy}).
                 </AlertDescription>
               </Alert>
             )}
@@ -391,34 +529,42 @@ export default function RoomMapQuickBooking({
 
           {/* Valores */}
           <div className="space-y-4">
-            <h4 className="font-medium flex items-center gap-2">
-              <DollarSign className="h-4 w-4" />
+            <div className="flex items-center gap-2 text-lg font-medium">
+              <DollarSign className="h-5 w-5" />
               Valores
-            </h4>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="rate">Tarifa por Noite</Label>
+                <Label htmlFor="rate">Taxa por Noite (R$)</Label>
                 <Input
                   id="rate"
                   type="number"
                   min="0"
                   step="0.01"
                   {...register('rate', { valueAsNumber: true })}
-                  placeholder="0,00"
+                  disabled={submitting}
+                  placeholder="0.00"
                 />
+                {errors.rate && (
+                  <p className="text-sm text-red-600 mt-1">{errors.rate.message}</p>
+                )}
               </div>
 
               <div>
-                <Label htmlFor="total_amount">Valor Total</Label>
+                <Label htmlFor="total_amount">Valor Total (R$)</Label>
                 <Input
                   id="total_amount"
                   type="number"
                   min="0"
                   step="0.01"
                   {...register('total_amount', { valueAsNumber: true })}
-                  placeholder="0,00"
+                  disabled={submitting}
+                  placeholder="0.00"
                 />
+                {errors.total_amount && (
+                  <p className="text-sm text-red-600 mt-1">{errors.total_amount.message}</p>
+                )}
               </div>
             </div>
           </div>
@@ -429,13 +575,16 @@ export default function RoomMapQuickBooking({
             <Textarea
               id="notes"
               {...register('notes')}
-              placeholder="Observações adicionais sobre a reserva..."
+              disabled={submitting}
+              placeholder="Observações sobre a reserva..."
               rows={3}
             />
+            {errors.notes && (
+              <p className="text-sm text-red-600 mt-1">{errors.notes.message}</p>
+            )}
           </div>
 
-          {/* Ações */}
-          <div className="flex justify-end gap-2 pt-4">
+          <DialogFooter>
             <Button
               type="button"
               variant="outline"
@@ -446,7 +595,7 @@ export default function RoomMapQuickBooking({
             </Button>
             <Button
               type="submit"
-              disabled={submitting || loading || isOverCapacity}
+              disabled={submitting || isOverCapacity}
             >
               {submitting ? (
                 <>
@@ -457,7 +606,7 @@ export default function RoomMapQuickBooking({
                 'Criar Reserva'
               )}
             </Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
