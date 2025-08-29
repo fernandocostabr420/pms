@@ -155,9 +155,9 @@ export default function QuickBookingModal({
         adults: watchedValues.adults,
         children: watchedValues.children,
       });
-      
+
       setAvailableRooms(response.available_rooms);
-      
+
       if (!response.available) {
         toast({
           title: 'Sem disponibilidade',
@@ -181,8 +181,13 @@ export default function QuickBookingModal({
   const onSubmit = async (data: QuickBookingFormData) => {
     try {
       setSubmitting(true);
-      
-      const rooms = data.selected_rooms.map(roomId => ({ room_id: roomId }));
+
+      // CORREÇÃO: Incluir as datas de check-in e check-out para cada quarto
+      const rooms = data.selected_rooms.map(roomId => ({
+        room_id: roomId,
+        check_in_date: data.check_in_date,
+        check_out_date: data.check_out_date
+      }));
 
       await apiClient.createQuickReservation({
         guest_name: data.guest_name,
@@ -193,7 +198,7 @@ export default function QuickBookingModal({
         check_out_date: data.check_out_date,
         adults: data.adults,
         children: data.children,
-        rooms: rooms,
+        rooms: rooms, // Agora com as datas incluídas
         total_amount: data.total_amount || 0,
         source: data.source || 'direct',
         guest_requests: data.notes || undefined,

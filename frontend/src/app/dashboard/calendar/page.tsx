@@ -1,7 +1,7 @@
 // frontend/src/app/dashboard/calendar/page.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -24,13 +24,9 @@ import CalendarView from '@/components/calendar/CalendarView';
 import CalendarHeader from '@/components/calendar/CalendarHeader';
 import QuickBookingModal from '@/components/calendar/QuickBookingModal';
 import { CalendarFilters } from '@/types/calendar';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { PropertyResponse } from '@/types/api';
+import apiClient from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 
 export default function CalendarPage() {
   const {
@@ -47,8 +43,38 @@ export default function CalendarPage() {
     refreshData
   } = useCalendarData();
 
+  // Estados para modal de reserva rápida
   const [isQuickBookingOpen, setIsQuickBookingOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  
+  // Estados para propriedades
+  const [properties, setProperties] = useState<PropertyResponse[]>([]);
+  const [loadingProperties, setLoadingProperties] = useState(true);
+  
+  const { toast } = useToast();
+
+  // Carregar propriedades no carregamento inicial
+  useEffect(() => {
+    const loadProperties = async () => {
+      try {
+        setLoadingProperties(true);
+        const response = await apiClient.getProperties({ per_page: 100 });
+        setProperties(response.properties || []);
+      } catch (error) {
+        console.error('Erro ao carregar propriedades:', error);
+        setProperties([]);
+        toast({
+          title: "Erro",
+          description: "Não foi possível carregar as propriedades",
+          variant: "destructive",
+        });
+      } finally {
+        setLoadingProperties(false);
+      }
+    };
+
+    loadProperties();
+  }, [toast]);
 
   // Handler para abrir modal de reserva rápida
   const handleQuickBooking = (date?: Date) => {
@@ -63,6 +89,7 @@ export default function CalendarPage() {
     updateFilters(newFilters);
   };
 
+  // Renderização do estado de loading inicial
   if (loading && !calendarMonth) {
     return (
       <div className="space-y-6">
@@ -90,6 +117,7 @@ export default function CalendarPage() {
     );
   }
 
+  // Renderização do estado de erro
   if (error) {
     return (
       <div className="space-y-6">
@@ -148,86 +176,86 @@ export default function CalendarPage() {
         </div>
       </div>
 
-      {/* Stats Cards */}
+      {/* Cards de Estatísticas */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <Card>
-            <CardContent className="p-4">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-blue-600">
-                  {stats.total_reservations}
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Reservas Totais</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {stats.total_reservations || 0}
+                  </p>
                 </div>
-                <div className="text-xs text-gray-600">Total Reservas</div>
+                <div className="h-8 w-8 bg-blue-100 rounded-full flex items-center justify-center">
+                  <CalendarIcon className="h-4 w-4 text-blue-600" />
+                </div>
               </div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardContent className="p-4">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-600">
-                  {stats.checked_in}
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Check-ins Hoje</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {stats.arriving_today || 0}
+                  </p>
                 </div>
-                <div className="text-xs text-gray-600">Ocupados</div>
+                <div className="h-8 w-8 bg-green-100 rounded-full flex items-center justify-center">
+                  <ArrowRight className="h-4 w-4 text-green-600" />
+                </div>
               </div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardContent className="p-4">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-orange-600">
-                  {stats.arriving_today}
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Check-outs Hoje</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {stats.departing_today || 0}
+                  </p>
                 </div>
-                <div className="text-xs text-gray-600">Chegadas Hoje</div>
+                <div className="h-8 w-8 bg-yellow-100 rounded-full flex items-center justify-center">
+                  <ArrowLeft className="h-4 w-4 text-yellow-600" />
+                </div>
               </div>
             </CardContent>
           </Card>
 
           <Card>
-            <CardContent className="p-4">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-purple-600">
-                  {stats.departing_today}
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Taxa de Ocupação</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {stats.occupancy_rate ? `${stats.occupancy_rate}%` : '0%'}
+                  </p>
                 </div>
-                <div className="text-xs text-gray-600">Saídas Hoje</div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-gray-600">
-                  {stats.available_rooms}
+                <div className="h-8 w-8 bg-purple-100 rounded-full flex items-center justify-center">
+                  <Home className="h-4 w-4 text-purple-600" />
                 </div>
-                <div className="text-xs text-gray-600">Disponíveis</div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-indigo-600">
-                  {Math.round(stats.occupancy_rate)}%
-                </div>
-                <div className="text-xs text-gray-600">Ocupação</div>
               </div>
             </CardContent>
           </Card>
         </div>
       )}
 
-      {/* Calendar Header Controls */}
+      {/* Calendar Header Controls - CORRIGIDO */}
       <CalendarHeader
         currentDate={currentDate}
-        onPreviousMonth={goToPreviousMonth}
+        onPrevMonth={goToPreviousMonth}
         onNextMonth={goToNextMonth}
         onToday={goToToday}
         filters={filters}
         onFiltersChange={handleFilterChange}
+        properties={properties}
         loading={loading}
+        loadingProperties={loadingProperties}
       />
 
       {/* Calendar Grid */}

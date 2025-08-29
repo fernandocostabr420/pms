@@ -63,6 +63,9 @@ const reservationSchema = z.object({
   rooms: z.array(z.object({
     room_id: z.number().min(1, 'Selecione um quarto'),
     rate_per_night: z.number().min(0, 'Tarifa deve ser positiva').optional(),
+    // ADICIONADO: datas para cada quarto (serão preenchidas automaticamente)
+    check_in_date: z.string().optional(),
+    check_out_date: z.string().optional(),
   })).min(1, 'Selecione pelo menos um quarto'),
 });
 
@@ -247,22 +250,34 @@ export default function ReservationModal({
 
   const onSubmit = async (data: ReservationFormData) => {
     setLoading(true);
-    
+
     try {
+      // CORREÇÃO: Adicionar as datas para cada quarto
+      const roomsWithDates = data.rooms.map(room => ({
+        ...room,
+        check_in_date: data.check_in_date,
+        check_out_date: data.check_out_date
+      }));
+
+      const reservationData = {
+        ...data,
+        rooms: roomsWithDates // Quartos agora têm as datas incluídas
+      };
+
       if (isEditing && reservation) {
-        await apiClient.updateReservation(reservation.id, data as ReservationUpdate);
+        await apiClient.updateReservation(reservation.id, reservationData as ReservationUpdate);
         toast({
           title: "Sucesso",
           description: "Reserva atualizada com sucesso",
         });
       } else {
-        await apiClient.createReservation(data as ReservationCreate);
+        await apiClient.createReservation(reservationData as ReservationCreate);
         toast({
           title: "Sucesso",
           description: "Reserva criada com sucesso",
         });
       }
-      
+
       onSuccess();
     } catch (error: any) {
       console.error('Erro ao salvar reserva:', error);
