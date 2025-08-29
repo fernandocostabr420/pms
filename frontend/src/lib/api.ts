@@ -23,6 +23,16 @@ import {
   RoomAvailabilityCheckResponse,
 } from '@/types/room-availability';
 
+import {
+  MapResponse,
+  MapStatsResponse,
+  MapFilters,
+  MapBulkOperation,
+  MapQuickBooking,
+  RoomAvailabilityData,
+  CategorySummaryData,
+} from '@/types/room-map';
+
 
 
 class PMSApiClient {
@@ -813,6 +823,96 @@ async mergeGuests(primaryGuestId: number, secondaryGuestId: number) {
   return response.data;
 }
 
+// ===== MAPA DE QUARTOS API =====
+
+async getMapData(filters: MapFilters): Promise<MapResponse> {
+  const params = new URLSearchParams();
+  params.append('start_date', filters.start_date);
+  params.append('end_date', filters.end_date);
+  
+  if (filters.property_id) {
+    params.append('property_id', filters.property_id.toString());
+  }
+  
+  if (filters.room_type_ids && filters.room_type_ids.length > 0) {
+    params.append('room_type_ids', filters.room_type_ids.join(','));
+  }
+  
+  if (filters.include_out_of_order !== undefined) {
+    params.append('include_out_of_order', filters.include_out_of_order.toString());
+  }
+  
+  if (filters.include_cancelled !== undefined) {
+    params.append('include_cancelled', filters.include_cancelled.toString());
+  }
+  
+  if (filters.status_filter && filters.status_filter.length > 0) {
+    params.append('status_filter', filters.status_filter.join(','));
+  }
+
+  const response = await this.client.get<MapResponse>(`/map/data?${params}`);
+  return response.data;
+}
+
+async getMapStats(
+  startDate: string, 
+  endDate: string, 
+  propertyId?: number
+): Promise<MapStatsResponse> {
+  const params = new URLSearchParams();
+  params.append('start_date', startDate);
+  params.append('end_date', endDate);
+  
+  if (propertyId) {
+    params.append('property_id', propertyId.toString());
+  }
+
+  const response = await this.client.get<MapStatsResponse>(`/map/stats?${params}`);
+  return response.data;
+}
+
+async executeBulkOperation(operation: MapBulkOperation): Promise<any> {
+  const response = await this.client.post('/map/bulk-operation', operation);
+  return response.data;
+}
+
+async createQuickBooking(booking: MapQuickBooking): Promise<any> {
+  const response = await this.client.post('/map/quick-booking', booking);
+  return response.data;
+}
+
+async getRoomAvailability(
+  roomId: number,
+  startDate: string,
+  endDate: string
+): Promise<RoomAvailabilityData> {
+  const params = new URLSearchParams();
+  params.append('start_date', startDate);
+  params.append('end_date', endDate);
+
+  const response = await this.client.get<RoomAvailabilityData>(
+    `/map/room-availability/${roomId}?${params}`
+  );
+  return response.data;
+}
+
+async getCategorySummary(
+  startDate: string,
+  endDate: string,
+  propertyId?: number
+): Promise<CategorySummaryData[]> {
+  const params = new URLSearchParams();
+  params.append('start_date', startDate);
+  params.append('end_date', endDate);
+  
+  if (propertyId) {
+    params.append('property_id', propertyId.toString());
+  }
+
+  const response = await this.client.get<CategorySummaryData[]>(`/map/category-summary?${params}`);
+  return response.data;
+}
+
   // ===== DASHBOARD STATS =====
   
   async getDashboardStats() {
@@ -841,6 +941,8 @@ async mergeGuests(primaryGuestId: number, secondaryGuestId: number) {
     });
     return response.data;
   }
+
+  
 
   // ===== CALENDAR METHODS =====
 

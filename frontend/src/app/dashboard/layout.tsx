@@ -25,7 +25,8 @@ import {
   Settings,
   LogOut,
   User,
-  Menu
+  Menu,
+  Map // ✅ NOVO IMPORT
 } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -33,12 +34,13 @@ import { useState } from 'react';
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Calendário', href: '/dashboard/calendar', icon: Calendar },
+  { name: 'Mapa de Quartos', href: '/dashboard/room-map', icon: Map }, // ✅ NOVA OPÇÃO
   { name: 'Reservas', href: '/dashboard/reservations', icon: Calendar },
   { name: 'Hóspedes', href: '/dashboard/guests', icon: Users },
   { name: 'Propriedades', href: '/dashboard/properties', icon: Building },
   { name: 'Tipos de Quartos', href: '/dashboard/room-types', icon: Tag },
   { name: 'Quartos', href: '/dashboard/rooms', icon: Bed },
-  { name: 'Disponibilidade', href: '/dashboard/room-availability', icon: Calendar }, // ✅ NOVO ITEM
+  { name: 'Disponibilidade', href: '/dashboard/room-availability', icon: Calendar },
 ];
 
 export default function DashboardLayout({
