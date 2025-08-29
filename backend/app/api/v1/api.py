@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     auth, users, tenants, audit, properties, 
     room_types, rooms, guests, reservations,
-    room_availability  # ✅ NOVO IMPORT
+    room_availability, map  # ✅ NOVO IMPORT
 )
 
 api_router = APIRouter()
@@ -59,11 +59,18 @@ api_router.include_router(
     tags=["Quartos"]
 )
 
-# ✅ NOVO ROUTER - ROOM AVAILABILITY
+# Incluir rotas de disponibilidade de quartos
 api_router.include_router(
     room_availability.router,
     prefix="/room-availability", 
     tags=["Disponibilidade de Quartos"]
+)
+
+# ✅ NOVO ROUTER - MAPA DE QUARTOS
+api_router.include_router(
+    map.router,
+    prefix="/map", 
+    tags=["Mapa de Quartos"]
 )
 
 # Incluir rotas de hóspedes
