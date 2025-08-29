@@ -99,7 +99,7 @@ export default function DashboardLayout({
         <SidebarContent />
       </div>
 
-      {/* Main content - ALTURA COMPLETA */}
+      {/* Main content - ALTURA COMPLETA COM ESPAÇAMENTO MÍNIMO */}
       <div className="md:pl-64 flex flex-col flex-1 min-h-screen">
         {/* Top header */}
         <div className="sticky top-0 z-10 flex-shrink-0 flex h-16 bg-white shadow">
@@ -161,9 +161,11 @@ export default function DashboardLayout({
           </div>
         </div>
 
-        {/* Page content - ALTURA COMPLETA SEM PADDING */}
-        <main className="flex-1 overflow-hidden">
-          {children}
+        {/* Page content - ALTURA COMPLETA COM PADDING MÍNIMO */}
+        <main className="flex-1 overflow-hidden p-4">
+          <div className="h-full">
+            {children}
+          </div>
         </main>
       </div>
     </div>

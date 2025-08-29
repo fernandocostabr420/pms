@@ -313,53 +313,216 @@
   }
 }
 
-/* ROOM MAP SPECIFIC STYLES */
-.room-map-container {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
+/* Adicione ao final do arquivo frontend/src/app/globals.css */
 
+/* ===== ROOM MAP HEADER STYLES - DESIGN LIMPO E FUNCIONAL ===== */
+
+/* Header principal - fundo branco limpo */
 .room-map-header {
-  flex-shrink: 0;
+  background: #ffffff;
+  border-bottom: 2px solid #e5e7eb;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.room-map-content {
-  flex: 1;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+/* Coluna "Quartos" - clara e legível */
+.room-map-header-title {
+  background: #f9fafb;
+  border-right: 2px solid #e5e7eb;
+  font-weight: 600;
+  color: #1f2937;
 }
 
-/* Remove espaçamentos desnecessários para o mapa de quartos */
-.room-map-page .space-y-6 > * + * {
-  margin-top: 0 !important;
+/* Base das células - fundo branco limpo */
+.room-map-date-cell {
+  background: #ffffff;
+  border-right: 1px solid #e5e7eb;
+  position: relative;
 }
 
-.room-map-page {
-  height: 100%;
-  padding: 0;
+/* Fim de semana (Sexta e Sábado) - fundo escuro riscado */
+.room-map-date-weekend {
+  background: 
+    repeating-linear-gradient(
+      45deg,
+      #f3f4f6 0px,
+      #f3f4f6 2px,
+      #e5e7eb 2px,
+      #e5e7eb 4px
+    );
+  border-right: 1px solid #d1d5db;
+  position: relative;
 }
 
-/* Otimizações para scroll suave */
-.room-map-scroll {
-  scroll-behavior: smooth;
+/* Hoje - destaque amarelo/dourado */
+.room-map-date-today {
+  background: #fefce8 !important;
+  border-right: 1px solid #fde047;
+  position: relative;
+  box-shadow: inset 0 0 0 1px #fbbf24;
 }
 
-.room-map-scroll::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+.room-map-date-today::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: #f59e0b;
 }
 
-.room-map-scroll::-webkit-scrollbar-track {
-  background: #f1f1f1;
+.room-map-date-today::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: #f59e0b;
 }
 
-.room-map-scroll::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 3px;
+/* Tipografia - clara e legível */
+.room-map-day-name {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+  line-height: 1.2;
 }
 
-.room-map-scroll::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
+.room-map-day-number {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  margin-top: 1px;
+}
+
+/* Cores para dias normais - legível */
+.room-map-date-cell:not(.room-map-date-weekend):not(.room-map-date-today) .room-map-day-name {
+  color: #6b7280;
+}
+
+.room-map-date-cell:not(.room-map-date-weekend):not(.room-map-date-today) .room-map-day-number {
+  color: #374151;
+}
+
+/* Fim de semana - texto escuro legível */
+.room-map-date-weekend .room-map-day-name {
+  color: #374151;
+  font-weight: 700;
+}
+
+.room-map-date-weekend .room-map-day-number {
+  color: #1f2937;
+  font-weight: 800;
+  font-size: 19px;
+}
+
+/* Hoje - laranja/dourado legível */
+.room-map-date-today .room-map-day-name {
+  color: #d97706;
+  font-weight: 700;
+}
+
+.room-map-date-today .room-map-day-number {
+  color: #92400e;
+  font-weight: 800;
+  font-size: 19px;
+}
+
+/* Hover sutil */
+.room-map-date-cell:hover {
+  background: #f8fafc;
+}
+
+.room-map-date-weekend:hover {
+  background: 
+    repeating-linear-gradient(
+      45deg,
+      #e5e7eb 0px,
+      #e5e7eb 2px,
+      #d1d5db 2px,
+      #d1d5db 4px
+    );
+}
+
+.room-map-date-today:hover {
+  background: #fef3c7 !important;
+}
+
+/* Responsividade */
+@media (max-width: 1024px) {
+  .room-map-day-name {
+    font-size: 10px;
+    margin-bottom: 2px;
+  }
+  
+  .room-map-day-number {
+    font-size: 17px;
+  }
+  
+  .room-map-date-weekend .room-map-day-number,
+  .room-map-date-today .room-map-day-number {
+    font-size: 18px;
+  }
+}
+
+@media (max-width: 768px) {
+  .room-map-day-name {
+    font-size: 9px;
+    margin-bottom: 2px;
+  }
+  
+  .room-map-day-number {
+    font-size: 16px;
+  }
+  
+  .room-map-date-weekend .room-map-day-number,
+  .room-map-date-today .room-map-day-number {
+    font-size: 17px;
+  }
+}
+
+/* Scroll limpo */
+.room-map-header-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.room-map-header-scroll::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.room-map-header-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 2px;
+}
+
+.room-map-header-scroll::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ===== CÉLULAS DOS QUARTOS - FIM DE SEMANA ===== */
+
+/* Células de fim de semana nos quartos - mesmo padrão riscado */
+.room-map-cell-weekend {
+  background: 
+    repeating-linear-gradient(
+      45deg,
+      #f9fafb 0px,
+      #f9fafb 2px,
+      #f3f4f6 2px,
+      #f3f4f6 4px
+    ) !important;
+}
+
+.room-map-cell-weekend:hover {
+  background: 
+    repeating-linear-gradient(
+      45deg,
+      #f3f4f6 0px,
+      #f3f4f6 2px,
+      #e5e7eb 2px,
+      #e5e7eb 4px
+    ) !important;
 }

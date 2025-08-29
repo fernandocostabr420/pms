@@ -56,7 +56,7 @@ export default function RoomMapGrid({
         date: dateStr,
         dayOfWeek: format(date, 'EEE', { locale: ptBR }),
         dayOfMonth: format(date, 'd'),
-        isWeekend: date.getDay() === 0 || date.getDay() === 6,
+        isWeekend: date.getDay() === 5 || date.getDay() === 6, // sexta = 5, sábado = 6
         isToday: format(date, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
       };
     });
@@ -71,130 +71,13 @@ export default function RoomMapGrid({
 
   // ✅ CORREÇÃO 3: Funções render APÓS todos os hooks
   
-  // Renderizar célula de reserva
-  const renderReservationCell = (
-    room: MapRoomData, 
-    date: string, 
-    reservation?: MapReservationResponse
-  ) => {
-    const isToday = format(new Date(), 'yyyy-MM-dd') === date;
-    const isWeekend = dateHeaders.find(h => h.date === date)?.isWeekend;
-
-    if (!reservation) {
-      // Célula vazia - disponível
-      const isEmpty = room.is_operational && !room.is_out_of_order;
-      
-      return (
-        <div
-          key={date}
-          onClick={() => onCellClick?.(room, date)}
-          className={cn(
-            "w-16 h-5 border-r border-gray-200 cursor-pointer transition-colors flex-shrink-0 min-w-[4rem]",
-            "hover:bg-blue-50 flex items-center justify-center",
-            isToday && "border-l-2 border-l-blue-500",
-            isWeekend && "bg-gray-50",
-            room.is_out_of_order && "bg-red-50 cursor-not-allowed",
-            !room.is_operational && "bg-gray-100 cursor-not-allowed"
-          )}
-          title={
-            room.is_out_of_order 
-              ? "Quarto fora de funcionamento" 
-              : !room.is_operational 
-              ? "Quarto inativo" 
-              : "Disponível - Clique para reservar"
-          }
-        >
-          {room.is_out_of_order && (
-            <Wrench className="h-2 w-2 text-red-500" />
-          )}
-        </div>
-      );
-    }
-
-    // Determinar posição da reserva
-    const checkIn = new Date(reservation.check_in_date + 'T00:00:00');
-    const checkOut = new Date(reservation.check_out_date + 'T00:00:00');
-    const currentDate = new Date(date + 'T00:00:00');
-    
-    const isFirstDay = format(checkIn, 'yyyy-MM-dd') === date;
-    const isLastDay = format(checkOut, 'yyyy-MM-dd') === date;
-    const isMiddleDay = currentDate > checkIn && currentDate < checkOut;
-
-    if (!isFirstDay && !isLastDay && !isMiddleDay) return null;
-
-    // Cores por status
-    const getReservationColor = (status: string) => {
-      switch (status) {
-        case 'confirmed':
-          return 'bg-blue-500 text-white';
-        case 'checked_in':
-          return 'bg-green-500 text-white';
-        case 'pending':
-          return 'bg-yellow-500 text-white';
-        case 'cancelled':
-          return 'bg-red-500 text-white';
-        default:
-          return 'bg-gray-500 text-white';
-      }
-    };
-
-    return (
-      <div
-        key={`${date}-${reservation.id}`}
-        onClick={() => onReservationClick?.(reservation, room)}
-        className={cn(
-          "w-16 h-5 border-r border-gray-200 cursor-pointer relative flex-shrink-0 min-w-[4rem]",
-          "flex items-center justify-center text-[10px] font-medium",
-          getReservationColor(reservation.status),
-          isToday && "border-l-2 border-l-blue-600",
-          isFirstDay && "rounded-l-sm",
-          isLastDay && "rounded-r-sm"
-        )}
-        title={`${reservation.guest_name} - ${reservation.reservation_number}`}
-      >
-        {/* Conteúdo da reserva - apenas no primeiro dia */}
-        {isFirstDay && (
-          <div className="flex items-center justify-center px-0.5 text-center overflow-hidden">
-            <span className="text-[8px] font-medium truncate leading-tight">
-              {reservation.guest_name.split(' ')[0].substring(0, 4)}
-            </span>
-          </div>
-        )}
-
-        {/* Indicadores de chegada/saída - menores */}
-        {reservation.is_arrival && (
-          <div className="absolute top-0 left-0 w-1.5 h-1.5 bg-green-400 rounded-full" />
-        )}
-        {reservation.is_departure && (
-          <div className="absolute top-0 right-0 w-1.5 h-1.5 bg-red-400 rounded-full" />
-        )}
-      </div>
-    );
-  };
-
-  // Renderizar linha do quarto
+  // Renderizar linha do quarto com blocos contínuos
   const renderRoomRow = (room: MapRoomData) => {
-    // Mapear reservas por data
-    const reservationsByDate: Record<string, MapReservationResponse | undefined> = {};
-    
-    room.reservations.forEach(reservation => {
-      const checkIn = new Date(reservation.check_in_date + 'T00:00:00');
-      const checkOut = new Date(reservation.check_out_date + 'T00:00:00');
-      
-      // Preencher todas as datas da reserva
-      for (let d = new Date(checkIn); d < checkOut; d.setDate(d.getDate() + 1)) {
-        const dateStr = format(d, 'yyyy-MM-dd');
-        if (dateHeaders.some(h => h.date === dateStr)) {
-          reservationsByDate[dateStr] = reservation;
-        }
-      }
-    });
-
     return (
-      <div key={room.id} className="flex border-b border-gray-100 last:border-b-0 border-b-[0.5px]">
-        {/* ✅ Info do quarto - ALTURA AUMENTADA EM 20% */}
+      <div key={room.id} className="flex border-b border-gray-100 last:border-b-0 border-b-[0.5px] relative">
+        {/* Info do quarto - ALTURA AUMENTADA MAIS 10% */}
         <div 
-          className="w-48 px-2 py-1.5 bg-white border-r border-gray-200 flex items-center justify-between cursor-pointer hover:bg-gray-50 flex-shrink-0 h-6"
+          className="w-48 px-2 py-1.5 bg-white border-r border-gray-200 flex items-center justify-between cursor-pointer hover:bg-gray-50 flex-shrink-0 h-8"
           onClick={() => onRoomClick?.(room)}
           title={`${room.name}${room.floor ? ` - Andar ${room.floor}` : ''} - ${Math.round(room.occupancy_rate)}% ocupado`}
         >
@@ -214,11 +97,138 @@ export default function RoomMapGrid({
           </div>
         </div>
 
-        {/* Células de data */}
-        <div className="flex">
-          {dateHeaders.map(header => 
-            renderReservationCell(room, header.date, reservationsByDate[header.date])
-          )}
+        {/* Container para células vazias e reservas */}
+        <div className="flex relative">
+          {/* Células vazias de fundo */}
+          {dateHeaders.map(header => {
+            const isToday = header.isToday;
+            const isWeekend = header.isWeekend;
+            
+            return (
+              <div
+                key={header.date}
+                onClick={() => onCellClick?.(room, header.date)}
+                className={cn(
+                  "w-16 h-8 border-r border-gray-200 cursor-pointer transition-colors flex-shrink-0 min-w-[4rem]",
+                  "hover:bg-blue-50 flex items-center justify-center",
+                  isToday && "border-l-2 border-l-blue-500",
+                  isWeekend && "room-map-cell-weekend",
+                  room.is_out_of_order && "bg-red-50 cursor-not-allowed",
+                  !room.is_operational && "bg-gray-100 cursor-not-allowed"
+                )}
+                title={
+                  room.is_out_of_order 
+                    ? "Quarto fora de funcionamento" 
+                    : !room.is_operational 
+                    ? "Quarto inativo" 
+                    : "Disponível - Clique para reservar"
+                }
+              >
+                {room.is_out_of_order && (
+                  <Wrench className="h-2 w-2 text-red-500" />
+                )}
+              </div>
+            );
+          })}
+          
+          {/* Blocos contínuos de reservas posicionados absolutamente */}
+          {room.reservations.map(reservation => {
+            const checkIn = new Date(reservation.check_in_date + 'T00:00:00');
+            const checkOut = new Date(reservation.check_out_date + 'T00:00:00');
+            
+            // Encontrar índices das datas de início e fim
+            const startIndex = dateHeaders.findIndex(h => h.date === format(checkIn, 'yyyy-MM-dd'));
+            const endIndex = dateHeaders.findIndex(h => h.date === format(checkOut, 'yyyy-MM-dd'));
+            
+            // Se a reserva não está no período visível, não renderizar
+            if (startIndex === -1) {
+              return null;
+            }
+            
+            // Calcular posição e largura como um bloco único contínuo
+            const cellWidth = 64; // 64px = w-16
+            
+            // Determinar quais dias mostrar
+            let actualEndIndex = endIndex;
+            if (endIndex === -1 || endIndex < startIndex) {
+              // Check-out fora do período visível, mostrar até o final visível
+              actualEndIndex = dateHeaders.length - 1;
+            }
+            
+            // Calcular início e largura do bloco contínuo
+            let blockLeft, blockWidth;
+            
+            if (startIndex === actualEndIndex) {
+              // Caso especial: mesmo dia (não deveria acontecer em hotéis normais)
+              blockLeft = startIndex * cellWidth + cellWidth / 2;
+              blockWidth = cellWidth / 2;
+            } else {
+              // Bloco contínuo do meio do primeiro dia ao meio do último dia
+              blockLeft = startIndex * cellWidth + cellWidth / 2; // Começar do meio do primeiro dia
+              
+              // Calcular até onde vai: meio do último dia
+              const blockEnd = actualEndIndex * cellWidth + cellWidth / 2;
+              blockWidth = blockEnd - blockLeft;
+            }
+            
+            // Criar clip-path para bordas diagonais
+            const clipPath = `polygon(
+              8px 0%, 
+              100% 0%, 
+              calc(100% - 8px) 100%, 
+              0% 100%
+            )`;
+            
+            // Cores por status
+            const getReservationColor = (status: string) => {
+              switch (status) {
+                case 'confirmed':
+                  return 'bg-blue-500 text-white';
+                case 'checked_in':
+                  return 'bg-green-500 text-white';
+                case 'pending':
+                  return 'bg-yellow-500 text-white';
+                case 'cancelled':
+                  return 'bg-red-500 text-white';
+                default:
+                  return 'bg-gray-500 text-white';
+              }
+            };
+            
+            return (
+              <div
+                key={reservation.id}
+                onClick={() => onReservationClick?.(reservation, room)}
+                className={cn(
+                  "absolute cursor-pointer text-[10px] font-medium flex items-center justify-center",
+                  getReservationColor(reservation.status)
+                )}
+                style={{
+                  left: `${blockLeft}px`,
+                  width: `${blockWidth}px`,
+                  height: 'calc(100% - 20px)', // Mais margem para separação
+                  top: '10px', // Mais margem superior
+                  zIndex: 1,
+                  clipPath: clipPath,
+                  borderRadius: '0px' // Remove border-radius para clip-path funcionar
+                }}
+                title={`${reservation.guest_name} - ${reservation.reservation_number}`}
+              >
+                {/* Nome do hóspede */}
+                <span className="text-[8px] font-medium truncate leading-tight px-2">
+                  {reservation.guest_name.split(' ')[0].substring(0, 8)}
+                </span>
+                
+                {/* Indicadores de chegada/saída */}
+                {reservation.is_arrival && (
+                  <div className="absolute top-1 left-2 w-1.5 h-1.5 bg-green-400 rounded-full" />
+                )}
+                {reservation.is_departure && (
+                  <div className="absolute top-1 right-2 w-1.5 h-1.5 bg-red-400 rounded-full" />
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -282,26 +292,36 @@ export default function RoomMapGrid({
     );
   }
 
-  // ✅ RENDER PRINCIPAL
+  // ✅ RENDER PRINCIPAL - MANTENDO ESTRUTURA ORIGINAL
   return (
     <div className={cn("bg-white")} style={{ minWidth: `${totalWidth}px` }}>
-      {/* Header das datas - AJUSTADO PARA NOVA ALTURA DOS QUARTOS */}
-      <div className="flex border-b border-gray-300 bg-gray-50 sticky top-0 z-10">
-        <div className="w-48 px-2 py-1.5 border-r border-gray-300 bg-gray-50 flex-shrink-0 h-6 flex items-center">
-          <div className="font-semibold text-xs">Quartos</div>
+      {/* ✅ Header das datas - AUMENTADO EM 20% E ESTILIZADO */}
+      <div className="flex room-map-header sticky top-0 z-10">
+        {/* Coluna "Quartos" - AUMENTADO PARA h-10 */}
+        <div className="w-48 px-3 py-2 room-map-header-title flex-shrink-0 h-10 flex items-center">
+          <div className="font-bold text-sm text-gray-800">Quartos</div>
         </div>
+        
+        {/* Células das datas - AUMENTADO PARA h-10 */}
         <div className="flex">
           {dateHeaders.map(header => (
             <div 
               key={header.date}
               className={cn(
-                "w-16 px-0.5 py-0.5 text-center border-r border-gray-200 flex-shrink-0 min-w-[4rem] h-5 flex flex-col items-center justify-center",
-                header.isWeekend && "bg-gray-100",
-                header.isToday && "bg-blue-100 border-l-2 border-l-blue-500"
+                "w-16 px-2 py-2 text-center border-r border-gray-300 flex-shrink-0 min-w-[4rem] h-10 flex flex-col items-center justify-center room-map-date-cell",
+                header.isWeekend && "room-map-date-weekend",
+                header.isToday && "room-map-date-today"
               )}
             >
-              <div className="text-[8px] font-medium leading-2">{header.dayOfWeek}</div>
-              <div className="text-xs leading-2">{header.dayOfMonth}</div>
+              {/* Dia da semana */}
+              <div className="room-map-day-name">
+                {header.dayOfWeek.toUpperCase()}
+              </div>
+              
+              {/* Número do dia */}
+              <div className="room-map-day-number">
+                {header.dayOfMonth}
+              </div>
             </div>
           ))}
         </div>
