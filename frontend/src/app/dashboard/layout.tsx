@@ -26,7 +26,7 @@ import {
   LogOut,
   User,
   Menu,
-  Map // ✅ NOVO IMPORT
+  Map
 } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -34,7 +34,7 @@ import { useState } from 'react';
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Calendário', href: '/dashboard/calendar', icon: Calendar },
-  { name: 'Mapa de Quartos', href: '/dashboard/room-map', icon: Map }, // ✅ NOVA OPÇÃO
+  { name: 'Mapa de Quartos', href: '/dashboard/room-map', icon: Map },
   { name: 'Reservas', href: '/dashboard/reservations', icon: Calendar },
   { name: 'Hóspedes', href: '/dashboard/guests', icon: Users },
   { name: 'Propriedades', href: '/dashboard/properties', icon: Building },
@@ -78,7 +78,7 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex">
       {/* Sidebar Mobile Overlay */}
       {sidebarOpen && (
         <div 
@@ -99,8 +99,8 @@ export default function DashboardLayout({
         <SidebarContent />
       </div>
 
-      {/* Main content */}
-      <div className="md:pl-64 flex flex-col flex-1">
+      {/* Main content - ALTURA COMPLETA */}
+      <div className="md:pl-64 flex flex-col flex-1 min-h-screen">
         {/* Top header */}
         <div className="sticky top-0 z-10 flex-shrink-0 flex h-16 bg-white shadow">
           <button
@@ -161,13 +161,9 @@ export default function DashboardLayout({
           </div>
         </div>
 
-        {/* Page content */}
-        <main className="flex-1">
-          <div className="py-6">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
-              {children}
-            </div>
-          </div>
+        {/* Page content - ALTURA COMPLETA SEM PADDING */}
+        <main className="flex-1 overflow-hidden">
+          {children}
         </main>
       </div>
     </div>
@@ -177,7 +173,7 @@ export default function DashboardLayout({
 function SidebarContent() {
   return (
     <div className="flex flex-col h-full bg-white shadow-md">
-      <div className="flex items-center flex-shrink-0 px-4">
+      <div className="flex items-center flex-shrink-0 px-4 py-4">
         <img 
           src="/tucapms-logo.png" 
           alt="TucaPMS" 

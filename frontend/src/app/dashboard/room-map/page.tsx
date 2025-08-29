@@ -199,39 +199,55 @@ export default function RoomMapPage() {
   ) || [];
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-white">
-      {/* Header compacto fixo */}
-      <div className="flex-shrink-0 border-b bg-white px-4 py-3">
-        <div className="flex items-center justify-between">
-          {/* Título + Data */}
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-3">
-              <div className="p-1.5 bg-blue-100 rounded-lg">
-                <Map className="h-5 w-5 text-blue-600" />
+    <div className="space-y-6 pb-6">
+      {/* Header da página */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-blue-100 rounded-lg">
+            <Map className="h-6 w-6 text-blue-600" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Mapa de Quartos</h1>
+            <p className="text-gray-600">
+              Visualização de ocupação dos quartos
+            </p>
+          </div>
+        </div>
+
+        <Button onClick={handleQuickBooking} className="flex items-center gap-2">
+          <Plus className="h-4 w-4" />
+          Nova Reserva
+        </Button>
+      </div>
+
+      {/* Controles com seletor de data corrigido */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            {/* ✅ CORREÇÃO: Seletor de data inicial com Popover */}
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <CalendarIcon className="h-4 w-4 text-gray-500" />
+                <Label className="text-sm font-medium">
+                  Data inicial:
+                </Label>
               </div>
-              <div>
-                <h1 className="text-xl font-bold text-gray-900">Mapa de Quartos</h1>
-              </div>
-            </div>
-            
-            {/* Seletor de data compacto */}
-            <div className="flex items-center gap-3">
-              <Label className="text-sm font-medium text-gray-700">Data inicial:</Label>
+              
+              {/* ✅ Popover com Calendar em vez de input type="date" */}
               <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
                 <PopoverTrigger asChild>
                   <Button
                     variant="outline"
-                    size="sm"
                     className={cn(
-                      "w-40 justify-start text-left font-normal",
+                      "w-56 justify-start text-left font-normal",
                       !calendarDate && "text-muted-foreground"
                     )}
                     disabled={loading}
                   >
-                    <CalendarIcon className="mr-2 h-3 w-3" />
+                    <CalendarIcon className="mr-2 h-4 w-4" />
                     {calendarDate 
                       ? format(calendarDate, "dd/MM/yyyy", { locale: ptBR }) 
-                      : "Selecionar"
+                      : "Selecionar data"
                     }
                   </Button>
                 </PopoverTrigger>
@@ -246,10 +262,8 @@ export default function RoomMapPage() {
                 </PopoverContent>
               </Popover>
             </div>
-          </div>
 
-          {/* Ações */}
-          <div className="flex items-center gap-3">
+            {/* Botão atualizar */}
             <Button
               variant="outline"
               size="sm"
@@ -259,50 +273,46 @@ export default function RoomMapPage() {
               <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
               Atualizar
             </Button>
-            <Button onClick={handleQuickBooking} size="sm" className="flex items-center gap-2">
-              <Plus className="h-4 w-4" />
-              Nova Reserva
-            </Button>
           </div>
-        </div>
+        </CardContent>
+      </Card>
 
-        {/* Erro */}
-        {error && (
-          <Alert variant="destructive" className="mt-3">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-      </div>
+      {/* Erro */}
+      {error && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            {error}
+          </AlertDescription>
+        </Alert>
+      )}
 
-      {/* Mapa ocupando todo o espaço restante */}
-      <div className="flex-1 overflow-hidden">
-        {loading && !mapData ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
+      {/* Mapa principal */}
+      <Card>
+        <CardContent className="p-0">
+          {loading && !mapData ? (
+            <div className="p-12 text-center">
               <RefreshCw className="h-12 w-12 animate-spin text-blue-500 mx-auto mb-4" />
               <p className="text-lg text-gray-600 mb-2">Carregando mapa de quartos...</p>
               <p className="text-sm text-gray-500">
                 Período: {format(new Date(selectedStartDate), 'dd/MM/yyyy')} - {format(addDays(new Date(selectedStartDate), 30), 'dd/MM/yyyy')}
               </p>
             </div>
-          </div>
-        ) : mapData ? (
-          <div className="h-full relative">
+          ) : mapData ? (
+            <div className="relative">
             
-            <div className="h-full overflow-auto">
-              <RoomMapGrid
-                mapData={mapData}
-                onRoomClick={handleRoomClick}
-                onReservationClick={handleReservationClick}
-                onCellClick={handleCellClick}
-                loading={loading}
-              />
+              <div className="overflow-x-auto overflow-y-hidden">
+                <RoomMapGrid
+                  mapData={mapData}
+                  onRoomClick={handleRoomClick}
+                  onReservationClick={handleReservationClick}
+                  onCellClick={handleCellClick}
+                  loading={loading}
+                />
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
+          ) : (
+            <div className="p-12 text-center">
               <Map className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <p className="text-lg text-gray-600 mb-2">Nenhum dado encontrado</p>
               <p className="text-sm text-gray-500 mb-4">
@@ -313,9 +323,9 @@ export default function RoomMapPage() {
                 Carregar Dados
               </Button>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Modal de reserva rápida */}
       {isQuickBookingOpen && (

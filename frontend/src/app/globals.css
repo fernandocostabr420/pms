@@ -312,3 +312,54 @@
     @apply bg-gray-800 text-gray-200;
   }
 }
+
+/* ROOM MAP SPECIFIC STYLES */
+.room-map-container {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.room-map-header {
+  flex-shrink: 0;
+}
+
+.room-map-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Remove espaçamentos desnecessários para o mapa de quartos */
+.room-map-page .space-y-6 > * + * {
+  margin-top: 0 !important;
+}
+
+.room-map-page {
+  height: 100%;
+  padding: 0;
+}
+
+/* Otimizações para scroll suave */
+.room-map-scroll {
+  scroll-behavior: smooth;
+}
+
+.room-map-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.room-map-scroll::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.room-map-scroll::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.room-map-scroll::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
