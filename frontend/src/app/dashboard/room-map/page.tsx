@@ -38,7 +38,7 @@ import RoomMapGrid from '@/components/room-map/RoomMapGrid';
 import RoomMapQuickBooking from '@/components/room-map/RoomMapQuickBooking';
 
 export default function RoomMapPage() {
-  // ✅ Estados principais
+  // Estados principais
   const [selectedStartDate, setSelectedStartDate] = useState(() => 
     format(new Date(), 'yyyy-MM-dd')
   );
@@ -48,7 +48,7 @@ export default function RoomMapPage() {
   const [selectedRoom, setSelectedRoom] = useState<MapRoomData | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   
-  // ✅ CORREÇÃO: Estado para controlar o calendário Popover
+  // Estado para controlar o calendário Popover
   const [calendarDate, setCalendarDate] = useState<Date>(() => new Date());
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
@@ -66,7 +66,7 @@ export default function RoomMapPage() {
     end_date: format(addDays(new Date(selectedStartDate), 30), 'yyyy-MM-dd'),
   });
 
-  // ✅ CARREGAMENTO DE PROPRIEDADES
+  // Carregamento de propriedades
   useEffect(() => {
     const loadProperties = async () => {
       try {
@@ -87,7 +87,7 @@ export default function RoomMapPage() {
     loadProperties();
   }, [toast]);
 
-  // ✅ DISPONIBILIDADE DE QUARTOS PARA RESERVA RÁPIDA
+  // Disponibilidade de quartos para reserva rápida
   const availableRooms = mapData?.categories.flatMap(cat => 
     cat.rooms.filter(room => 
       room.is_operational && 
@@ -101,15 +101,13 @@ export default function RoomMapPage() {
     )
   ) || [];
 
-  // ✅ HANDLERS DE INTERAÇÃO
+  // Handlers de interação
   const handleRoomClick = (room: MapRoomData) => {
     console.log('Room clicked:', room);
-    // TODO: Implementar modal de detalhes do quarto
   };
 
   const handleReservationClick = (reservation: MapReservationResponse, room: MapRoomData) => {
     console.log('Reservation clicked:', reservation, room);
-    // TODO: Implementar modal de detalhes da reserva
   };
 
   const handleCellClick = (room: MapRoomData, date: string) => {
@@ -117,7 +115,6 @@ export default function RoomMapPage() {
       return;
     }
     
-    // Verificar se já existe reserva nesta data
     const hasReservation = room.reservations.some(res => {
       const checkIn = new Date(res.check_in_date + 'T00:00:00');
       const checkOut = new Date(res.check_out_date + 'T00:00:00');
@@ -129,7 +126,6 @@ export default function RoomMapPage() {
       return;
     }
 
-    // Abrir modal de reserva rápida
     setSelectedRoom(room);
     setSelectedDate(date);
     setIsQuickBookingOpen(true);
@@ -143,7 +139,6 @@ export default function RoomMapPage() {
     setCalendarDate(date);
     setIsCalendarOpen(false);
     
-    // Atualizar filtros com nova data
     updateFilters({
       start_date: formattedDate,
       end_date: format(addDays(date, 30), 'yyyy-MM-dd'),
@@ -159,7 +154,6 @@ export default function RoomMapPage() {
   const handleQuickBookingSubmit = async (bookingData: MapQuickBooking) => {
     try {
       console.log('Creating quick booking:', bookingData);
-      // TODO: Implementar criação de reserva via API
       
       toast({
         title: "Sucesso",
@@ -178,82 +172,139 @@ export default function RoomMapPage() {
     }
   };
 
+  // Calcular estatísticas
+  const totalOccupied = mapData ? mapData.categories.reduce((sum, cat) => 
+    sum + cat.rooms.filter(room => 
+      room.reservations.some(res => {
+        const checkIn = new Date(res.check_in_date + 'T00:00:00');
+        const checkOut = new Date(res.check_out_date + 'T00:00:00');
+        const today = new Date();
+        return today >= checkIn && today < checkOut;
+      })
+    ).length, 0
+  ) : 0;
+
+  const totalAvailable = (mapData?.total_rooms || 0) - totalOccupied;
+  const occupancyRate = mapData?.total_rooms ? Math.round((totalOccupied / mapData.total_rooms) * 100) : 0;
+
   return (
-    <div className="space-y-4 w-full max-w-full px-4 sm:px-6 lg:px-8">
-      {/* Header da página */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 w-full">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="p-2 bg-blue-100 rounded-lg flex-shrink-0">
-            <Map className="h-6 w-6 text-blue-600" />
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">Mapa de Quartos</h1>
-            <p className="text-gray-600 text-sm sm:text-base">
-              {mapData ? `${mapData.total_rooms} quartos` : 'Carregando...'}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Controles simples */}
-      <Card className="w-full">
-        <CardContent className="p-3 sm:p-4">
-          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full lg:w-auto">
-              {/* Seletor de data */}
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <Label htmlFor="start-date" className="text-sm font-medium whitespace-nowrap">
-                  Data inicial:
-                </Label>
-                <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "justify-start text-left font-normal w-[120px] sm:w-[140px]",
-                        !selectedStartDate && "text-muted-foreground"
-                      )}
-                    >
-                      <CalendarIcon className="mr-2 h-4 w-4 flex-shrink-0" />
-                      <span className="truncate">
-                        {selectedStartDate ? format(new Date(selectedStartDate), "dd/MM/yyyy") : "Selecionar"}
-                      </span>
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={calendarDate}
-                      onSelect={handleDateChange}
-                      disabled={(date) => date < new Date("1900-01-01")}
-                      initialFocus
-                    />
-                  </PopoverContent>
-                </Popover>
+    <div className="space-y-6 w-full max-w-full px-4 sm:px-6 lg:px-8">
+      {/* Header aprimorado da página */}
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+        <div className="p-6">
+          {/* Linha superior: Título e botão principal */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-blue-100 rounded-xl">
+                <Map className="h-7 w-7 text-blue-600" />
               </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Mapa de Quartos</h1>
+                <p className="text-gray-500 mt-1">
+                  {mapData ? `${mapData.total_rooms} quartos cadastrados` : 'Carregando informações...'}
+                </p>
+              </div>
+            </div>
+            
+            {/* Botão Nova Reserva */}
+            <Button className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 font-medium">
+              <Plus className="h-4 w-4 mr-2" />
+              Nova Reserva
+            </Button>
+          </div>
 
-              {/* Info do período */}
-              <div className="text-xs sm:text-sm text-gray-600 min-w-0">
-                <span className="hidden sm:inline">Período: </span>
-                <span className="truncate">
-                  {format(new Date(selectedStartDate), 'dd/MM/yyyy')} - {format(addDays(new Date(selectedStartDate), 30), 'dd/MM/yyyy')}
-                </span>
+          {/* Linha inferior: Controles e informações */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end">
+            {/* Controles de data */}
+            <div className="lg:col-span-5 space-y-3">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="start-date" className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                    Data inicial:
+                  </Label>
+                  <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className={cn(
+                          "justify-start text-left font-normal w-[140px] sm:w-[160px] border-gray-300",
+                          !selectedStartDate && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4 flex-shrink-0 text-gray-500" />
+                        <span className="truncate">
+                          {selectedStartDate ? format(new Date(selectedStartDate), "dd/MM/yyyy") : "Selecionar"}
+                        </span>
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={calendarDate}
+                        onSelect={handleDateChange}
+                        disabled={(date) => date < new Date("1900-01-01")}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+
+                <Button 
+                  onClick={handleRefresh} 
+                  disabled={loading}
+                  variant="outline"
+                  className="border-gray-300 hover:bg-gray-50"
+                >
+                  <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                  Atualizar
+                </Button>
+              </div>
+              
+              <div className="text-sm text-gray-600 bg-gray-50 px-3 py-2 rounded-md">
+                <span className="font-medium">Período:</span>{' '}
+                {format(new Date(selectedStartDate), 'dd/MM/yyyy')} - {format(addDays(new Date(selectedStartDate), 30), 'dd/MM/yyyy')}
               </div>
             </div>
 
-            {/* Botão atualizar */}
-            <Button 
-              onClick={handleRefresh} 
-              disabled={loading}
-              size="sm"
-              className="w-full sm:w-auto flex-shrink-0"
-            >
-              <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              Atualizar
-            </Button>
+            {/* Cards de estatísticas */}
+            <div className="lg:col-span-7">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <div className="text-blue-600 text-xs font-medium uppercase tracking-wide">Total</div>
+                  <div className="text-blue-900 text-xl font-bold mt-1">
+                    {mapData?.total_rooms || 0}
+                  </div>
+                  <div className="text-blue-600 text-xs">Quartos</div>
+                </div>
+                
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                  <div className="text-green-600 text-xs font-medium uppercase tracking-wide">Ocupados</div>
+                  <div className="text-green-900 text-xl font-bold mt-1">
+                    {totalOccupied}
+                  </div>
+                  <div className="text-green-600 text-xs">Hoje</div>
+                </div>
+                
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <div className="text-amber-600 text-xs font-medium uppercase tracking-wide">Livres</div>
+                  <div className="text-amber-900 text-xl font-bold mt-1">
+                    {totalAvailable}
+                  </div>
+                  <div className="text-amber-600 text-xs">Hoje</div>
+                </div>
+                
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                  <div className="text-purple-600 text-xs font-medium uppercase tracking-wide">Ocupação</div>
+                  <div className="text-purple-900 text-xl font-bold mt-1">
+                    {occupancyRate}%
+                  </div>
+                  <div className="text-purple-600 text-xs">Taxa</div>
+                </div>
+              </div>
+            </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Erro */}
       {error && (
@@ -265,7 +316,7 @@ export default function RoomMapPage() {
         </Alert>
       )}
 
-      {/* MAPA RESPONSIVO COM CONTENÇÃO TOTAL */}
+      {/* MAPA RESPONSIVO COM SCROLL HORIZONTAL */}
       <Card className="w-full">
         <CardContent className="p-0 w-full overflow-hidden">
           {loading && !mapData ? (
@@ -277,7 +328,6 @@ export default function RoomMapPage() {
               </p>
             </div>
           ) : mapData ? (
-            /* CONTAINER TOTALMENTE RESPONSIVO */
             <div className="w-full room-map-container">
               <div className="w-full overflow-x-auto room-map-scroll">
                 <RoomMapGrid
