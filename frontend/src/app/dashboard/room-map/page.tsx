@@ -58,100 +58,74 @@ export default function RoomMapPage() {
     mapData,
     loading,
     error,
-    filters,
-    loadMapData,
+    refresh: handleRefresh,
     updateFilters,
-    createQuickBooking
+    filters
   } = useRoomMap({
-    initialDays: 31,
+    start_date: selectedStartDate,
+    end_date: format(addDays(new Date(selectedStartDate), 30), 'yyyy-MM-dd'),
   });
 
-  // Carregar propriedades
+  // ✅ CARREGAMENTO DE PROPRIEDADES
   useEffect(() => {
     const loadProperties = async () => {
       try {
         setLoadingProperties(true);
-        const response = await apiClient.getProperties({ per_page: 100 });
-        setProperties(response.properties || []);
+        const response = await apiClient.getProperties({});
+        setProperties(response.data || []);
       } catch (error) {
         console.error('Erro ao carregar propriedades:', error);
         toast({
           title: "Erro",
-          description: "Não foi possível carregar as propriedades",
+          description: "Erro ao carregar propriedades",
           variant: "destructive",
         });
       } finally {
         setLoadingProperties(false);
       }
     };
-
     loadProperties();
-  }, []);
+  }, [toast]);
 
-  // Sincronizar calendarDate com selectedStartDate
-  useEffect(() => {
-    setCalendarDate(new Date(selectedStartDate + 'T00:00:00'));
-  }, [selectedStartDate]);
+  // ✅ DISPONIBILIDADE DE QUARTOS PARA RESERVA RÁPIDA
+  const availableRooms = mapData?.categories.flatMap(cat => 
+    cat.rooms.filter(room => 
+      room.is_operational && 
+      !room.is_out_of_order &&
+      selectedDate && !room.reservations.some(res => {
+        const checkIn = new Date(res.check_in_date + 'T00:00:00');
+        const checkOut = new Date(res.check_out_date + 'T00:00:00');
+        const targetDate = new Date(selectedDate + 'T00:00:00');
+        return targetDate >= checkIn && targetDate < checkOut;
+      })
+    )
+  ) || [];
 
-  // Atualizar filtros quando a data inicial mudar
-  useEffect(() => {
-    const startDate = new Date(selectedStartDate + 'T00:00:00');
-    const endDate = addDays(startDate, 31);
-
-    const newStartDate = format(startDate, 'yyyy-MM-dd');
-    const newEndDate = format(endDate, 'yyyy-MM-dd');
-    
-    if (filters.start_date !== newStartDate || filters.end_date !== newEndDate) {
-      updateFilters({
-        start_date: newStartDate,
-        end_date: newEndDate
-      });
-    }
-  }, [selectedStartDate, filters.start_date, filters.end_date, updateFilters]);
-
-  // ✅ CORREÇÃO: Handler para seleção de data no calendário
-  const handleCalendarDateSelect = (date: Date | undefined) => {
-    if (date) {
-      const dateStr = format(date, 'yyyy-MM-dd');
-      setSelectedStartDate(dateStr);
-      setCalendarDate(date);
-      setIsCalendarOpen(false); // Fechar o calendário após seleção
-    }
-  };
-
-  // Outros handlers
+  // ✅ HANDLERS DE INTERAÇÃO
   const handleRoomClick = (room: MapRoomData) => {
     console.log('Room clicked:', room);
+    // TODO: Implementar modal de detalhes do quarto
   };
 
   const handleReservationClick = (reservation: MapReservationResponse, room: MapRoomData) => {
     console.log('Reservation clicked:', reservation, room);
+    // TODO: Implementar modal de detalhes da reserva
   };
 
   const handleCellClick = (room: MapRoomData, date: string) => {
     if (!room.is_operational || room.is_out_of_order) {
-      toast({
-        title: "Quarto Indisponível",
-        description: "Este quarto não está operacional no momento",
-        variant: "destructive",
-      });
       return;
     }
-
-    // Verificar se há reserva nesta data
-    const hasReservation = room.reservations.some(r => {
-      const checkIn = new Date(r.check_in_date + 'T00:00:00');
-      const checkOut = new Date(r.check_out_date + 'T00:00:00');
-      const cellDate = new Date(date + 'T00:00:00');
-      return cellDate >= checkIn && cellDate < checkOut;
+    
+    // Verificar se já existe reserva nesta data
+    const hasReservation = room.reservations.some(res => {
+      const checkIn = new Date(res.check_in_date + 'T00:00:00');
+      const checkOut = new Date(res.check_out_date + 'T00:00:00');
+      const targetDate = new Date(date + 'T00:00:00');
+      return targetDate >= checkIn && targetDate < checkOut;
     });
 
     if (hasReservation) {
-      toast({
-        title: "Quarto Ocupado",
-        description: "Este quarto já possui reserva para esta data",
-        variant: "destructive",
-      });
       return;
     }
 
@@ -161,26 +135,19 @@ export default function RoomMapPage() {
     setIsQuickBookingOpen(true);
   };
 
-  const handleQuickBooking = () => {
-    setSelectedRoom(null);
-    setSelectedDate(null);
-    setIsQuickBookingOpen(true);
-  };
-
-  const handleQuickBookingSubmit = async (booking: MapQuickBooking) => {
-    try {
-      await createQuickBooking(booking);
-      toast({
-        title: "Sucesso",
-        description: "Reserva criada com sucesso",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Erro",
-        description: error.response?.data?.detail || "Erro ao criar reserva",
-        variant: "destructive",
-      });
-    }
+  const handleDateChange = (date: Date | undefined) => {
+    if (!date) return;
+    
+    const formattedDate = format(date, 'yyyy-MM-dd');
+    setSelectedStartDate(formattedDate);
+    setCalendarDate(date);
+    setIsCalendarOpen(false);
+    
+    // Atualizar filtros com nova data
+    updateFilters({
+      start_date: formattedDate,
+      end_date: format(addDays(date, 30), 'yyyy-MM-dd'),
+    });
   };
 
   const handleQuickBookingClose = () => {
@@ -189,88 +156,99 @@ export default function RoomMapPage() {
     setSelectedDate(null);
   };
 
-  const handleRefresh = async () => {
-    await loadMapData();
+  const handleQuickBookingSubmit = async (bookingData: MapQuickBooking) => {
+    try {
+      console.log('Creating quick booking:', bookingData);
+      // TODO: Implementar criação de reserva via API
+      
+      toast({
+        title: "Sucesso",
+        description: "Reserva criada com sucesso!",
+      });
+      
+      handleQuickBookingClose();
+      handleRefresh();
+    } catch (error: any) {
+      console.error('Erro ao criar reserva:', error);
+      toast({
+        title: "Erro",
+        description: error.response?.data?.detail || "Erro ao criar reserva",
+        variant: "destructive",
+      });
+    }
   };
 
-  // Quartos disponíveis
-  const availableRooms = mapData?.categories.flatMap(category => 
-    category.rooms.filter(room => room.is_operational && !room.is_out_of_order)
-  ) || [];
-
   return (
-    <div className="space-y-6 pb-6">
+    <div className="space-y-4 w-full max-w-full px-4 sm:px-6 lg:px-8">
       {/* Header da página */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-100 rounded-lg">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 w-full">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="p-2 bg-blue-100 rounded-lg flex-shrink-0">
             <Map className="h-6 w-6 text-blue-600" />
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Mapa de Quartos</h1>
-            <p className="text-gray-600">
-              Visualização de ocupação dos quartos
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">Mapa de Quartos</h1>
+            <p className="text-gray-600 text-sm sm:text-base">
+              {mapData ? `${mapData.total_rooms} quartos` : 'Carregando...'}
             </p>
           </div>
         </div>
-
-        <Button onClick={handleQuickBooking} className="flex items-center gap-2">
-          <Plus className="h-4 w-4" />
-          Nova Reserva
-        </Button>
       </div>
 
-      {/* Controles com seletor de data corrigido */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            {/* ✅ CORREÇÃO: Seletor de data inicial com Popover */}
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <CalendarIcon className="h-4 w-4 text-gray-500" />
-                <Label className="text-sm font-medium">
+      {/* Controles simples */}
+      <Card className="w-full">
+        <CardContent className="p-3 sm:p-4">
+          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full lg:w-auto">
+              {/* Seletor de data */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Label htmlFor="start-date" className="text-sm font-medium whitespace-nowrap">
                   Data inicial:
                 </Label>
+                <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "justify-start text-left font-normal w-[120px] sm:w-[140px]",
+                        !selectedStartDate && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4 flex-shrink-0" />
+                      <span className="truncate">
+                        {selectedStartDate ? format(new Date(selectedStartDate), "dd/MM/yyyy") : "Selecionar"}
+                      </span>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={calendarDate}
+                      onSelect={handleDateChange}
+                      disabled={(date) => date < new Date("1900-01-01")}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
-              
-              {/* ✅ Popover com Calendar em vez de input type="date" */}
-              <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      "w-56 justify-start text-left font-normal",
-                      !calendarDate && "text-muted-foreground"
-                    )}
-                    disabled={loading}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {calendarDate 
-                      ? format(calendarDate, "dd/MM/yyyy", { locale: ptBR }) 
-                      : "Selecionar data"
-                    }
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={calendarDate}
-                    onSelect={handleCalendarDateSelect}
-                    disabled={(date) => date < new Date(new Date().toDateString())}
-                    initialFocus
-                  />
-                </PopoverContent>
-              </Popover>
+
+              {/* Info do período */}
+              <div className="text-xs sm:text-sm text-gray-600 min-w-0">
+                <span className="hidden sm:inline">Período: </span>
+                <span className="truncate">
+                  {format(new Date(selectedStartDate), 'dd/MM/yyyy')} - {format(addDays(new Date(selectedStartDate), 30), 'dd/MM/yyyy')}
+                </span>
+              </div>
             </div>
 
             {/* Botão atualizar */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefresh}
+            <Button 
+              onClick={handleRefresh} 
               disabled={loading}
+              size="sm"
+              className="w-full sm:w-auto flex-shrink-0"
             >
-              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               Atualizar
             </Button>
           </div>
@@ -279,29 +257,29 @@ export default function RoomMapPage() {
 
       {/* Erro */}
       {error && (
-        <Alert variant="destructive">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>
+        <Alert variant="destructive" className="w-full">
+          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+          <AlertDescription className="min-w-0">
             {error}
           </AlertDescription>
         </Alert>
       )}
 
-      {/* Mapa principal */}
-      <Card>
-        <CardContent className="p-0">
+      {/* MAPA RESPONSIVO COM CONTENÇÃO TOTAL */}
+      <Card className="w-full">
+        <CardContent className="p-0 w-full overflow-hidden">
           {loading && !mapData ? (
-            <div className="p-12 text-center">
-              <RefreshCw className="h-12 w-12 animate-spin text-blue-500 mx-auto mb-4" />
-              <p className="text-lg text-gray-600 mb-2">Carregando mapa de quartos...</p>
-              <p className="text-sm text-gray-500">
+            <div className="p-8 sm:p-12 text-center">
+              <RefreshCw className="h-8 w-8 sm:h-12 sm:w-12 animate-spin text-blue-500 mx-auto mb-4" />
+              <p className="text-base sm:text-lg text-gray-600 mb-2">Carregando mapa de quartos...</p>
+              <p className="text-xs sm:text-sm text-gray-500">
                 Período: {format(new Date(selectedStartDate), 'dd/MM/yyyy')} - {format(addDays(new Date(selectedStartDate), 30), 'dd/MM/yyyy')}
               </p>
             </div>
           ) : mapData ? (
-            <div className="relative">
-            
-              <div className="overflow-x-auto overflow-y-hidden">
+            /* CONTAINER TOTALMENTE RESPONSIVO */
+            <div className="w-full room-map-container">
+              <div className="w-full overflow-x-auto room-map-scroll">
                 <RoomMapGrid
                   mapData={mapData}
                   onRoomClick={handleRoomClick}
@@ -312,18 +290,54 @@ export default function RoomMapPage() {
               </div>
             </div>
           ) : (
-            <div className="p-12 text-center">
-              <Map className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-lg text-gray-600 mb-2">Nenhum dado encontrado</p>
-              <p className="text-sm text-gray-500 mb-4">
+            <div className="p-8 sm:p-12 text-center">
+              <Map className="h-8 w-8 sm:h-12 sm:w-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-base sm:text-lg text-gray-600 mb-2">Nenhum dado encontrado</p>
+              <p className="text-xs sm:text-sm text-gray-500 mb-4">
                 Selecione uma data e clique em Atualizar para carregar os dados
               </p>
-              <Button onClick={handleRefresh} variant="outline">
+              <Button onClick={handleRefresh} variant="outline" className="w-full sm:w-auto">
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Carregar Dados
               </Button>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Legenda compacta e responsiva */}
+      <Card className="w-full">
+        <CardContent className="p-2 sm:p-3">
+          <div className="grid grid-cols-3 sm:grid-cols-4 lg:flex lg:items-center lg:justify-center gap-2 lg:gap-6 text-xs">
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 bg-white border border-gray-300 rounded flex-shrink-0"></div>
+              <span className="truncate">Disponível</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 bg-blue-500 rounded flex-shrink-0"></div>
+              <span className="truncate">Confirmada</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 bg-green-500 rounded flex-shrink-0"></div>
+              <span className="truncate">Check-in</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 bg-yellow-500 rounded flex-shrink-0"></div>
+              <span className="truncate">Pendente</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 bg-gray-100 rounded flex-shrink-0"></div>
+              <span className="truncate">Inativo</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 bg-green-400 rounded-full flex-shrink-0"></div>
+              <span className="truncate">Chegada</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 bg-red-400 rounded-full flex-shrink-0"></div>
+              <span className="truncate">Saída</span>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

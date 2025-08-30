@@ -44,9 +44,7 @@ export default function RoomMapGrid({
   loading = false
 }: RoomMapGridProps) {
   
-  // ✅ CORREÇÃO 1: TODOS os hooks no topo do componente, na ordem correta
-  
-  // Hook 1: Gerar cabeçalhos de data
+  // ✅ Hook 1: Gerar cabeçalhos de data
   const dateHeaders = useMemo((): DateHeader[] => {
     if (!mapData?.date_headers) return [];
     
@@ -56,28 +54,40 @@ export default function RoomMapGrid({
         date: dateStr,
         dayOfWeek: format(date, 'EEE', { locale: ptBR }),
         dayOfMonth: format(date, 'd'),
-        isWeekend: date.getDay() === 5 || date.getDay() === 6, // sexta = 5, sábado = 6
+        isWeekend: date.getDay() === 5 || date.getDay() === 6,
         isToday: format(date, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
       };
     });
   }, [mapData]);
 
-  // ✅ CORREÇÃO 2: Hook totalWidth MOVIDO para o topo (era o problema!)
-  const totalWidth = useMemo(() => {
-    const roomColumnWidth = 192; // 12rem = 192px (w-48)
-    const cellWidth = 64; // 4rem = 64px (w-16)
-    return roomColumnWidth + (dateHeaders.length * cellWidth);
+  // ✅ Hook 2: Calcular larguras responsivas
+  const gridDimensions = useMemo(() => {
+    const baseRoomColumnWidth = 160; // Reduzido para mobile
+    const baseCellWidth = 48; // Reduzido para mobile
+    
+    // Responsivo baseado na viewport
+    const roomColumnWidth = window.innerWidth < 640 ? 140 : 
+                           window.innerWidth < 1024 ? 160 : 192;
+    const cellWidth = window.innerWidth < 640 ? 44 : 
+                     window.innerWidth < 1024 ? 52 : 64;
+    
+    const totalWidth = roomColumnWidth + (dateHeaders.length * cellWidth);
+    
+    return {
+      roomColumnWidth,
+      cellWidth,
+      totalWidth
+    };
   }, [dateHeaders.length]);
 
-  // ✅ CORREÇÃO 3: Funções render APÓS todos os hooks
-  
-  // Renderizar linha do quarto com blocos contínuos
+  // ✅ Renderizar linha do quarto - RESPONSIVO
   const renderRoomRow = (room: MapRoomData) => {
     return (
-      <div key={room.id} className="flex border-b border-gray-100 last:border-b-0 border-b-[0.5px] relative">
-        {/* Info do quarto - ALTURA AUMENTADA MAIS 10% */}
+      <div key={room.id} className="flex border-b border-gray-100 last:border-b-0 border-b-[0.5px] relative min-w-0">
+        {/* Info do quarto - RESPONSIVO */}
         <div 
-          className="w-48 px-2 py-1.5 bg-white border-r border-gray-200 flex items-center justify-between cursor-pointer hover:bg-gray-50 flex-shrink-0 h-8"
+          className="px-2 py-1.5 bg-white border-r border-gray-200 flex items-center justify-between cursor-pointer hover:bg-gray-50 flex-shrink-0 h-7 sm:h-8"
+          style={{ width: `${gridDimensions.roomColumnWidth}px` }}
           onClick={() => onRoomClick?.(room)}
           title={`${room.name}${room.floor ? ` - Andar ${room.floor}` : ''} - ${Math.round(room.occupancy_rate)}% ocupado`}
         >
@@ -89,97 +99,81 @@ export default function RoomMapGrid({
           {/* Ícones de status */}
           <div className="flex items-center gap-0.5 ml-1 flex-shrink-0">
             {!room.is_operational && (
-              <AlertTriangle className="h-2.5 w-2.5 text-red-500" title="Quarto inativo" />
+              <AlertTriangle className="h-2 w-2 sm:h-2.5 sm:w-2.5 text-red-500" title="Quarto inativo" />
             )}
             {room.is_out_of_order && (
-              <Wrench className="h-2.5 w-2.5 text-red-500" title="Quarto em manutenção" />
+              <Wrench className="h-2 w-2 sm:h-2.5 sm:w-2.5 text-red-500" title="Quarto em manutenção" />
             )}
           </div>
         </div>
 
-        {/* Container para células vazias e reservas */}
-        <div className="flex relative">
-          {/* Células vazias de fundo */}
-          {dateHeaders.map(header => {
-            const isToday = header.isToday;
-            const isWeekend = header.isWeekend;
-            
-            return (
-              <div
-                key={header.date}
-                onClick={() => onCellClick?.(room, header.date)}
-                className={cn(
-                  "w-16 h-8 border-r border-gray-200 cursor-pointer transition-colors flex-shrink-0 min-w-[4rem]",
-                  "hover:bg-blue-50 flex items-center justify-center",
-                  isToday && "border-l-2 border-l-blue-500",
-                  isWeekend && "room-map-cell-weekend",
-                  room.is_out_of_order && "bg-red-50 cursor-not-allowed",
-                  !room.is_operational && "bg-gray-100 cursor-not-allowed"
-                )}
-                title={
-                  room.is_out_of_order 
-                    ? "Quarto fora de funcionamento" 
-                    : !room.is_operational 
-                    ? "Quarto inativo" 
-                    : "Disponível - Clique para reservar"
-                }
-              >
-                {room.is_out_of_order && (
-                  <Wrench className="h-2 w-2 text-red-500" />
-                )}
-              </div>
-            );
-          })}
+        {/* Container das células - RESPONSIVO */}
+        <div className="relative grid-dates-container flex-1 min-w-0">
+          {/* Grid das células de datas */}
+          <div className="flex">
+            {dateHeaders.map(header => {
+              const isToday = header.isToday;
+              const isWeekend = header.isWeekend;
+              
+              return (
+                <div
+                  key={header.date}
+                  onClick={() => onCellClick?.(room, header.date)}
+                  className={cn(
+                    "border-r border-gray-200 cursor-pointer transition-colors flex-shrink-0 h-7 sm:h-8",
+                    "hover:bg-blue-50 flex items-center justify-center",
+                    isToday && "border-l-2 border-l-blue-500",
+                    isWeekend && "room-map-cell-weekend",
+                    room.is_out_of_order && "bg-red-50 cursor-not-allowed",
+                    !room.is_operational && "bg-gray-100 cursor-not-allowed"
+                  )}
+                  style={{ width: `${gridDimensions.cellWidth}px` }}
+                  title={
+                    room.is_out_of_order 
+                      ? "Quarto fora de funcionamento" 
+                      : !room.is_operational 
+                      ? "Quarto inativo" 
+                      : "Disponível - Clique para reservar"
+                  }
+                >
+                  {room.is_out_of_order && (
+                    <Wrench className="h-1.5 w-1.5 sm:h-2 sm:w-2 text-red-500" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
           
-          {/* Blocos contínuos de reservas posicionados absolutamente */}
+          {/* Blocos contínuos de reservas - AJUSTADOS PARA RESPONSIVIDADE */}
           {room.reservations.map(reservation => {
             const checkIn = new Date(reservation.check_in_date + 'T00:00:00');
             const checkOut = new Date(reservation.check_out_date + 'T00:00:00');
             
-            // Encontrar índices das datas de início e fim
             const startIndex = dateHeaders.findIndex(h => h.date === format(checkIn, 'yyyy-MM-dd'));
             const endIndex = dateHeaders.findIndex(h => h.date === format(checkOut, 'yyyy-MM-dd'));
             
-            // Se a reserva não está no período visível, não renderizar
-            if (startIndex === -1) {
-              return null;
-            }
+            if (startIndex === -1) return null;
             
-            // Calcular posição e largura como um bloco único contínuo
-            const cellWidth = 64; // 64px = w-16
+            const cellWidth = gridDimensions.cellWidth;
             
-            // Determinar quais dias mostrar
             let actualEndIndex = endIndex;
             if (endIndex === -1 || endIndex < startIndex) {
-              // Check-out fora do período visível, mostrar até o final visível
               actualEndIndex = dateHeaders.length - 1;
             }
             
-            // Calcular início e largura do bloco contínuo
             let blockLeft, blockWidth;
             
             if (startIndex === actualEndIndex) {
-              // Caso especial: mesmo dia (não deveria acontecer em hotéis normais)
               blockLeft = startIndex * cellWidth + cellWidth / 2;
               blockWidth = cellWidth / 2;
             } else {
-              // Bloco contínuo do meio do primeiro dia ao meio do último dia
-              blockLeft = startIndex * cellWidth + cellWidth / 2; // Começar do meio do primeiro dia
-              
-              // Calcular até onde vai: meio do último dia
+              blockLeft = startIndex * cellWidth + cellWidth / 2;
               const blockEnd = actualEndIndex * cellWidth + cellWidth / 2;
               blockWidth = blockEnd - blockLeft;
             }
             
-            // Criar clip-path para bordas diagonais
-            const clipPath = `polygon(
-              8px 0%, 
-              100% 0%, 
-              calc(100% - 8px) 100%, 
-              0% 100%
-            )`;
+            const clipPath = `polygon(6px 0%, 100% 0%, calc(100% - 6px) 100%, 0% 100%)`;
             
-            // Cores por status
             const getReservationColor = (status: string) => {
               switch (status) {
                 case 'confirmed':
@@ -200,31 +194,29 @@ export default function RoomMapGrid({
                 key={reservation.id}
                 onClick={() => onReservationClick?.(reservation, room)}
                 className={cn(
-                  "absolute cursor-pointer text-[10px] font-medium flex items-center justify-center",
+                  "absolute cursor-pointer text-[8px] sm:text-[10px] font-medium flex items-center justify-center",
                   getReservationColor(reservation.status)
                 )}
                 style={{
                   left: `${blockLeft}px`,
                   width: `${blockWidth}px`,
-                  height: 'calc(100% - 20px)', // Mais margem para separação
-                  top: '10px', // Mais margem superior
+                  height: 'calc(100% - 12px)',
+                  top: '6px',
                   zIndex: 1,
                   clipPath: clipPath,
-                  borderRadius: '0px' // Remove border-radius para clip-path funcionar
+                  borderRadius: '0px'
                 }}
                 title={`${reservation.guest_name} - ${reservation.reservation_number}`}
               >
-                {/* Nome do hóspede */}
-                <span className="text-[8px] font-medium truncate leading-tight px-2">
-                  {reservation.guest_name.split(' ')[0].substring(0, 8)}
+                <span className="font-medium truncate leading-tight px-1 sm:px-2">
+                  {reservation.guest_name.split(' ')[0].substring(0, window.innerWidth < 640 ? 4 : 8)}
                 </span>
                 
-                {/* Indicadores de chegada/saída */}
                 {reservation.is_arrival && (
-                  <div className="absolute top-1 left-2 w-1.5 h-1.5 bg-green-400 rounded-full" />
+                  <div className="absolute top-0.5 left-1 w-1 h-1 sm:w-1.5 sm:h-1.5 bg-green-400 rounded-full" />
                 )}
                 {reservation.is_departure && (
-                  <div className="absolute top-1 right-2 w-1.5 h-1.5 bg-red-400 rounded-full" />
+                  <div className="absolute top-0.5 right-1 w-1 h-1 sm:w-1.5 sm:h-1.5 bg-red-400 rounded-full" />
                 )}
               </div>
             );
@@ -240,7 +232,7 @@ export default function RoomMapGrid({
 
     return (
       <div key={category.room_type_id} className="mb-1">
-        {/* Header da categoria - SEM NÚMEROS */}
+        {/* Header da categoria */}
         <div className="bg-gray-50 border border-gray-200 rounded-t-lg px-2 py-1">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -292,34 +284,49 @@ export default function RoomMapGrid({
     );
   }
 
-  // ✅ RENDER PRINCIPAL - MANTENDO ESTRUTURA ORIGINAL
+  // ✅ RENDER PRINCIPAL - TOTALMENTE RESPONSIVO
   return (
-    <div className={cn("bg-white")} style={{ minWidth: `${totalWidth}px` }}>
-      {/* ✅ Header das datas - AUMENTADO EM 20% E ESTILIZADO */}
-      <div className="flex room-map-header sticky top-0 z-10">
-        {/* Coluna "Quartos" - AUMENTADO PARA h-10 */}
-        <div className="w-48 px-3 py-2 room-map-header-title flex-shrink-0 h-10 flex items-center">
-          <div className="font-bold text-sm text-gray-800">Quartos</div>
+    <div 
+      className="bg-white room-map-grid-container w-full"
+      style={{ 
+        minWidth: `${gridDimensions.totalWidth}px`
+      }}
+    >
+      {/* ✅ Header das datas - RESPONSIVO E STICKY */}
+      <div className="flex room-map-header sticky top-0 z-20 bg-white shadow-sm">
+        {/* Coluna "Quartos" - RESPONSIVO */}
+        <div 
+          className="px-2 sm:px-3 py-2 room-map-header-title flex-shrink-0 flex items-center border-r border-gray-300"
+          style={{ 
+            width: `${gridDimensions.roomColumnWidth}px`,
+            height: '48px'
+          }}
+        >
+          <div className="font-bold text-xs sm:text-sm text-gray-800 truncate">Quartos</div>
         </div>
         
-        {/* Células das datas - AUMENTADO PARA h-10 */}
-        <div className="flex">
+        {/* Células das datas - RESPONSIVAS */}
+        <div className="flex room-map-dates-header">
           {dateHeaders.map(header => (
             <div 
               key={header.date}
               className={cn(
-                "w-16 px-2 py-2 text-center border-r border-gray-300 flex-shrink-0 min-w-[4rem] h-10 flex flex-col items-center justify-center room-map-date-cell",
+                "px-1 sm:px-2 py-2 text-center border-r border-gray-300 flex-shrink-0 flex flex-col items-center justify-center room-map-date-cell",
                 header.isWeekend && "room-map-date-weekend",
                 header.isToday && "room-map-date-today"
               )}
+              style={{ 
+                width: `${gridDimensions.cellWidth}px`,
+                height: '48px'
+              }}
             >
               {/* Dia da semana */}
-              <div className="room-map-day-name">
+              <div className="room-map-day-name text-[9px] sm:text-[10px] lg:text-[11px] mb-1">
                 {header.dayOfWeek.toUpperCase()}
               </div>
               
               {/* Número do dia */}
-              <div className="room-map-day-number">
+              <div className="room-map-day-number text-base sm:text-lg lg:text-xl font-bold">
                 {header.dayOfMonth}
               </div>
             </div>
@@ -327,15 +334,15 @@ export default function RoomMapGrid({
         </div>
       </div>
 
-      {/* Categorias e quartos - ALTURA COMPLETA */}
-      <div className="h-full overflow-y-auto">
+      {/* Categorias e quartos - RESPONSIVOS */}
+      <div className="room-map-content">
         {mapData.categories.length === 0 ? (
-          <div className="p-6 text-center">
-            <Bed className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-            <h3 className="text-base font-medium text-gray-900 mb-1">
+          <div className="p-4 sm:p-6 text-center">
+            <Bed className="h-8 w-8 sm:h-12 sm:w-12 text-gray-300 mx-auto mb-3" />
+            <h3 className="text-sm sm:text-base font-medium text-gray-900 mb-1">
               Nenhum quarto encontrado
             </h3>
-            <p className="text-sm text-gray-500">
+            <p className="text-xs sm:text-sm text-gray-500">
               Não há quartos cadastrados para os filtros selecionados.
             </p>
           </div>

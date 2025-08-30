@@ -526,3 +526,488 @@
       #e5e7eb 4px
     ) !important;
 }
+
+/* ===== GLOBAL OVERFLOW FIXES - TOTAL RESPONSIVIDADE ===== */
+
+/* Garantir que html/body não tenham overflow horizontal */
+html, body {
+  overflow-x: hidden !important;
+  max-width: 100vw !important;
+}
+
+/* Container principal da aplicação */
+#__next, 
+.page-container,
+main,
+[class*="space-y"] {
+  max-width: 100vw !important;
+  overflow-x: hidden !important;
+  box-sizing: border-box !important;
+}
+
+/* Todos os elementos devem respeitar a viewport */
+* {
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* ===== CONTAINER DO MAPA - COMPLETAMENTE RESPONSIVO ===== */
+
+/* Container principal do mapa */
+.room-map-container {
+  width: 100%;
+  max-width: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Container com scroll horizontal OTIMIZADO */
+.room-map-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f8fafc;
+  
+  /* Scroll personalizado WebKit - mais elegante */
+  &::-webkit-scrollbar {
+    height: 12px;
+    width: 0;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: linear-gradient(to right, #f8fafc, #f1f5f9);
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+    margin: 3px;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: linear-gradient(45deg, #cbd5e1, #94a3b8);
+    border-radius: 10px;
+    border: 2px solid #f8fafc;
+    box-shadow: 
+      inset 0 1px 3px rgba(0, 0, 0, 0.1),
+      0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+  
+  &::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(45deg, #94a3b8, #64748b);
+    box-shadow: 
+      inset 0 1px 3px rgba(0, 0, 0, 0.2),
+      0 2px 6px rgba(0, 0, 0, 0.15);
+  }
+  
+  &::-webkit-scrollbar-thumb:active {
+    background: #64748b;
+  }
+}
+
+/* ===== ROOM MAP GRID CONTAINER ===== */
+
+.room-map-grid-container {
+  /* Estrutura flexível e responsiva */
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 100%;
+  overflow: visible;
+}
+
+/* ===== ROOM MAP HEADER STYLES - APRIMORADO ===== */
+
+/* Header principal - fundo branco limpo com sombra */
+.room-map-header {
+  background: #ffffff;
+  border-bottom: 2px solid #e5e7eb;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+/* Coluna "Quartos" - clara e legível */
+.room-map-header-title {
+  background: #f8fafc;
+  border-right: 2px solid #e5e7eb;
+  font-weight: 600;
+  color: #1f2937;
+  flex-shrink: 0;
+  min-width: 192px; /* w-48 */
+  width: 192px;
+}
+
+/* Container das datas no header */
+.room-map-dates-header {
+  display: flex;
+  flex-shrink: 0;
+}
+
+/* Base das células - fundo branco limpo */
+.room-map-date-cell {
+  background: #ffffff;
+  border-right: 1px solid #e5e7eb;
+  position: relative;
+  flex-shrink: 0;
+  min-width: 64px; /* w-16 */
+  width: 64px;
+}
+
+/* Fim de semana (Sexta e Sábado) - fundo escuro riscado */
+.room-map-date-weekend {
+  background: 
+    repeating-linear-gradient(
+      45deg,
+      #f3f4f6 0px,
+      #f3f4f6 2px,
+      #e5e7eb 2px,
+      #e5e7eb 4px
+    );
+  border-right: 1px solid #d1d5db;
+  position: relative;
+}
+
+/* Hoje - destaque amarelo/dourado */
+.room-map-date-today {
+  background: #fefce8 !important;
+  border-right: 1px solid #fde047 !important;
+  position: relative;
+  box-shadow: inset 0 0 0 1px #fbbf24;
+}
+
+.room-map-date-today::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: #f59e0b;
+  z-index: 1;
+}
+
+.room-map-date-today::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: #f59e0b;
+  z-index: 1;
+}
+
+/* ===== TIPOGRAFIA DO HEADER ===== */
+
+/* Tipografia - clara e legível */
+.room-map-day-name {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  line-height: 1.1;
+}
+
+.room-map-day-number {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  margin-top: 2px;
+}
+
+/* Cores para dias normais - legível */
+.room-map-date-cell:not(.room-map-date-weekend):not(.room-map-date-today) .room-map-day-name {
+  color: #6b7280;
+}
+
+.room-map-date-cell:not(.room-map-date-weekend):not(.room-map-date-today) .room-map-day-number {
+  color: #374151;
+}
+
+/* Fim de semana - texto escuro legível */
+.room-map-date-weekend .room-map-day-name {
+  color: #374151;
+  font-weight: 700;
+}
+
+.room-map-date-weekend .room-map-day-number {
+  color: #1f2937;
+  font-weight: 800;
+  font-size: 18px;
+}
+
+/* Hoje - laranja/dourado legível */
+.room-map-date-today .room-map-day-name {
+  color: #d97706;
+  font-weight: 700;
+}
+
+.room-map-date-today .room-map-day-number {
+  color: #92400e;
+  font-weight: 800;
+  font-size: 18px;
+}
+
+/* ===== CONTEÚDO DO MAPA (QUARTOS) ===== */
+
+.room-map-content {
+  flex: 1;
+  overflow: visible;
+  background: #ffffff;
+}
+
+/* Grid das datas nos quartos */
+.grid-dates-container {
+  position: relative;
+  width: 100%;
+  min-width: fit-content;
+}
+
+/* ===== CÉLULAS DOS QUARTOS - FIM DE SEMANA ===== */
+
+/* Células de fim de semana nos quartos - mesmo padrão riscado */
+.room-map-cell-weekend {
+  background: 
+    repeating-linear-gradient(
+      45deg,
+      #f9fafb 0px,
+      #f9fafb 2px,
+      #f3f4f6 2px,
+      #f3f4f6 4px
+    ) !important;
+}
+
+.room-map-cell-weekend:hover {
+  background: 
+    repeating-linear-gradient(
+      45deg,
+      #f3f4f6 0px,
+      #f3f4f6 2px,
+      #e5e7eb 2px,
+      #e5e7eb 4px
+    ) !important;
+}
+
+/* ===== HOVER EFFECTS ===== */
+
+/* Hover sutil no header */
+.room-map-date-cell:hover {
+  background: #f8fafc;
+}
+
+.room-map-date-weekend:hover {
+  background: 
+    repeating-linear-gradient(
+      45deg,
+      #e5e7eb 0px,
+      #e5e7eb 2px,
+      #d1d5db 2px,
+      #d1d5db 4px
+    );
+}
+
+.room-map-date-today:hover {
+  background: #fef3c7 !important;
+}
+
+/* ===== RESPONSIVIDADE APRIMORADA ===== */
+
+/* Tablets */
+@media (max-width: 1024px) {
+  .room-map-day-name {
+    font-size: 10px;
+    margin-bottom: 2px;
+  }
+  
+  .room-map-day-number {
+    font-size: 16px;
+  }
+  
+  .room-map-date-weekend .room-map-day-number,
+  .room-map-date-today .room-map-day-number {
+    font-size: 17px;
+  }
+  
+  /* Ajustar altura do header em tablets */
+  .room-map-header-title,
+  .room-map-date-cell {
+    height: 36px; /* h-9 */
+  }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .room-map-day-name {
+    font-size: 9px;
+    margin-bottom: 1px;
+    letter-spacing: 0.02em;
+  }
+  
+  .room-map-day-number {
+    font-size: 14px;
+  }
+  
+  .room-map-date-weekend .room-map-day-number,
+  .room-map-date-today .room-map-day-number {
+    font-size: 15px;
+  }
+  
+  /* Reduzir altura do header no mobile */
+  .room-map-header-title,
+  .room-map-date-cell {
+    height: 32px; /* h-8 */
+    padding: 4px 8px;
+  }
+  
+  /* Ajustar células dos quartos no mobile */
+  .room-map-cell-weekend,
+  [class*="w-16"] {
+    min-width: 56px; /* w-14 */
+    width: 56px;
+  }
+  
+  /* Ajustar coluna de quartos no mobile */
+  .room-map-header-title {
+    min-width: 160px; /* w-40 */
+    width: 160px;
+    font-size: 12px;
+  }
+}
+
+/* Mobile pequeno */
+@media (max-width: 480px) {
+  .room-map-day-name {
+    font-size: 8px;
+    margin-bottom: 1px;
+  }
+  
+  .room-map-day-number {
+    font-size: 12px;
+  }
+  
+  .room-map-date-weekend .room-map-day-number,
+  .room-map-date-today .room-map-day-number {
+    font-size: 13px;
+  }
+  
+  /* Header ainda mais compacto */
+  .room-map-header-title,
+  .room-map-date-cell {
+    height: 28px; /* h-7 */
+    padding: 2px 6px;
+  }
+  
+  /* Células mais estreitas */
+  .room-map-cell-weekend,
+  [class*="w-16"] {
+    min-width: 48px; /* w-12 */
+    width: 48px;
+  }
+  
+  /* Coluna de quartos mais estreita */
+  .room-map-header-title {
+    min-width: 140px; /* w-35 */
+    width: 140px;
+    font-size: 11px;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+}
+
+/* ===== PERFORMANCE E SUAVIDADE ===== */
+
+/* Transições suaves */
+.room-map-date-cell,
+.room-map-cell-weekend,
+.room-map-header-title {
+  transition: background-color 0.15s ease-in-out;
+}
+
+/* Otimização de scroll */
+.room-map-scroll-container {
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+
+/* Melhorar performance de rendering */
+.room-map-grid-container {
+  transform: translateZ(0);
+  will-change: scroll-position;
+}
+
+.room-map-header {
+  transform: translateZ(0);
+}
+
+/* ===== ACCESSIBILITY ===== */
+
+/* Melhorar contraste para acessibilidade */
+@media (prefers-contrast: high) {
+  .room-map-date-weekend {
+    background: 
+      repeating-linear-gradient(
+        45deg,
+        #e5e7eb 0px,
+        #e5e7eb 3px,
+        #d1d5db 3px,
+        #d1d5db 6px
+      );
+  }
+  
+  .room-map-date-today {
+    background: #fcd34d !important;
+    box-shadow: inset 0 0 0 2px #f59e0b !important;
+  }
+}
+
+/* Redução de movimento */
+@media (prefers-reduced-motion: reduce) {
+  .room-map-date-cell,
+  .room-map-cell-weekend,
+  .room-map-header-title {
+    transition: none;
+  }
+  
+  .room-map-scroll-container {
+    scroll-behavior: auto;
+  }
+}
+
+/* ===== PRINT STYLES ===== */
+
+@media print {
+  .room-map-scroll-container {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+  
+  .room-map-header {
+    position: static !important;
+  }
+  
+  .room-map-grid-container {
+    min-width: auto !important;
+  }
+}
+
+/* ===== DEBUG (REMOVER EM PRODUÇÃO) ===== */
+
+/* Uncomment para debug de layout */
+/*
+.room-map-grid-container {
+  border: 2px solid red;
+}
+
+.room-map-header {
+  border: 2px solid blue;
+}
+
+.room-map-content {
+  border: 2px solid green;
+}
+
+.room-map-scroll-container {
+  border: 2px solid purple;
+}
+*/
