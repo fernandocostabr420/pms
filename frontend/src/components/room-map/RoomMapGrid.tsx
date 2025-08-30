@@ -1,7 +1,7 @@
 // frontend/src/components/room-map/RoomMapGrid.tsx
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Card } from '@/components/ui/card';
@@ -62,12 +62,11 @@ export default function RoomMapGrid({
 
   // ✅ Hook 2: Calcular larguras responsivas
   const gridDimensions = useMemo(() => {
-    const baseRoomColumnWidth = 160; // Reduzido para mobile
-    const baseCellWidth = 48; // Reduzido para mobile
+    // Larguras aumentadas para acomodar nomes completos dos quartos
+    const roomColumnWidth = window.innerWidth < 640 ? 180 :   // Mobile: 180px (antes 140px)
+                           window.innerWidth < 1024 ? 220 :   // Tablet: 220px (antes 160px)  
+                           260;                               // Desktop: 260px (antes 192px)
     
-    // Responsivo baseado na viewport
-    const roomColumnWidth = window.innerWidth < 640 ? 140 : 
-                           window.innerWidth < 1024 ? 160 : 192;
     const cellWidth = window.innerWidth < 640 ? 44 : 
                      window.innerWidth < 1024 ? 52 : 64;
     
@@ -119,28 +118,91 @@ export default function RoomMapGrid({
     
     return occupancyByDate;
   }, [mapData, dateHeaders]);
+
+  // ✅ Hook 4: Estado para controlar categorias expandidas/recolhidas
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+
+  // Função para toggle de categoria
+  const toggleCategory = (categoryId: string) => {
+    const newExpanded = new Set(expandedCategories);
+    if (newExpanded.has(categoryId)) {
+      newExpanded.delete(categoryId);
+    } else {
+      newExpanded.add(categoryId);
+    }
+    setExpandedCategories(newExpanded);
+  };
+
+  // Inicializar todas as categorias como expandidas
+  useEffect(() => {
+    if (mapData?.categories && expandedCategories.size === 0) {
+      const allCategories = new Set(mapData.categories.map(cat => cat.room_type_id.toString()));
+      setExpandedCategories(allCategories);
+    }
+  }, [mapData, expandedCategories.size]);
+
+  // ✅ Hook 5: Calcular disponibilidade por categoria por dia
+  const categoryDailyAvailability = useMemo(() => {
+    if (!mapData?.categories) return {};
+    
+    const availabilityByCategory: Record<string, Record<string, number>> = {};
+    
+    mapData.categories.forEach(category => {
+      const categoryId = category.room_type_id.toString();
+      availabilityByCategory[categoryId] = {};
+      
+      dateHeaders.forEach(header => {
+        let availableRooms = 0;
+        
+        category.rooms.forEach(room => {
+          if (room.is_operational && !room.is_out_of_order) {
+            // Verificar se não há reserva nesta data
+            const hasReservation = room.reservations.some(res => {
+              const checkIn = new Date(res.check_in_date + 'T00:00:00');
+              const checkOut = new Date(res.check_out_date + 'T00:00:00');
+              const targetDate = new Date(header.date + 'T00:00:00');
+              return targetDate >= checkIn && targetDate < checkOut;
+            });
+            
+            if (!hasReservation) {
+              availableRooms++;
+            }
+          }
+        });
+        
+        availabilityByCategory[categoryId][header.date] = availableRooms;
+      });
+    });
+    
+    return availabilityByCategory;
+  }, [mapData, dateHeaders]);
+
   const renderRoomRow = (room: MapRoomData) => {
     return (
-      <div key={room.id} className="flex border-b border-gray-100 last:border-b-0 border-b-[0.5px] relative min-w-0">
-        {/* Info do quarto - RESPONSIVO */}
+      <div key={room.id} className="flex border-b border-gray-200 last:border-b-0 relative min-w-0 hover:bg-gray-50 transition-colors duration-150">
+        {/* Info do quarto - Estilo lista com cinza escuro */}
         <div 
-          className="px-2 py-1.5 bg-white border-r border-gray-200 flex items-center justify-between cursor-pointer hover:bg-gray-50 flex-shrink-0 h-7 sm:h-8"
+          className="px-4 py-3 bg-white flex items-center justify-between cursor-pointer flex-shrink-0"
           style={{ width: `${gridDimensions.roomColumnWidth}px` }}
           onClick={() => onRoomClick?.(room)}
           title={`${room.name}${room.floor ? ` - Andar ${room.floor}` : ''} - ${Math.round(room.occupancy_rate)}% ocupado`}
         >
-          {/* Nome do quarto */}
-          <div className="font-medium text-xs text-gray-900 truncate">
-            {room.name}
-          </div>
-          
-          {/* Ícones de status */}
-          <div className="flex items-center gap-0.5 ml-1 flex-shrink-0">
-            {!room.is_operational && (
-              <AlertTriangle className="h-2 w-2 sm:h-2.5 sm:w-2.5 text-red-500" title="Quarto inativo" />
-            )}
-            {room.is_out_of_order && (
-              <Wrench className="h-2 w-2 sm:h-2.5 sm:w-2.5 text-red-500" title="Quarto em manutenção" />
+          {/* Nome do quarto - Cinza escuro mas não preto */}
+          <div className="flex items-center gap-2">
+            <div className="font-normal text-sm text-gray-700">
+              {room.name}
+            </div>
+            
+            {/* Ícones de status compactos */}
+            {(!room.is_operational || room.is_out_of_order) && (
+              <div className="flex items-center gap-1">
+                {!room.is_operational && (
+                  <AlertTriangle className="h-3 w-3 text-red-500" title="Quarto inativo" />
+                )}
+                {room.is_out_of_order && (
+                  <Wrench className="h-3 w-3 text-red-500" title="Quarto em manutenção" />
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -158,14 +220,17 @@ export default function RoomMapGrid({
                   key={header.date}
                   onClick={() => onCellClick?.(room, header.date)}
                   className={cn(
-                    "border-r border-gray-200 cursor-pointer transition-colors flex-shrink-0 h-7 sm:h-8",
+                    "border-r border-gray-200 cursor-pointer transition-colors flex-shrink-0",
                     "hover:bg-blue-50 flex items-center justify-center",
                     isToday && "border-l-2 border-l-blue-500",
                     isWeekend && "room-map-cell-weekend",
                     room.is_out_of_order && "bg-red-50 cursor-not-allowed",
                     !room.is_operational && "bg-gray-100 cursor-not-allowed"
                   )}
-                  style={{ width: `${gridDimensions.cellWidth}px` }}
+                  style={{ 
+                    width: `${gridDimensions.cellWidth}px`,
+                    height: '40px'
+                  }}
                   title={
                     room.is_out_of_order 
                       ? "Quarto fora de funcionamento" 
@@ -175,14 +240,14 @@ export default function RoomMapGrid({
                   }
                 >
                   {room.is_out_of_order && (
-                    <Wrench className="h-1.5 w-1.5 sm:h-2 sm:w-2 text-red-500" />
+                    <Wrench className="h-3 w-3 text-red-500" />
                   )}
                 </div>
               );
             })}
           </div>
           
-          {/* Blocos contínuos de reservas - AJUSTADOS PARA RESPONSIVIDADE */}
+          {/* Blocos contínuos de reservas - NOME COMPLETO DO HÓSPEDE */}
           {room.reservations.map(reservation => {
             const checkIn = new Date(reservation.check_in_date + 'T00:00:00');
             const checkOut = new Date(reservation.check_out_date + 'T00:00:00');
@@ -232,29 +297,31 @@ export default function RoomMapGrid({
                 key={reservation.id}
                 onClick={() => onReservationClick?.(reservation, room)}
                 className={cn(
-                  "absolute cursor-pointer text-[8px] sm:text-[10px] font-medium flex items-center justify-center",
+                  "absolute cursor-pointer text-[9px] sm:text-[10px] font-medium flex items-center justify-center",
                   getReservationColor(reservation.status)
                 )}
                 style={{
                   left: `${blockLeft}px`,
                   width: `${blockWidth}px`,
-                  height: 'calc(100% - 12px)',
-                  top: '6px',
+                  height: 'calc(60% - 4px)', // Aumentado 20% (de 50% para 60%)
+                  top: '50%', // Centralizado verticalmente
+                  transform: 'translateY(-50%)', // Ajuste fino para centralização
                   zIndex: 1,
                   clipPath: clipPath,
                   borderRadius: '0px'
                 }}
                 title={`${reservation.guest_name} - ${reservation.reservation_number}`}
               >
-                <span className="font-medium truncate leading-tight px-1 sm:px-2">
-                  {reservation.guest_name.split(' ')[0].substring(0, window.innerWidth < 640 ? 4 : 8)}
+                {/* NOME COMPLETO DO HÓSPEDE */}
+                <span className="font-medium truncate leading-tight px-2">
+                  {reservation.guest_name}
                 </span>
                 
                 {reservation.is_arrival && (
-                  <div className="absolute top-0.5 left-1 w-1 h-1 sm:w-1.5 sm:h-1.5 bg-green-400 rounded-full" />
+                  <div className="absolute top-1 left-1 w-1.5 h-1.5 bg-green-400 rounded-full" />
                 )}
                 {reservation.is_departure && (
-                  <div className="absolute top-0.5 right-1 w-1 h-1 sm:w-1.5 sm:h-1.5 bg-red-400 rounded-full" />
+                  <div className="absolute top-1 right-1 w-1.5 h-1.5 bg-red-400 rounded-full" />
                 )}
               </div>
             );
@@ -264,36 +331,73 @@ export default function RoomMapGrid({
     );
   };
 
-  // Renderizar categoria
+  // Renderizar categoria com estilo hierárquico e disponibilidade por dia
   const renderCategory = (category: MapCategoryData) => {
     if (category.rooms.length === 0) return null;
 
+    const categoryId = category.room_type_id.toString();
+    const isExpanded = expandedCategories.has(categoryId);
+    const categoryAvailability = categoryDailyAvailability[categoryId] || {};
+
     return (
-      <div key={category.room_type_id} className="mb-1">
-        {/* Header da categoria */}
-        <div className="bg-gray-50 border border-gray-200 rounded-t-lg px-2 py-1">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <h3 className="font-semibold text-gray-900 text-xs">
-                {category.room_type_name.replace(/\s+\d+$/, '')}
-              </h3>
+      <div key={category.room_type_id}>
+        {/* Linha da categoria com disponibilidade por dia */}
+        <div className="flex border-b border-gray-200">
+          {/* Header da categoria - Nome */}
+          <div 
+            className="bg-gray-100 hover:bg-gray-200 transition-colors duration-200 cursor-pointer flex items-center justify-between px-4 py-2 border-r border-gray-200"
+            style={{ width: `${gridDimensions.roomColumnWidth}px` }}
+            onClick={() => toggleCategory(categoryId)}
+          >
+            <h3 className="font-semibold text-gray-800 text-sm tracking-wide uppercase">
+              {category.room_type_name.replace(/\s+\d+$/, '')}
+            </h3>
+            
+            {/* Seta indicadora */}
+            <div className={cn(
+              "transform transition-transform duration-200 text-gray-600",
+              isExpanded ? "rotate-180" : "rotate-0"
+            )}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
             </div>
-            <div className="flex items-center gap-2 text-[10px] text-gray-600">
-              <div className="flex items-center gap-0.5">
-                <Bed className="h-2.5 w-2.5" />
-                <span>{category.operational_rooms}/{category.total_rooms}</span>
-              </div>
-              <div className="text-right">
-                <span className="font-medium">{Math.round(category.average_occupancy_rate)}%</span>
-              </div>
-            </div>
+          </div>
+          
+          {/* Células de disponibilidade por dia */}
+          <div className="flex">
+            {dateHeaders.map(header => {
+              const availableRooms = categoryAvailability[header.date] || 0;
+              const isWeekend = header.isWeekend;
+              
+              return (
+                <div
+                  key={header.date}
+                  className={cn(
+                    "bg-gray-100 border-r border-gray-200 flex items-center justify-center",
+                    isWeekend && "room-map-cell-weekend"
+                  )}
+                  style={{ 
+                    width: `${gridDimensions.cellWidth}px`,
+                    height: '40px'
+                  }}
+                >
+                  {/* Número de quartos disponíveis - Estilo minimalista reduzido */}
+                  <div className="text-xs font-medium text-gray-700 bg-white rounded border border-gray-200 px-1.5 py-0.5 min-w-[20px] text-center shadow-sm">
+                    {availableRooms}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
-        {/* Quartos da categoria */}
-        <div className="border-x border-b border-gray-200 rounded-b-lg">
-          {category.rooms.map(room => renderRoomRow(room))}
-        </div>
+        {/* Quartos da categoria - Expansível */}
+        {isExpanded && (
+          <div className="bg-white">
+            {category.rooms.map(room => renderRoomRow(room))}
+          </div>
+        )}
       </div>
     );
   };

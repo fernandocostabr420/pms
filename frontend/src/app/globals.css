@@ -614,6 +614,92 @@ main,
   overflow: visible;
 }
 
+/* ===== COLUNA DOS QUARTOS FIXA DURANTE SCROLL HORIZONTAL ===== */
+
+/* Header da coluna "Quartos" - fixo */
+.room-map-header-title {
+  position: sticky !important;
+  left: 0 !important;
+  z-index: 30 !important;
+  background: #374151;
+  border-right: 2px solid #4b5563;
+  font-weight: 600;
+  color: #ffffff;
+  flex-shrink: 0;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Células de categorias - fixas com z-index alto */
+.room-map-grid-container [style*="width:"] > div:first-child {
+  position: sticky !important;
+  left: 0 !important;
+  z-index: 25 !important;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
+  background: inherit;
+}
+
+/* Células dos quartos individuais - fixas */
+.room-map-content > div > div > div > div:first-child {
+  position: sticky !important;
+  left: 0 !important;
+  z-index: 20 !important;
+  background: white !important;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
+}
+
+/* Células das categorias expandíveis - fixas com prioridade máxima */
+.room-map-content > div > div:first-child > div:first-child {
+  position: sticky !important;
+  left: 0 !important;
+  z-index: 28 !important;
+  background: #f3f4f6 !important;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
+}
+
+/* Células de disponibilidade - z-index baixo para não sobrepor */
+.room-map-content > div > div:first-child > div:not(:first-child) {
+  z-index: 5 !important;
+  position: relative;
+}
+
+/* Garantir que números de disponibilidade não sobreponham categorias */
+.room-map-content [class*="bg-gray-100"] {
+  z-index: 5 !important;
+}
+
+/* Garantir que o scroll horizontal funcione apenas nas datas */
+.room-map-scroll {
+  position: relative;
+}
+
+/* ===== ELIMINAÇÃO TOTAL DE ESPAÇOS ENTRE ELEMENTOS ===== */
+
+/* Remove qualquer espaçamento entre categorias e quartos */
+.room-map-content > div {
+  margin: 0 !important;
+  padding: 0 !important;
+  gap: 0 !important;
+}
+
+/* Remove espaçamentos entre linhas */
+.room-map-content > div > div {
+  margin: 0 !important;
+  border-spacing: 0 !important;
+  line-height: 1 !important;
+}
+
+/* Garante que flex containers não tenham gaps */
+.room-map-content .flex {
+  gap: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Remove espaçamento de bordas duplas */
+.room-map-content [class*="border-b"] + [class*="border-b"] {
+  border-top: none !important;
+}
+
 /* ===== ROOM MAP HEADER STYLES - SEM ALTURAS FIXAS ===== */
 
 /* Header principal - fundo escuro compacto */
