@@ -614,27 +614,27 @@ main,
   overflow: visible;
 }
 
-/* ===== ROOM MAP HEADER STYLES - APRIMORADO ===== */
+/* ===== ROOM MAP HEADER STYLES - SEM ALTURAS FIXAS ===== */
 
-/* Header principal - fundo branco limpo com sombra */
+/* Header principal - fundo escuro compacto */
 .room-map-header {
-  background: #ffffff;
-  border-bottom: 2px solid #e5e7eb;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  background: #334155; /* slate-700 */
+  border-bottom: 2px solid #475569; /* slate-600 */
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
   position: sticky;
   top: 0;
   z-index: 20;
+  /* REMOVIDO: height: 64px; - estava sobrescrevendo o inline style */
 }
 
-/* Coluna "Quartos" - clara e legível */
+/* Coluna "Quartos" - escura para combinar */
 .room-map-header-title {
-  background: #f8fafc;
-  border-right: 2px solid #e5e7eb;
+  background: #374151; /* gray-700 */
+  border-right: 2px solid #4b5563; /* gray-600 */
   font-weight: 600;
-  color: #1f2937;
+  color: #ffffff;
   flex-shrink: 0;
-  min-width: 192px; /* w-48 */
-  width: 192px;
+  /* REMOVIDO: height: 64px; - estava sobrescrevendo o inline style */
 }
 
 /* Container das datas no header */
@@ -643,110 +643,118 @@ main,
   flex-shrink: 0;
 }
 
-/* Base das células - fundo branco limpo */
-.room-map-date-cell {
-  background: #ffffff;
-  border-right: 1px solid #e5e7eb;
+/* Células das datas - estilo compacto */
+.room-map-date-cell-enhanced {
+  background: #475569; /* slate-600 */
+  border-right: 1px solid #64748b; /* slate-500 */
   position: relative;
   flex-shrink: 0;
-  min-width: 64px; /* w-16 */
-  width: 64px;
+  overflow: hidden;
+  /* REMOVIDO: height: 64px; - deixar o inline style controlar */
 }
 
-/* Fim de semana (Sexta e Sábado) - fundo escuro riscado */
-.room-map-date-weekend {
-  background: 
-    repeating-linear-gradient(
-      45deg,
-      #f3f4f6 0px,
-      #f3f4f6 2px,
-      #e5e7eb 2px,
-      #e5e7eb 4px
-    );
-  border-right: 1px solid #d1d5db;
-  position: relative;
-}
-
-/* Hoje - destaque amarelo/dourado */
-.room-map-date-today {
-  background: #fefce8 !important;
-  border-right: 1px solid #fde047 !important;
-  position: relative;
-  box-shadow: inset 0 0 0 1px #fbbf24;
-}
-
-.room-map-date-today::before {
+/* Fim de semana com indicador visual pequeno */
+.room-map-date-weekend-enhanced::after {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: #f59e0b;
-  z-index: 1;
+  top: 1px;
+  right: 1px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 3px 3px 0;
+  border-color: transparent #3b82f6 transparent transparent;
+  z-index: 10;
 }
 
-.room-map-date-today::after {
+/* Hoje com borda destaque fina */
+.room-map-date-today-enhanced::before {
   content: '';
   position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: #f59e0b;
-  z-index: 1;
+  inset: 0;
+  border: 1px solid #f97316; /* orange-500 */
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Hover effect mais sutil */
+.room-map-date-cell-enhanced:hover {
+  background: #64748b; /* slate-500 */
+  transition: background-color 0.2s ease-in-out;
+}
+
+/* Otimização para fontes pequenas */
+.room-map-date-cell-enhanced * {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Responsividade - SEM ALTURAS FIXAS */
+@media (max-width: 768px) {
+  .room-map-date-cell-enhanced {
+    min-width: 40px;
+    width: 40px;
+  }
+  /* REMOVIDO: alturas fixas que sobrescreviam os inline styles */
+}
+
+@media (max-width: 480px) {  
+  .room-map-date-cell-enhanced {
+    min-width: 36px;
+    width: 36px;
+  }
+  /* REMOVIDO: alturas fixas que sobrescreviam os inline styles */
 }
 
 /* ===== TIPOGRAFIA DO HEADER ===== */
 
-/* Tipografia - clara e legível */
+/* ===== TIPOGRAFIA SUPER COMPACTA PARA CABER NO LAYOUT ===== */
+
+/* Remover definições de tipografia que sobrescrevem o Tailwind */
 .room-map-day-name {
-  font-size: 9px;
+  /* Deixar o Tailwind controlar o font-size */
   font-weight: 600;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
-  margin-bottom: 4px;
-  line-height: 1.1;
+  line-height: 1;
 }
 
 .room-map-day-number {
-  font-size: 16px;
+  /* Deixar o Tailwind controlar o font-size */
   font-weight: 700;
   line-height: 1;
-  margin-top: 2px;
 }
 
 /* Cores para dias normais - legível */
-.room-map-date-cell:not(.room-map-date-weekend):not(.room-map-date-today) .room-map-day-name {
-  color: #6b7280;
+.room-map-date-cell-enhanced:not(.room-map-date-weekend-enhanced):not(.room-map-date-today-enhanced) .room-map-day-name {
+  color: #ffffff;
 }
 
-.room-map-date-cell:not(.room-map-date-weekend):not(.room-map-date-today) .room-map-day-number {
-  color: #374151;
+.room-map-date-cell-enhanced:not(.room-map-date-weekend-enhanced):not(.room-map-date-today-enhanced) .room-map-day-number {
+  color: #ffffff;
 }
 
-/* Fim de semana - texto escuro legível */
-.room-map-date-weekend .room-map-day-name {
-  color: #374151;
+/* Fim de semana - texto branco */
+.room-map-date-weekend-enhanced .room-map-day-name {
+  color: #ffffff;
   font-weight: 700;
 }
 
-.room-map-date-weekend .room-map-day-number {
-  color: #1f2937;
+.room-map-date-weekend-enhanced .room-map-day-number {
+  color: #ffffff;
   font-weight: 800;
-  font-size: 18px;
 }
 
-/* Hoje - laranja/dourado legível */
-.room-map-date-today .room-map-day-name {
-  color: #d97706;
+/* Hoje - texto branco com destaque */
+.room-map-date-today-enhanced .room-map-day-name {
+  color: #ffffff;
   font-weight: 700;
 }
 
-.room-map-date-today .room-map-day-number {
-  color: #92400e;
+.room-map-date-today-enhanced .room-map-day-number {
+  color: #ffffff;
   font-weight: 800;
-  font-size: 18px;
 }
 
 /* ===== CONTEÚDO DO MAPA (QUARTOS) ===== */
