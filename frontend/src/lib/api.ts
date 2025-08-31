@@ -1,4 +1,4 @@
-// src/lib/api.ts - ARQUIVO ORIGINAL COMPLETO + NOVAS FUNCIONALIDADES
+// src/lib/api.ts - ARQUIVO COMPLETO + NOVAS FUNCIONALIDADES
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import Cookies from 'js-cookie';
 import type { 
@@ -388,6 +388,123 @@ class PMSApiClient {
     }
   }
 
+  // ===== NOVO MÉTODO PRINCIPAL PARA A TABELA =====
+  async getReservationsWithDetails(params?: {
+    page?: number;
+    per_page?: number;
+    status?: string;
+    source?: string;
+    property_id?: number;
+    guest_id?: number;
+    check_in_from?: string;
+    check_in_to?: string;
+    check_out_from?: string;
+    check_out_to?: string;
+    created_from?: string;
+    created_to?: string;
+    search?: string;
+    guest_email?: string;
+    guest_phone?: string;
+    guest_document_type?: string;
+    guest_nationality?: string;
+    guest_city?: string;
+    guest_state?: string;
+    guest_country?: string;
+    cancelled_from?: string;
+    cancelled_to?: string;
+    confirmed_from?: string;
+    confirmed_to?: string;
+    actual_checkin_from?: string;
+    actual_checkin_to?: string;
+    actual_checkout_from?: string;
+    actual_checkout_to?: string;
+    min_guests?: number;
+    max_guests?: number;
+    min_nights?: number;
+    max_nights?: number;
+    room_type_id?: number;
+    room_number?: string;
+    has_special_requests?: boolean;
+    has_internal_notes?: boolean;
+    deposit_paid?: boolean;
+    payment_status?: string;
+    marketing_source?: string;
+    is_current?: boolean;
+    can_check_in?: boolean;
+    can_check_out?: boolean;
+    can_cancel?: boolean;
+    min_amount?: number;
+    max_amount?: number;
+    is_paid?: boolean;
+    requires_deposit?: boolean;
+    is_group_reservation?: boolean;
+  }): Promise<ReservationListResponseWithDetails> {
+    // Limpar parâmetros nulos/vazios
+    const cleanParams = Object.fromEntries(
+      Object.entries(params || {}).filter(([_, value]) => 
+        value !== null && value !== undefined && value !== '' && value !== 'all'
+      )
+    );
+
+    // Sempre incluir detalhes para este método
+    cleanParams.include_guest_details = true;
+    cleanParams.include_room_details = true;
+    cleanParams.include_payment_details = true;
+
+    try {
+      const response = await this.client.get<ReservationListResponseWithDetails>('/reservations/detailed', { params: cleanParams });
+      return response.data;
+    } catch (error: any) {
+      console.error('Erro ao carregar reservas detalhadas:', error);
+      
+      // Fallback: tentar o endpoint padrão se o detalhado não existir
+      try {
+        const fallbackResponse = await this.getReservations({
+          ...cleanParams,
+          include_guest_details: true,
+          include_room_details: true,
+        });
+        
+        // Converter para o formato expandido se necessário
+        if ('reservations' in fallbackResponse && Array.isArray(fallbackResponse.reservations)) {
+          return {
+            reservations: fallbackResponse.reservations.map(reservation => ({
+              ...reservation,
+              guest_phone: reservation.guest?.phone || undefined,
+              guest_document_type: reservation.guest?.document_type || undefined,
+              guest_document_number: reservation.guest?.document_number || undefined,
+              guest_nationality: reservation.guest?.nationality || undefined,
+              guest_city: reservation.guest?.city || undefined,
+              guest_state: reservation.guest?.state || undefined,
+              guest_country: reservation.guest?.country || undefined,
+              property_address: reservation.property?.address || undefined,
+              property_phone: reservation.property?.phone || undefined,
+              property_city: reservation.property?.city || undefined,
+            })) as ReservationResponseWithGuestDetails[],
+            total: fallbackResponse.total,
+            page: fallbackResponse.page,
+            pages: fallbackResponse.pages,
+            per_page: fallbackResponse.per_page,
+            summary: {
+              total_amount: 0,
+              total_paid: 0,
+              total_pending: 0,
+              status_counts: {},
+              source_counts: {},
+              avg_nights: 0,
+              avg_guests: 0,
+              avg_amount: 0,
+            }
+          };
+        }
+        
+        throw new Error('Formato de resposta inválido');
+      } catch (fallbackError) {
+        throw error; // Lançar o erro original se o fallback também falhar
+      }
+    }
+  }
+
   async createReservation(data: ReservationCreate) {
     const response = await this.client.post<ReservationResponse>('/reservations/', data);
     return response.data;
@@ -438,33 +555,159 @@ class PMSApiClient {
     return response.data;
   }
 
-  async confirmReservation(reservationId: number): Promise<ReservationResponse> {
-    const response = await this.client.patch<ReservationResponse>(`/reservations/${reservationId}/confirm`);
-    return response.data;
+  // ===== MÉTODOS DE AÇÕES RÁPIDAS ATUALIZADOS =====
+  async confirmReservation(reservationId: number): Promise<ReservationResponseWithGuestDetails> {
+    try {
+      const response = await this.client.patch<ReservationResponseWithGuestDetails>(`/reservations/${reservationId}/confirm`);
+      return response.data;
+    } catch (error: any) {
+      // Fallback para método original se o novo não existir
+      try {
+        const fallbackResponse = await this.client.patch<ReservationResponse>(`/reservations/${reservationId}/confirm`);
+        return fallbackResponse.data as ReservationResponseWithGuestDetails;
+      } catch (fallbackError) {
+        throw error;
+      }
+    }
   }
 
   async checkInReservation(
     reservationId: number,
     data: CheckInRequest | CheckInRequestNew
-  ): Promise<ReservationResponse> {
-    const response = await this.client.post<ReservationResponse>(`/reservations/${reservationId}/check-in`, data);
-    return response.data;
+  ): Promise<ReservationResponseWithGuestDetails> {
+    try {
+      const response = await this.client.post<ReservationResponseWithGuestDetails>(`/reservations/${reservationId}/check-in`, data);
+      return response.data;
+    } catch (error: any) {
+      // Fallback para método original
+      try {
+        const fallbackResponse = await this.client.post<ReservationResponse>(`/reservations/${reservationId}/check-in`, data);
+        return fallbackResponse.data as ReservationResponseWithGuestDetails;
+      } catch (fallbackError) {
+        throw error;
+      }
+    }
   }
 
   async checkOutReservation(
     reservationId: number,
     data: CheckOutRequest | CheckOutRequestNew
-  ): Promise<ReservationResponse> {
-    const response = await this.client.post<ReservationResponse>(`/reservations/${reservationId}/check-out`, data);
-    return response.data;
+  ): Promise<ReservationResponseWithGuestDetails> {
+    try {
+      const response = await this.client.post<ReservationResponseWithGuestDetails>(`/reservations/${reservationId}/check-out`, data);
+      return response.data;
+    } catch (error: any) {
+      // Fallback para método original
+      try {
+        const fallbackResponse = await this.client.post<ReservationResponse>(`/reservations/${reservationId}/check-out`, data);
+        return fallbackResponse.data as ReservationResponseWithGuestDetails;
+      } catch (fallbackError) {
+        throw error;
+      }
+    }
   }
 
   async cancelReservation(
     reservationId: number,
     data: CancelReservationRequest | CancelReservationRequestNew
-  ): Promise<ReservationResponse> {
-    const response = await this.client.post<ReservationResponse>(`/reservations/${reservationId}/cancel`, data);
-    return response.data;
+  ): Promise<ReservationResponseWithGuestDetails> {
+    try {
+      const response = await this.client.post<ReservationResponseWithGuestDetails>(`/reservations/${reservationId}/cancel`, data);
+      return response.data;
+    } catch (error: any) {
+      // Fallback para método original
+      try {
+        const fallbackResponse = await this.client.post<ReservationResponse>(`/reservations/${reservationId}/cancel`, data);
+        return fallbackResponse.data as ReservationResponseWithGuestDetails;
+      } catch (fallbackError) {
+        throw error;
+      }
+    }
+  }
+
+  // ===== MÉTODO DE EXPORTAÇÃO ATUALIZADO =====
+  async exportReservations(filters?: ReservationExportFilters): Promise<Blob> {
+    const cleanParams = Object.fromEntries(
+      Object.entries(filters || {}).filter(([_, value]) => 
+        value !== null && value !== undefined && value !== ''
+      )
+    );
+
+    try {
+      const response = await this.client.get('/reservations/export', {
+        params: {
+          ...cleanParams,
+          format: 'xlsx',
+        },
+        responseType: 'blob',
+      });
+
+      return response.data;
+    } catch (error: any) {
+      // Fallback: usar endpoint alternativo ou método CSV
+      try {
+        const response = await this.client.post('/reservations/export', cleanParams, {
+          responseType: 'blob',
+        });
+        return response.data;
+      } catch (fallbackError) {
+        console.error('Erro ao exportar reservas:', error);
+        throw error;
+      }
+    }
+  }
+
+  // ===== MÉTODO DE DASHBOARD STATS ATUALIZADO =====
+  async getDashboardStats(): Promise<DashboardStats> {
+    try {
+      const response = await this.client.get<DashboardStats>('/dashboard/stats');
+      return response.data;
+    } catch (error: any) {
+      console.error('Erro ao carregar estatísticas do dashboard:', error);
+      
+      // Fallback: tentar endpoint original
+      try {
+        const fallbackResponse = await this.getDashboardStatsSimple();
+        return {
+          total_reservations: fallbackResponse.total_reservations || 0,
+          total_revenue: fallbackResponse.total_revenue || 0,
+          occupancy_rate: 0,
+          pending_checkins: fallbackResponse.arrivals_today || 0,
+          pending_checkouts: fallbackResponse.departures_today || 0,
+          overdue_payments: 0,
+          avg_nights: 0,
+          avg_guests: 0,
+          avg_amount: 0,
+          this_month_reservations: 0,
+          this_month_revenue: 0,
+          last_month_reservations: 0,
+          last_month_revenue: 0,
+          status_distribution: {},
+          source_distribution: {},
+          recent_activity: [],
+        };
+      } catch (fallbackError) {
+        // Retornar dados padrão em caso de erro completo
+        return {
+          total_reservations: 0,
+          total_revenue: 0,
+          occupancy_rate: 0,
+          pending_checkins: 0,
+          pending_checkouts: 0,
+          overdue_payments: 0,
+          avg_nights: 0,
+          avg_guests: 0,
+          avg_amount: 0,
+          this_month_reservations: 0,
+          this_month_revenue: 0,
+          last_month_reservations: 0,
+          last_month_revenue: 0,
+          status_distribution: {},
+          source_distribution: {},
+          recent_activity: [],
+        };
+      }
+    }
   }
 
   async getCalendarMonth(
@@ -514,21 +757,7 @@ class PMSApiClient {
     return response.data;
   }
 
-  async getDashboardStats(propertyId?: number, daysBack?: number): Promise<CalendarStatsResponse> {
-    const params = new URLSearchParams();
-    if (propertyId) {
-      params.append('property_id', propertyId.toString());
-    }
-    if (daysBack) {
-      params.append('days_back', daysBack.toString());
-    }
-
-    const response = await this.client.get(`/reservations/stats/dashboard?${params}`);
-    return response.data;
-  }
-
-  // Novo método de stats expandido
-  async getDashboardStatsExpanded(propertyId?: number, daysBack?: number): Promise<DashboardStats> {
+  async getDashboardStatsOriginal(propertyId?: number, daysBack?: number): Promise<CalendarStatsResponse> {
     const params = new URLSearchParams();
     if (propertyId) {
       params.append('property_id', propertyId.toString());

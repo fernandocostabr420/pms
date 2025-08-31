@@ -18,13 +18,17 @@ import {
   TrendingUp,
   AlertCircle,
   Filter,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Table as TableIcon,
+  Grid,
+  Search,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 // Components
 import ReservationFiltersComponent from '@/components/reservations/ReservationFilters';
+import ReservationTable from '@/components/reservations/ReservationTable';
 import ReservationCard from '@/components/reservations/ReservationCard';
 import ReservationDetails from '@/components/reservations/ReservationDetails';
 import LoadingSpinner from '@/components/ui/loading-spinner';
@@ -77,6 +81,8 @@ const INITIAL_FILTERS: ReservationFilters = {
 
 const PER_PAGE = 20;
 
+type ViewMode = 'table' | 'cards';
+
 export default function ReservationsPage() {
   // Estados principais
   const [state, setState] = useState<ReservationPageState>({
@@ -95,52 +101,52 @@ export default function ReservationsPage() {
   const [showDetails, setShowDetails] = useState(false);
   const [actionLoading, setActionLoading] = useState<{ [key: number]: string | null }>({});
   const [exporting, setExporting] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('table');
 
   // Carregar reservas
-  const loadReservations = useCallback(async (page: number = 1) => {
-    setState(prev => ({ ...prev, loading: true, error: null }));
-    
+  const loadReservations = useCallback(async (page?: number) => {
     try {
-      const queryParams = {
-        page,
+      setState(prev => ({ ...prev, loading: true, error: null }));
+      
+      const currentPage = page || state.currentPage;
+      const params = {
+        page: currentPage,
         per_page: PER_PAGE,
-        include_guest_details: true,
-        include_room_details: true,
-        include_payment_summary: true,
-        ...filters
+        ...filters,
+        // Remover valores vazios/undefined
+        ...Object.fromEntries(
+          Object.entries(filters).filter(([_, value]) => 
+            value !== undefined && value !== '' && value !== null
+          )
+        ),
       };
 
-      // Remover valores vazios/null/undefined
-      Object.keys(queryParams).forEach(key => {
-        const value = queryParams[key as keyof typeof queryParams];
-        if (value === null || value === undefined || value === '' || value === 'all') {
-          delete queryParams[key as keyof typeof queryParams];
-        }
-      });
-
-      const response = await apiClient.getReservations(queryParams);
+      const response = await apiClient.getReservationsWithDetails(params);
       
       setState(prev => ({
         ...prev,
         reservations: response.reservations || [],
         total: response.total || 0,
-        currentPage: response.page || 1,
-        totalPages: response.pages || 0,
+        currentPage: currentPage,
+        totalPages: Math.ceil((response.total || 0) / PER_PAGE),
         summary: response.summary || null,
         loading: false,
-        error: null,
       }));
-
+      
     } catch (error: any) {
       console.error('Erro ao carregar reservas:', error);
       setState(prev => ({
         ...prev,
+        error: error?.response?.data?.detail || 'Erro ao carregar reservas',
         loading: false,
-        error: error?.response?.data?.detail || 'Erro ao carregar reservas'
+        reservations: [],
       }));
+      
       toast({
         title: "Erro",
-        description: "Não foi possível carregar as reservas. Tente novamente.",
+        description: error?.response?.data?.detail || 
+          "Não foi possível carregar as reservas. Tente novamente.",
         variant: "destructive"
       });
     }
@@ -231,29 +237,29 @@ export default function ReservationsPage() {
           break;
           
         case 'cancel':
-          // TODO: Abrir modal de confirmação com motivo
-          response = await apiClient.cancelReservation(reservation.id, {
-            cancellation_reason: "Cancelado pelo sistema"
-          });
+          // Para cancelamento, implementar modal de confirmação no futuro
           toast({
-            title: "Sucesso",
-            description: "Reserva cancelada com sucesso!"
+            title: "Funcionalidade em desenvolvimento",
+            description: "O cancelamento será implementado em breve."
           });
           break;
           
         default:
-          throw new Error(`Ação não implementada: ${action}`);
+          break;
       }
       
-      // Recarregar dados
-      await loadReservations(state.currentPage);
-      await loadQuickStats();
+      if (response) {
+        // Recarregar dados após ação bem-sucedida
+        loadReservations();
+        loadQuickStats();
+      }
       
     } catch (error: any) {
-      console.error(`Erro na ação ${action}:`, error);
+      console.error('Erro na ação rápida:', error);
       toast({
         title: "Erro",
-        description: error?.response?.data?.detail || `Erro ao ${action} reserva`,
+        description: error?.response?.data?.detail || 
+          "Não foi possível executar a ação. Tente novamente.",
         variant: "destructive"
       });
     } finally {
@@ -261,33 +267,45 @@ export default function ReservationsPage() {
     }
   };
 
-  const handleExportCSV = async () => {
-    setExporting(true);
+  const handleRefresh = () => {
+    loadReservations();
+    loadQuickStats();
+  };
+
+  const handleExport = async () => {
     try {
-      const exportFilters = {
+      setExporting(true);
+      
+      const params = {
         ...filters,
+        export_format: 'xlsx',
         include_guest_details: true,
         include_room_details: true,
         include_payment_details: true,
-        date_format: "dd/mm/yyyy",
-        currency_format: "pt-BR"
       };
-
-      const response = await apiClient.exportReservationsCSV(exportFilters);
       
-      // Fazer download do arquivo
-      window.open(response.file_url, '_blank');
+      const response = await apiClient.exportReservations(params);
+      
+      // Criar link de download
+      const url = window.URL.createObjectURL(new Blob([response]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `reservas-${format(new Date(), 'yyyy-MM-dd')}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
       
       toast({
         title: "Sucesso",
-        description: `Arquivo exportado com ${response.total_records} reservas!`
+        description: "Relatório exportado com sucesso!"
       });
       
     } catch (error: any) {
       console.error('Erro ao exportar:', error);
       toast({
         title: "Erro",
-        description: "Erro ao exportar reservas. Tente novamente.",
+        description: "Não foi possível exportar o relatório. Tente novamente.",
         variant: "destructive"
       });
     } finally {
@@ -295,141 +313,163 @@ export default function ReservationsPage() {
     }
   };
 
+  // Verificar se há filtros ativos
+  const hasActiveFilters = Object.values(filters).some(value => 
+    value !== undefined && value !== '' && value !== null
+  );
+
   const getActionLoadingForReservation = (reservationId: number) => {
     return actionLoading[reservationId] || null;
   };
 
-  const hasActiveFilters = Object.values(filters).some(value => 
-    value !== null && value !== undefined && value !== '' && value !== 'all'
-  );
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+    }).format(value);
+  };
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Reservas</h1>
-          <p className="text-gray-600">
-            Gerencie todas as reservas do seu hotel
-            {state.total > 0 && (
-              <span className="ml-2">
-                • {state.total} reserva{state.total !== 1 ? 's' : ''} encontrada{state.total !== 1 ? 's' : ''}
-              </span>
-            )}
+          <p className="text-gray-600 mt-1">
+            Gerencie todas as reservas do sistema
           </p>
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {/* Toggle de visualização */}
+          <div className="flex items-center border rounded-md p-1">
+            <Button
+              variant={viewMode === 'table' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setViewMode('table')}
+              className="h-8 px-3"
+            >
+              <TableIcon className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={viewMode === 'cards' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setViewMode('cards')}
+              className="h-8 px-3"
+            >
+              <Grid className="h-4 w-4" />
+            </Button>
+          </div>
+          
           <Button
             variant="outline"
-            onClick={() => loadReservations(state.currentPage)}
-            disabled={state.loading}
+            size="sm"
+            onClick={() => setShowFilters(!showFilters)}
+            className={hasActiveFilters ? 'border-blue-500 bg-blue-50' : ''}
           >
+            <Filter className="h-4 w-4 mr-2" />
+            Filtros
+            {hasActiveFilters && (
+              <Badge variant="secondary" className="ml-2 bg-blue-100 text-blue-800">
+                {Object.values(filters).filter(v => v !== undefined && v !== '' && v !== null).length}
+              </Badge>
+            )}
+          </Button>
+          
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={state.loading}>
             <RefreshCw className={`h-4 w-4 mr-2 ${state.loading ? 'animate-spin' : ''}`} />
             Atualizar
           </Button>
           
-          <Button
-            variant="outline" 
-            onClick={handleExportCSV}
-            disabled={exporting || state.loading || state.total === 0}
-          >
-            <FileSpreadsheet className={`h-4 w-4 mr-2 ${exporting ? 'animate-spin' : ''}`} />
-            Exportar CSV
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
+            {exporting ? (
+              <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600" />
+            ) : (
+              <FileSpreadsheet className="h-4 w-4 mr-2" />
+            )}
+            Exportar
           </Button>
           
-          <Button>
+          <Button size="sm">
             <Plus className="h-4 w-4 mr-2" />
             Nova Reserva
           </Button>
         </div>
       </div>
 
-      {/* Quick Stats */}
+      {/* Estatísticas rápidas */}
       {quickStats && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
-          <Card>
+          <Card className="bg-gradient-to-r from-blue-50 to-blue-100 border-blue-200">
             <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <Calendar className="h-5 w-5 text-blue-600" />
-                </div>
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600">Total</p>
-                  <p className="text-xl font-bold">{quickStats.totalReservations}</p>
+                  <p className="text-sm font-medium text-blue-800">Total</p>
+                  <p className="text-2xl font-bold text-blue-900">{quickStats.totalReservations}</p>
                 </div>
+                <Calendar className="h-8 w-8 text-blue-600" />
               </div>
             </CardContent>
           </Card>
-
-          <Card>
+          
+          <Card className="bg-gradient-to-r from-green-50 to-green-100 border-green-200">
             <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-green-100 rounded-lg">
-                  <DollarSign className="h-5 w-5 text-green-600" />
-                </div>
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600">Receita</p>
-                  <p className="text-lg font-bold">
-                    R$ {quickStats.totalRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  <p className="text-sm font-medium text-green-800">Receita</p>
+                  <p className="text-xl font-bold text-green-900">
+                    {formatCurrency(quickStats.totalRevenue)}
                   </p>
                 </div>
+                <DollarSign className="h-8 w-8 text-green-600" />
               </div>
             </CardContent>
           </Card>
-
-          <Card>
+          
+          <Card className="bg-gradient-to-r from-purple-50 to-purple-100 border-purple-200">
             <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-100 rounded-lg">
-                  <TrendingUp className="h-5 w-5 text-purple-600" />
-                </div>
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600">Ocupação</p>
-                  <p className="text-xl font-bold">{quickStats.avgOccupancy.toFixed(1)}%</p>
+                  <p className="text-sm font-medium text-purple-800">Ocupação</p>
+                  <p className="text-2xl font-bold text-purple-900">{quickStats.avgOccupancy}%</p>
                 </div>
+                <TrendingUp className="h-8 w-8 text-purple-600" />
               </div>
             </CardContent>
           </Card>
-
-          <Card>
+          
+          <Card className="bg-gradient-to-r from-orange-50 to-orange-100 border-orange-200">
             <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <Users className="h-5 w-5 text-blue-600" />
-                </div>
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600">Check-ins</p>
-                  <p className="text-xl font-bold">{quickStats.pendingCheckIns}</p>
+                  <p className="text-sm font-medium text-orange-800">Check-ins</p>
+                  <p className="text-2xl font-bold text-orange-900">{quickStats.pendingCheckIns}</p>
                 </div>
+                <Users className="h-8 w-8 text-orange-600" />
               </div>
             </CardContent>
           </Card>
-
-          <Card>
+          
+          <Card className="bg-gradient-to-r from-teal-50 to-teal-100 border-teal-200">
             <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-orange-100 rounded-lg">
-                  <Users className="h-5 w-5 text-orange-600" />
-                </div>
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600">Check-outs</p>
-                  <p className="text-xl font-bold">{quickStats.pendingCheckOuts}</p>
+                  <p className="text-sm font-medium text-teal-800">Check-outs</p>
+                  <p className="text-2xl font-bold text-teal-900">{quickStats.pendingCheckOuts}</p>
                 </div>
+                <Building className="h-8 w-8 text-teal-600" />
               </div>
             </CardContent>
           </Card>
-
-          <Card>
+          
+          <Card className="bg-gradient-to-r from-red-50 to-red-100 border-red-200">
             <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-red-100 rounded-lg">
-                  <AlertCircle className="h-5 w-5 text-red-600" />
-                </div>
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600">Em atraso</p>
-                  <p className="text-xl font-bold">{quickStats.overduePayments}</p>
+                  <p className="text-sm font-medium text-red-800">Pendentes</p>
+                  <p className="text-2xl font-bold text-red-900">{quickStats.overduePayments}</p>
                 </div>
+                <AlertCircle className="h-8 w-8 text-red-600" />
               </div>
             </CardContent>
           </Card>
@@ -437,85 +477,65 @@ export default function ReservationsPage() {
       )}
 
       {/* Filtros */}
-      <ReservationFiltersComponent
-        filters={filters}
-        onFiltersChange={handleFiltersChange}
-        onClearFilters={handleClearFilters}
-        loading={state.loading}
-      />
+      {showFilters && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Filter className="h-5 w-5" />
+              Filtros de Busca
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ReservationFiltersComponent
+              filters={filters}
+              onFiltersChange={handleFiltersChange}
+              onClearFilters={handleClearFilters}
+              loading={state.loading}
+            />
+          </CardContent>
+        </Card>
+      )}
 
-      {/* Summary da Busca */}
+      {/* Erro */}
+      {state.error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{state.error}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Resumo */}
       {state.summary && state.total > 0 && (
-        <Card className="bg-blue-50 border-blue-200">
+        <Card className="bg-gray-50">
           <CardContent className="p-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              <div>
-                <span className="font-medium text-blue-900">Valor Total:</span>
-                <div className="text-lg font-bold text-blue-700">
-                  R$ {state.summary.total_amount?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                </div>
-              </div>
-              <div>
-                <span className="font-medium text-blue-900">Valor Pago:</span>
-                <div className="text-lg font-bold text-green-700">
-                  R$ {state.summary.total_paid?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                </div>
-              </div>
-              <div>
-                <span className="font-medium text-blue-900">Média de Noites:</span>
-                <div className="text-lg font-bold text-blue-700">
-                  {state.summary.avg_nights?.toFixed(1)}
-                </div>
-              </div>
-              <div>
-                <span className="font-medium text-blue-900">Média de Hóspedes:</span>
-                <div className="text-lg font-bold text-blue-700">
-                  {state.summary.avg_guests?.toFixed(1)}
-                </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium">
+                {state.total} reserva{state.total !== 1 ? 's' : ''} encontrada{state.total !== 1 ? 's' : ''}
+              </span>
+              <div className="flex items-center gap-6">
+                <span>
+                  Total: <span className="font-bold">{formatCurrency(state.summary.total_amount || 0)}</span>
+                </span>
+                <span>
+                  Pago: <span className="font-bold text-green-600">{formatCurrency(state.summary.total_paid || 0)}</span>
+                </span>
+                <span>
+                  Pendente: <span className="font-bold text-red-600">{formatCurrency(state.summary.total_pending || 0)}</span>
+                </span>
               </div>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Lista de Reservas */}
-      <Card>
-        <CardHeader className="pb-4">
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <Filter className="h-5 w-5" />
-              Reservas Encontradas
-              {hasActiveFilters && (
-                <Badge variant="secondary" className="ml-2">
-                  {Object.values(filters).filter(v => 
-                    v !== null && v !== undefined && v !== '' && v !== 'all'
-                  ).length} filtros ativos
-                </Badge>
-              )}
-            </CardTitle>
-            
-            {state.total > 0 && (
-              <div className="text-sm text-gray-600">
-                Página {state.currentPage} de {state.totalPages} • {state.total} registros
-              </div>
-            )}
-          </div>
-        </CardHeader>
-
-        <CardContent className="p-0">
-          {state.error ? (
-            <Alert className="m-6" variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{state.error}</AlertDescription>
-            </Alert>
-          ) : state.loading ? (
-            <div className="p-8">
-              <LoadingSpinner className="mx-auto" />
-              <div className="text-center mt-4 text-gray-600">
-                Carregando reservas...
-              </div>
-            </div>
-          ) : state.reservations.length === 0 ? (
+      {/* Conteúdo principal */}
+      <Card className="flex-1">
+        {state.loading && state.reservations.length === 0 ? (
+          <CardContent className="p-8">
+            <LoadingSpinner />
+          </CardContent>
+        ) : !state.reservations.length ? (
+          <CardContent>
             <div className="p-8 text-center">
               <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">
@@ -533,74 +553,89 @@ export default function ReservationsPage() {
                 </Button>
               )}
             </div>
-          ) : (
-            <>
-              <div className="space-y-4 p-6">
-                {state.reservations.map((reservation) => (
-                  <ReservationCard
-                    key={reservation.id}
-                    reservation={reservation}
-                    onView={() => handleViewReservation(reservation)}
-                    onEdit={() => handleEditReservation(reservation)}
-                    onQuickAction={(action) => handleQuickAction(reservation, action)}
-                    actionLoading={getActionLoadingForReservation(reservation.id)}
-                  />
-                ))}
-              </div>
+          </CardContent>
+        ) : (
+          <>
+            {/* Tabela ou Cards */}
+            {viewMode === 'table' ? (
+              <CardContent className="p-0">
+                <ReservationTable
+                  reservations={state.reservations}
+                  loading={state.loading}
+                  onView={handleViewReservation}
+                  onEdit={handleEditReservation}
+                  onQuickAction={handleQuickAction}
+                  actionLoading={actionLoading}
+                />
+              </CardContent>
+            ) : (
+              <CardContent>
+                <div className="space-y-4 p-2">
+                  {state.reservations.map((reservation) => (
+                    <ReservationCard
+                      key={reservation.id}
+                      reservation={reservation}
+                      onView={() => handleViewReservation(reservation)}
+                      onEdit={() => handleEditReservation(reservation)}
+                      onQuickAction={(action) => handleQuickAction(reservation, action)}
+                      actionLoading={getActionLoadingForReservation(reservation.id)}
+                    />
+                  ))}
+                </div>
+              </CardContent>
+            )}
 
-              {/* Paginação */}
-              {state.totalPages > 1 && (
-                <div className="p-6 border-t border-gray-200">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm text-gray-600">
-                      Mostrando {((state.currentPage - 1) * PER_PAGE) + 1} até{' '}
-                      {Math.min(state.currentPage * PER_PAGE, state.total)} de {state.total} registros
-                    </div>
+            {/* Paginação */}
+            {state.totalPages > 1 && (
+              <div className="p-6 border-t border-gray-200">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-gray-600">
+                    Mostrando {((state.currentPage - 1) * PER_PAGE) + 1} até{' '}
+                    {Math.min(state.currentPage * PER_PAGE, state.total)} de {state.total} registros
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(state.currentPage - 1)}
+                      disabled={state.currentPage <= 1 || state.loading}
+                    >
+                      Anterior
+                    </Button>
                     
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handlePageChange(state.currentPage - 1)}
-                        disabled={state.currentPage <= 1 || state.loading}
-                      >
-                        Anterior
-                      </Button>
-                      
-                      <span className="text-sm text-gray-600 px-3">
-                        {state.currentPage} / {state.totalPages}
-                      </span>
-                      
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handlePageChange(state.currentPage + 1)}
-                        disabled={state.currentPage >= state.totalPages || state.loading}
-                      >
-                        Próxima
-                      </Button>
-                    </div>
+                    <span className="text-sm text-gray-600 px-3">
+                      {state.currentPage} / {state.totalPages}
+                    </span>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePageChange(state.currentPage + 1)}
+                      disabled={state.currentPage >= state.totalPages || state.loading}
+                    >
+                      Próxima
+                    </Button>
                   </div>
                 </div>
-              )}
-            </>
-          )}
-        </CardContent>
+              </div>
+            )}
+          </>
+        )}
       </Card>
 
-      {/* Modal de Detalhes */}
+      {/* Modal de detalhes */}
       {showDetails && selectedReservation && (
         <ReservationDetails
           reservation={selectedReservation}
-          isOpen={showDetails}
+          open={showDetails}
           onClose={() => {
             setShowDetails(false);
             setSelectedReservation(null);
           }}
-          onUpdate={async () => {
-            await loadReservations(state.currentPage);
-            setShowDetails(false);
-            setSelectedReservation(null);
+          onUpdate={() => {
+            loadReservations();
+            loadQuickStats();
           }}
         />
       )}
