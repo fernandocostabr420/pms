@@ -1,4 +1,4 @@
-# backend/app/schemas/reservation.py
+# backend/app/schemas/reservation.py - ARQUIVO COMPLETO COM TODAS AS MODIFICAÇÕES
 
 from pydantic import BaseModel, field_validator, Field
 from typing import Optional, List, Dict, Any
@@ -36,6 +36,9 @@ class ReservationRoomResponse(ReservationRoomBase):
     nights: Optional[int] = None
     room_number: Optional[str] = None
     room_name: Optional[str] = None
+    room_type_name: Optional[str] = None
+    guests: Optional[int] = None
+    rate_plan_name: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -268,9 +271,11 @@ class AvailabilityResponse(BaseModel):
     conflicting_reservations: Optional[List[str]] = None  # Números das reservas em conflito
 
 
-# Schema para filtros
+# Schema para filtros - EXPANDIDO COM NOVOS CAMPOS
 class ReservationFilters(BaseModel):
-    """Schema para filtros de busca de reservas"""
+    """Schema para filtros de busca de reservas - VERSÃO EXPANDIDA"""
+    
+    # Filtros básicos existentes
     status: Optional[str] = None
     source: Optional[str] = None
     property_id: Optional[int] = None
@@ -292,3 +297,262 @@ class ReservationFilters(BaseModel):
     is_group_reservation: Optional[bool] = None
     
     search: Optional[str] = None  # Busca em reservation_number, guest name, etc.
+    
+    # ===== NOVOS FILTROS ADICIONADOS =====
+    
+    # Filtros do hóspede
+    guest_email: Optional[str] = Field(None, description="E-mail do hóspede")
+    guest_phone: Optional[str] = Field(None, description="Telefone do hóspede")
+    guest_document_type: Optional[str] = Field(None, description="Tipo de documento")
+    guest_nationality: Optional[str] = Field(None, description="Nacionalidade do hóspede")
+    guest_city: Optional[str] = Field(None, description="Cidade do hóspede")
+    guest_state: Optional[str] = Field(None, description="Estado do hóspede")
+    guest_country: Optional[str] = Field(None, description="País do hóspede")
+    
+    # Filtros de data expandidos
+    cancelled_from: Optional[date] = Field(None, description="Data de cancelamento inicial")
+    cancelled_to: Optional[date] = Field(None, description="Data de cancelamento final")
+    confirmed_from: Optional[datetime] = Field(None, description="Data de confirmação inicial")
+    confirmed_to: Optional[datetime] = Field(None, description="Data de confirmação final")
+    actual_checkin_from: Optional[datetime] = Field(None, description="Check-in realizado a partir de")
+    actual_checkin_to: Optional[datetime] = Field(None, description="Check-in realizado até")
+    actual_checkout_from: Optional[datetime] = Field(None, description="Check-out realizado a partir de")
+    actual_checkout_to: Optional[datetime] = Field(None, description="Check-out realizado até")
+    
+    # Filtros por número de hóspedes e noites
+    min_guests: Optional[int] = Field(None, ge=1, description="Número mínimo de hóspedes")
+    max_guests: Optional[int] = Field(None, ge=1, description="Número máximo de hóspedes")
+    min_nights: Optional[int] = Field(None, ge=1, description="Número mínimo de noites")
+    max_nights: Optional[int] = Field(None, ge=1, description="Número máximo de noites")
+    
+    # Filtros de quarto
+    room_type_id: Optional[int] = Field(None, description="ID do tipo de quarto")
+    room_number: Optional[str] = Field(None, description="Número do quarto")
+    
+    # Filtros especiais
+    has_special_requests: Optional[bool] = Field(None, description="Possui pedidos especiais")
+    has_internal_notes: Optional[bool] = Field(None, description="Possui notas internas")
+    deposit_paid: Optional[bool] = Field(None, description="Depósito pago")
+    payment_status: Optional[str] = Field(None, description="Status do pagamento")
+    marketing_source: Optional[str] = Field(None, description="Origem do marketing")
+    
+    # Filtros por flags específicas
+    is_current: Optional[bool] = Field(None, description="Reservas atuais (hóspede no hotel)")
+    can_check_in: Optional[bool] = Field(None, description="Pode fazer check-in")
+    can_check_out: Optional[bool] = Field(None, description="Pode fazer check-out")
+    can_cancel: Optional[bool] = Field(None, description="Pode ser cancelada")
+
+
+# ===== NOVOS SCHEMAS PARA FUNCIONALIDADES EXPANDIDAS =====
+
+class ReservationResponseWithGuestDetails(ReservationResponse):
+    """Schema de Reservation com detalhes completos do hóspede"""
+    
+    # Dados do hóspede expandidos
+    guest_phone: Optional[str] = None
+    guest_document_type: Optional[str] = None
+    guest_document_number: Optional[str] = None
+    guest_nationality: Optional[str] = None
+    guest_city: Optional[str] = None
+    guest_state: Optional[str] = None
+    guest_country: Optional[str] = None
+    guest_address: Optional[str] = None
+    guest_date_of_birth: Optional[date] = None
+    guest_preferences: Optional[Dict[str, Any]] = None
+    guest_notes: Optional[str] = None
+    
+    # Dados da propriedade expandidos
+    property_address: Optional[str] = None
+    property_phone: Optional[str] = None
+    property_city: Optional[str] = None
+    property_state: Optional[str] = None
+    property_country: Optional[str] = None
+    
+    # Estatísticas do hóspede
+    guest_total_reservations: Optional[int] = None
+    guest_completed_stays: Optional[int] = None
+    guest_cancelled_reservations: Optional[int] = None
+    guest_total_nights: Optional[int] = None
+    guest_last_stay_date: Optional[date] = None
+    
+    # Dados de pagamento expandidos
+    last_payment_date: Optional[datetime] = None
+    payment_method_last: Optional[str] = None
+    total_payments: Optional[int] = None
+    
+    # Informações dos quartos com mais detalhes
+    room_details: Optional[List[Dict[str, Any]]] = None
+    
+    # Campos adicionais específicos para reservas
+    deposit_paid: Optional[bool] = None
+
+
+class ReservationListResponseWithDetails(BaseModel):
+    """Schema para lista de reservas com detalhes expandidos"""
+    reservations: List[ReservationResponseWithGuestDetails]
+    total: int
+    page: int
+    pages: int
+    per_page: int
+    
+    # Estatísticas da busca
+    summary: Optional[Dict[str, Any]] = None
+
+
+# ===== SCHEMAS PARA EXPORTAÇÃO =====
+
+class ReservationExportFilters(ReservationFilters):
+    """Schema para filtros de exportação de reservas"""
+    
+    # Campos específicos para exportação
+    include_guest_details: bool = Field(True, description="Incluir detalhes do hóspede")
+    include_room_details: bool = Field(True, description="Incluir detalhes dos quartos")
+    include_payment_details: bool = Field(True, description="Incluir detalhes de pagamento")
+    include_property_details: bool = Field(False, description="Incluir detalhes da propriedade")
+    
+    # Formato da exportação
+    date_format: str = Field("dd/mm/yyyy", description="Formato das datas")
+    currency_format: str = Field("pt-BR", description="Formato da moeda")
+    
+    # Campos customizados para incluir
+    custom_fields: Optional[List[str]] = Field(None, description="Campos customizados para incluir")
+
+
+class ReservationExportResponse(BaseModel):
+    """Schema para resposta da exportação"""
+    file_url: str
+    file_name: str
+    total_records: int
+    generated_at: datetime
+    expires_at: datetime
+
+
+# ===== SCHEMAS PARA ESTATÍSTICAS EXPANDIDAS =====
+
+class ReservationSummary(BaseModel):
+    """Schema para resumo de reservas"""
+    total_reservations: int
+    total_revenue: Decimal
+    total_paid: Decimal
+    total_pending: Decimal
+    avg_nights: float
+    avg_guests: float
+    avg_amount: Decimal
+    
+    # Distribuições
+    status_counts: Dict[str, int]
+    source_counts: Dict[str, int]
+    property_counts: Optional[Dict[str, int]] = None
+    
+    # Tendências
+    cancellation_rate: float
+    occupancy_rate: float
+    revenue_per_night: Decimal
+
+
+class DashboardStatsResponse(BaseModel):
+    """Schema para estatísticas do dashboard"""
+    # Estatísticas gerais
+    total_reservations: int
+    total_revenue: Decimal
+    occupancy_rate: float
+    avg_daily_rate: Decimal
+    
+    # Estatísticas hoje
+    today_arrivals: int
+    today_departures: int
+    current_guests: int
+    available_rooms_today: int
+    
+    # Pendências
+    pending_checkins: int
+    pending_checkouts: int
+    overdue_payments: int
+    
+    # Médias
+    avg_nights: float
+    avg_guests: float
+    
+    # Distribuições
+    status_distribution: Dict[str, int]
+    source_distribution: Dict[str, int]
+    
+    # Tendências (últimos 7 dias)
+    revenue_trend: List[Dict[str, Any]]
+    
+    # Top performers
+    top_sources: List[Dict[str, Any]]
+    
+    # Alertas
+    alerts: List[Dict[str, Any]]
+
+
+# ===== SCHEMAS PARA RELATÓRIOS =====
+
+class ReservationReportFilters(BaseModel):
+    """Schema para filtros de relatórios"""
+    period_start: date
+    period_end: date
+    property_ids: Optional[List[int]] = None
+    room_type_ids: Optional[List[int]] = None
+    sources: Optional[List[str]] = None
+    include_cancelled: bool = Field(default=False)
+    group_by: str = Field(default="day")  # day, week, month
+
+
+class ReservationReportResponse(BaseModel):
+    """Schema para resposta de relatórios"""
+    period: Dict[str, Any]
+    summary: ReservationSummary
+    breakdown: Dict[str, Any]
+    trends: List[Dict[str, Any]]
+    top_performers: Dict[str, Any]
+    
+    # Metadados do relatório
+    generated_at: datetime
+    total_records: int
+    filters_applied: Dict[str, Any]
+
+
+# ===== SCHEMAS PARA BUSCA AVANÇADA =====
+
+class ReservationSearchCriteria(BaseModel):
+    """Schema para critérios de busca avançada"""
+    
+    # Critérios básicos
+    text_search: Optional[str] = None
+    status_filter: Optional[List[str]] = None
+    source_filter: Optional[List[str]] = None
+    
+    # Critérios de data
+    date_range: Optional[Dict[str, Any]] = None
+    
+    # Critérios de hóspede
+    guest_criteria: Optional[Dict[str, Any]] = None
+    
+    # Critérios financeiros
+    financial_criteria: Optional[Dict[str, Any]] = None
+    
+    # Critérios de acomodação
+    accommodation_criteria: Optional[Dict[str, Any]] = None
+    
+    # Critérios especiais
+    special_criteria: Optional[Dict[str, Any]] = None
+
+
+class AdvancedSearchResponse(BaseModel):
+    """Schema para resposta de busca avançada"""
+    reservations: List[ReservationResponseWithGuestDetails]
+    total: int
+    page: int
+    pages: int
+    per_page: int
+    
+    # Facetas da busca
+    facets: Optional[Dict[str, Any]] = None
+    
+    # Tempo de processamento
+    search_time_ms: Optional[int] = None
+    
+    # Critérios aplicados
+    applied_criteria: ReservationSearchCriteria

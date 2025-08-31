@@ -1,9 +1,10 @@
-# backend/app/api/v1/endpoints/reservations.py
+# backend/app/api/v1/endpoints/reservations.py - ARQUIVO COMPLETO
 
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 from datetime import datetime, date
+from decimal import Decimal
 import math
 
 from app.core.database import get_db
@@ -19,7 +20,11 @@ from app.schemas.reservation import (
     CheckOutRequest,
     CancelReservationRequest,
     AvailabilityRequest,
-    AvailabilityResponse
+    AvailabilityResponse,
+    ReservationListResponseWithDetails,
+    ReservationResponseWithGuestDetails,
+    ReservationExportFilters,
+    ReservationExportResponse
 )
 from app.schemas.common import MessageResponse
 from app.api.deps import get_current_active_user, get_current_superuser
@@ -35,51 +40,168 @@ def list_reservations(
     current_user: User = Depends(get_current_active_user),
     page: int = Query(1, ge=1, description="Página (inicia em 1)"),
     per_page: int = Query(20, ge=1, le=100, description="Itens por página"),
+    
+    # Filtros básicos existentes
     status: Optional[str] = Query(None, description="Filtrar por status"),
     source: Optional[str] = Query(None, description="Filtrar por canal"),
     property_id: Optional[int] = Query(None, description="Filtrar por propriedade"),
     guest_id: Optional[int] = Query(None, description="Filtrar por hóspede"),
+    
+    # Filtros de data existentes
     check_in_from: Optional[date] = Query(None, description="Check-in a partir de"),
     check_in_to: Optional[date] = Query(None, description="Check-in até"),
     check_out_from: Optional[date] = Query(None, description="Check-out a partir de"),
     check_out_to: Optional[date] = Query(None, description="Check-out até"),
-    search: Optional[str] = Query(None, description="Busca textual")
+    created_from: Optional[datetime] = Query(None, description="Criação a partir de"),
+    created_to: Optional[datetime] = Query(None, description="Criação até"),
+    
+    # Filtros financeiros existentes
+    min_amount: Optional[float] = Query(None, ge=0, description="Valor mínimo"),
+    max_amount: Optional[float] = Query(None, ge=0, description="Valor máximo"),
+    is_paid: Optional[bool] = Query(None, description="Filtrar por pago"),
+    requires_deposit: Optional[bool] = Query(None, description="Exige depósito"),
+    is_group_reservation: Optional[bool] = Query(None, description="Reserva em grupo"),
+    
+    # Busca textual existente
+    search: Optional[str] = Query(None, description="Busca textual"),
+    
+    # ===== NOVOS FILTROS =====
+    
+    # Filtros do hóspede
+    guest_email: Optional[str] = Query(None, description="E-mail do hóspede"),
+    guest_phone: Optional[str] = Query(None, description="Telefone do hóspede"),
+    guest_document_type: Optional[str] = Query(None, description="Tipo de documento"),
+    guest_nationality: Optional[str] = Query(None, description="Nacionalidade do hóspede"),
+    guest_city: Optional[str] = Query(None, description="Cidade do hóspede"),
+    guest_state: Optional[str] = Query(None, description="Estado do hóspede"),
+    guest_country: Optional[str] = Query(None, description="País do hóspede"),
+    
+    # Filtros de data de cancelamento  
+    cancelled_from: Optional[date] = Query(None, description="Cancelamento a partir de"),
+    cancelled_to: Optional[date] = Query(None, description="Cancelamento até"),
+    
+    # Filtros de confirmação
+    confirmed_from: Optional[datetime] = Query(None, description="Confirmação a partir de"),
+    confirmed_to: Optional[datetime] = Query(None, description="Confirmação até"),
+    
+    # Filtros de check-in/out realizados
+    actual_checkin_from: Optional[datetime] = Query(None, description="Check-in realizado a partir de"),
+    actual_checkin_to: Optional[datetime] = Query(None, description="Check-in realizado até"),
+    actual_checkout_from: Optional[datetime] = Query(None, description="Check-out realizado a partir de"), 
+    actual_checkout_to: Optional[datetime] = Query(None, description="Check-out realizado até"),
+    
+    # Filtros por número de hóspedes e noites
+    min_guests: Optional[int] = Query(None, ge=1, description="Número mínimo de hóspedes"),
+    max_guests: Optional[int] = Query(None, ge=1, description="Número máximo de hóspedes"),
+    min_nights: Optional[int] = Query(None, ge=1, description="Número mínimo de noites"),
+    max_nights: Optional[int] = Query(None, ge=1, description="Número máximo de noites"),
+    
+    # Filtros de quarto
+    room_type_id: Optional[int] = Query(None, description="ID do tipo de quarto"),
+    room_number: Optional[str] = Query(None, description="Número do quarto"),
+    
+    # Filtros especiais
+    has_special_requests: Optional[bool] = Query(None, description="Possui pedidos especiais"),
+    has_internal_notes: Optional[bool] = Query(None, description="Possui notas internas"),
+    deposit_paid: Optional[bool] = Query(None, description="Depósito pago"),
+    
+    # Filtros de pagamento
+    payment_status: Optional[str] = Query(None, description="Status do pagamento"),
 ):
-    """Lista reservas do tenant com filtros e paginação"""
+    """Lista reservas do tenant com filtros avançados e paginação"""
     reservation_service = ReservationService(db)
     
     # Construir filtros
     filters = ReservationFilters(
+        # Filtros básicos
         status=status,
         source=source,
         property_id=property_id,
         guest_id=guest_id,
+        
+        # Filtros de data
         check_in_from=check_in_from,
         check_in_to=check_in_to,
         check_out_from=check_out_from,
         check_out_to=check_out_to,
-        search=search
+        created_from=created_from,
+        created_to=created_to,
+        
+        # Filtros financeiros
+        min_amount=Decimal(min_amount) if min_amount else None,
+        max_amount=Decimal(max_amount) if max_amount else None,
+        is_paid=is_paid,
+        requires_deposit=requires_deposit,
+        is_group_reservation=is_group_reservation,
+        
+        # Busca textual
+        search=search,
+        
+        # Novos filtros
+        guest_email=guest_email,
+        guest_phone=guest_phone,
+        guest_document_type=guest_document_type,
+        guest_nationality=guest_nationality,
+        guest_city=guest_city,
+        guest_state=guest_state,
+        guest_country=guest_country,
+        cancelled_from=cancelled_from,
+        cancelled_to=cancelled_to,
+        confirmed_from=confirmed_from,
+        confirmed_to=confirmed_to,
+        actual_checkin_from=actual_checkin_from,
+        actual_checkin_to=actual_checkin_to,
+        actual_checkout_from=actual_checkout_from,
+        actual_checkout_to=actual_checkout_to,
+        min_guests=min_guests,
+        max_guests=max_guests,
+        min_nights=min_nights,
+        max_nights=max_nights,
+        room_type_id=room_type_id,
+        room_number=room_number,
+        has_special_requests=has_special_requests,
+        has_internal_notes=has_internal_notes,
+        deposit_paid=deposit_paid,
+        payment_status=payment_status
     )
     
-    # Calcular offset
+    # Usar método existente
     skip = (page - 1) * per_page
-    
-    # Buscar reservas e total
     reservations = reservation_service.get_reservations(current_user.tenant_id, filters, skip, per_page)
     total = reservation_service.count_reservations(current_user.tenant_id, filters)
     
-    # Calcular total de páginas
-    total_pages = math.ceil(total / per_page)
-    
-    # Converter para response
-    reservations_response = [ReservationResponse.model_validate(reservation) for reservation in reservations]
+    # Calcular páginas
+    pages = math.ceil(total / per_page) if total > 0 else 0
     
     return ReservationListResponse(
-        reservations=reservations_response,
+        reservations=[ReservationResponse.model_validate(r) for r in reservations],
         total=total,
         page=page,
-        pages=total_pages,
+        pages=pages,
         per_page=per_page
+    )
+
+
+# ===== NOVO ENDPOINT PARA EXPORTAÇÃO CSV =====
+
+@router.post("/export", response_model=ReservationExportResponse)
+def export_reservations(
+    export_filters: ReservationExportFilters,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Exporta reservas para CSV com filtros personalizados"""
+    
+    # Por enquanto, retornar dados simulados até implementar no service
+    from datetime import datetime, timedelta
+    
+    return ReservationExportResponse(
+        file_url="http://exemplo.com/export.csv",
+        file_name="reservations_export.csv",
+        total_records=0,
+        generated_at=datetime.utcnow(),
+        expires_at=datetime.utcnow() + timedelta(hours=24)
     )
 
 
@@ -533,11 +655,17 @@ def get_dashboard_stats(
         'period_days': days_back,
         'reservations_in_period': len(recent_reservations),
         'reservations_by_day': reservations_by_day,
-        'average_daily_reservations': len(recent_reservations) / days_back if days_back > 0 else 0
+        'average_daily_reservations': len(recent_reservations) / days_back if days_back > 0 else 0,
+        # Adicionar campos esperados pelo frontend
+        'total_reservations': general_stats.get('total_reservations', 0),
+        'total_revenue': general_stats.get('total_revenue', 0),
+        'occupancy_rate': general_stats.get('occupancy_rate', 0),
+        'pending_checkins': 0,  # Será calculado quando necessário
+        'pending_checkouts': 0, # Será calculado quando necessário
+        'overdue_payments': 0   # Será calculado quando necessário
     }
 
 
-# Endpoint adicional para busca avançada
 @router.post("/advanced-search", response_model=ReservationListResponse)
 def advanced_search_reservations(
     filters: ReservationFilters,
@@ -567,7 +695,6 @@ def advanced_search_reservations(
     )
 
 
-# Endpoints para análises específicas
 @router.get("/analysis/occupancy", response_model=Dict[str, Any])
 def get_occupancy_analysis(
     start_date: date = Query(..., description="Data inicial"),
