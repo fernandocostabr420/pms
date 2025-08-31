@@ -203,7 +203,7 @@ class ReservationService:
         query = self.db.query(Reservation).options(
             joinedload(Reservation.guest),
             joinedload(Reservation.property_obj),
-            joinedload(Reservation.reservation_rooms)
+            joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room)
         ).filter(
             Reservation.tenant_id == tenant_id,
             Reservation.is_active == True

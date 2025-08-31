@@ -660,7 +660,7 @@ class PMSApiClient {
   // ===== MÉTODO DE DASHBOARD STATS ATUALIZADO =====
   async getDashboardStats(): Promise<DashboardStats> {
     try {
-      const response = await this.client.get<DashboardStats>('/dashboard/stats');
+      const response = await this.client.get<DashboardStats>('/reservations/dashboard/stats');
       return response.data;
     } catch (error: any) {
       console.error('Erro ao carregar estatísticas do dashboard:', error);

@@ -39,6 +39,10 @@ import {
   Building,
   DollarSign,
   CreditCard,
+  Globe,
+  Home,
+  Hash,
+  BedDouble,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ReservationResponseWithGuestDetails } from '@/types/reservation';
@@ -64,6 +68,18 @@ const statusConfig = {
   checked_out: { label: 'Check-out', color: 'bg-gray-100 text-gray-800 border-gray-200' },
   cancelled: { label: 'Cancelada', color: 'bg-red-100 text-red-800 border-red-200' },
   no_show: { label: 'No-show', color: 'bg-orange-100 text-orange-800 border-orange-200' },
+};
+
+const sourceConfig = {
+  direct: { label: 'Direta', color: 'bg-blue-100 text-blue-800 border-blue-200', icon: Home },
+  'booking.com': { label: 'Booking', color: 'bg-blue-100 text-blue-800 border-blue-200', icon: Globe },
+  airbnb: { label: 'Airbnb', color: 'bg-red-100 text-red-800 border-red-200', icon: Globe },
+  expedia: { label: 'Expedia', color: 'bg-yellow-100 text-yellow-800 border-yellow-200', icon: Globe },
+  agoda: { label: 'Agoda', color: 'bg-purple-100 text-purple-800 border-purple-200', icon: Globe },
+  phone: { label: 'Telefone', color: 'bg-green-100 text-green-800 border-green-200', icon: Phone },
+  email: { label: 'Email', color: 'bg-gray-100 text-gray-800 border-gray-200', icon: Mail },
+  website: { label: 'Site', color: 'bg-blue-100 text-blue-800 border-blue-200', icon: Globe },
+  walk_in: { label: 'Walk-in', color: 'bg-orange-100 text-orange-800 border-orange-200', icon: Home },
 };
 
 const formatCurrency = (value: number) => {
@@ -103,6 +119,48 @@ const calculateNights = (checkIn: string, checkOut: string) => {
   }
 };
 
+const formatRooms = (rooms: any[] | undefined) => {
+  if (!rooms || rooms.length === 0) {
+    return { display: 'N/A', count: 0 };
+  }
+
+  if (rooms.length === 1) {
+    const room = rooms[0];
+    const roomNumber = room.room_number || 'N/A';
+    const roomType = room.room_type_name || '';
+    return {
+      display: roomType ? `${roomNumber} - ${roomType}` : roomNumber,
+      count: 1
+    };
+  }
+
+  // Múltiplos quartos
+  const roomNumbers = rooms
+    .map(room => room.room_number)
+    .filter(Boolean)
+    .sort((a, b) => {
+      // Tentar ordenar numericamente
+      const numA = parseInt(a);
+      const numB = parseInt(b);
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return numA - numB;
+      }
+      return a.localeCompare(b);
+    });
+
+  if (roomNumbers.length <= 3) {
+    return {
+      display: roomNumbers.join(', '),
+      count: rooms.length
+    };
+  }
+
+  return {
+    display: `${rooms.length} quartos`,
+    count: rooms.length
+  };
+};
+
 export default function ReservationTable({
   reservations,
   loading = false,
@@ -124,6 +182,26 @@ export default function ReservationTable({
     setSortConfig({ key, direction });
   };
 
+  const SortButton = ({ children, columnKey }: { children: React.ReactNode; columnKey: string }) => (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-auto p-0 font-semibold hover:bg-transparent"
+      onClick={() => handleSort(columnKey)}
+    >
+      <span className="mr-1">{children}</span>
+      {sortConfig.key === columnKey ? (
+        sortConfig.direction === 'asc' ? (
+          <ArrowUp className="h-3 w-3" />
+        ) : (
+          <ArrowDown className="h-3 w-3" />
+        )
+      ) : (
+        <ArrowUpDown className="h-3 w-3 opacity-50" />
+      )}
+    </Button>
+  );
+
   const getSortedReservations = () => {
     if (!reservations.length) return [];
 
@@ -132,6 +210,10 @@ export default function ReservationTable({
       let bValue: any;
 
       switch (sortConfig.key) {
+        case 'id':
+          aValue = a.id || 0;
+          bValue = b.id || 0;
+          break;
         case 'guest_name':
           aValue = (a.guest_name || '').toLowerCase();
           bValue = (b.guest_name || '').toLowerCase();
@@ -149,8 +231,12 @@ export default function ReservationTable({
           bValue = b.total_guests || 0;
           break;
         case 'total_amount':
-          aValue = parseFloat(a.total_amount.toString()) || 0;
-          bValue = parseFloat(b.total_amount.toString()) || 0;
+          aValue = parseFloat(a.total_amount?.toString() || '0');
+          bValue = parseFloat(b.total_amount?.toString() || '0');
+          break;
+        case 'paid_amount':
+          aValue = parseFloat(a.paid_amount?.toString() || '0');
+          bValue = parseFloat(b.paid_amount?.toString() || '0');
           break;
         case 'status':
           aValue = a.status || '';
@@ -160,13 +246,17 @@ export default function ReservationTable({
           aValue = (a.property_name || '').toLowerCase();
           bValue = (b.property_name || '').toLowerCase();
           break;
+        case 'created_date':
+          aValue = new Date(a.created_date).getTime();
+          bValue = new Date(b.created_date).getTime();
+          break;
         case 'created_at':
           aValue = new Date(a.created_at).getTime();
           bValue = new Date(b.created_at).getTime();
           break;
-        case 'paid_amount':
-          aValue = parseFloat(a.paid_amount.toString()) || 0;
-          bValue = parseFloat(b.paid_amount.toString()) || 0;
+        case 'source':
+          aValue = (a.source || '').toLowerCase();
+          bValue = (b.source || '').toLowerCase();
           break;
         default:
           return 0;
@@ -178,97 +268,77 @@ export default function ReservationTable({
     });
   };
 
-  const SortButton = ({ columnKey, children }: { columnKey: string; children: React.ReactNode }) => (
-    <Button
-      variant="ghost"
-      onClick={() => handleSort(columnKey)}
-      className="h-auto p-0 font-semibold hover:bg-transparent hover:text-blue-600"
-    >
-      <span className="flex items-center gap-1">
-        {children}
-        {sortConfig.key === columnKey ? (
-          sortConfig.direction === 'asc' ? (
-            <ArrowUp className="h-3 w-3" />
-          ) : (
-            <ArrowDown className="h-3 w-3" />
-          )
-        ) : (
-          <ArrowUpDown className="h-3 w-3 opacity-50" />
-        )}
-      </span>
-    </Button>
-  );
-
   const getQuickActions = (reservation: ReservationResponseWithGuestDetails) => {
     const actions = [];
+
+    if (reservation.can_check_in && reservation.status === 'confirmed') {
+      actions.push({
+        key: 'checkin',
+        label: 'Check-in',
+        icon: LogIn,
+        color: 'text-green-600 hover:text-green-700',
+      });
+    }
+
+    if (reservation.can_check_out && reservation.status === 'checked_in') {
+      actions.push({
+        key: 'checkout',
+        label: 'Check-out',
+        icon: LogOut,
+        color: 'text-blue-600 hover:text-blue-700',
+      });
+    }
+
+    if (reservation.can_cancel && ['pending', 'confirmed'].includes(reservation.status)) {
+      actions.push({
+        key: 'cancel',
+        label: 'Cancelar',
+        icon: XCircle,
+        color: 'text-red-600 hover:text-red-700',
+      });
+    }
 
     if (reservation.status === 'pending') {
       actions.push({
         key: 'confirm',
         label: 'Confirmar',
         icon: CheckCircle,
-        color: 'text-green-600',
-      });
-    }
-
-    if (reservation.can_check_in) {
-      actions.push({
-        key: 'check-in',
-        label: 'Check-in',
-        icon: LogIn,
-        color: 'text-blue-600',
-      });
-    }
-
-    if (reservation.can_check_out) {
-      actions.push({
-        key: 'check-out',
-        label: 'Check-out',
-        icon: LogOut,
-        color: 'text-purple-600',
-      });
-    }
-
-    if (reservation.can_cancel) {
-      actions.push({
-        key: 'cancel',
-        label: 'Cancelar',
-        icon: XCircle,
-        color: 'text-red-600',
+        color: 'text-green-600 hover:text-green-700',
       });
     }
 
     return actions;
   };
 
+  const getSourceInfo = (source: string | undefined) => {
+    if (!source) return { label: 'N/A', color: 'bg-gray-100 text-gray-800 border-gray-200', icon: Hash };
+    return sourceConfig[source] || { label: source, color: 'bg-gray-100 text-gray-800 border-gray-200', icon: Globe };
+  };
+
   const sortedReservations = getSortedReservations();
 
   if (loading) {
     return (
-      <div className="border rounded-lg">
-        <div className="p-8 text-center">
-          <div className="animate-pulse">
-            <div className="h-4 bg-gray-200 rounded w-1/4 mx-auto mb-4" />
-            <div className="space-y-3">
-              {[...Array(5)].map((_, i) => (
-                <div key={i} className="h-16 bg-gray-100 rounded" />
-              ))}
-            </div>
+      <div className="bg-white border rounded-lg shadow-sm">
+        <div className="flex items-center justify-center p-8">
+          <div className="flex items-center gap-2 text-gray-500">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600" />
+            <span>Carregando reservas...</span>
           </div>
         </div>
       </div>
     );
   }
 
-  if (!sortedReservations.length) {
+  if (!reservations.length) {
     return (
-      <div className="border rounded-lg bg-white">
-        <div className="p-12 text-center">
-          <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+      <div className="bg-white border rounded-lg shadow-sm">
+        <div className="flex flex-col items-center justify-center p-8 text-center">
+          <Calendar className="h-12 w-12 text-gray-300 mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">
             Nenhuma reserva encontrada
           </h3>
-          <p className="text-gray-600">
+          <p className="text-gray-500">
             Não há reservas que correspondam aos filtros aplicados.
           </p>
         </div>
@@ -282,6 +352,9 @@ export default function ReservationTable({
         <Table>
           <TableHeader>
             <TableRow className="bg-gray-50/50">
+              <TableHead className="font-semibold text-gray-700 w-16">
+                <SortButton columnKey="id">ID</SortButton>
+              </TableHead>
               <TableHead className="font-semibold text-gray-700">
                 <SortButton columnKey="guest_name">Hóspede</SortButton>
               </TableHead>
@@ -298,7 +371,16 @@ export default function ReservationTable({
                 <SortButton columnKey="property_name">Propriedade</SortButton>
               </TableHead>
               <TableHead className="font-semibold text-gray-700">
+                Quarto(s)
+              </TableHead>
+              <TableHead className="font-semibold text-gray-700">
                 <SortButton columnKey="status">Status</SortButton>
+              </TableHead>
+              <TableHead className="font-semibold text-gray-700">
+                <SortButton columnKey="created_date">Data Criação</SortButton>
+              </TableHead>
+              <TableHead className="font-semibold text-gray-700">
+                <SortButton columnKey="source">Origem</SortButton>
               </TableHead>
               <TableHead className="font-semibold text-gray-700 text-right">
                 <SortButton columnKey="total_amount">Valor</SortButton>
@@ -314,6 +396,8 @@ export default function ReservationTable({
           <TableBody>
             {sortedReservations.map((reservation) => {
               const statusInfo = statusConfig[reservation.status as keyof typeof statusConfig] || statusConfig.pending;
+              const sourceInfo = getSourceInfo(reservation.source);
+              const roomsInfo = formatRooms(reservation.rooms);
               const nights = calculateNights(reservation.check_in_date, reservation.check_out_date);
               const quickActions = getQuickActions(reservation);
               const isLoading = actionLoading[reservation.id];
@@ -323,6 +407,11 @@ export default function ReservationTable({
                   key={reservation.id}
                   className="hover:bg-gray-50/50 transition-colors"
                 >
+                  {/* ID */}
+                  <TableCell className="font-mono text-xs text-gray-600">
+                    #{reservation.id}
+                  </TableCell>
+
                   {/* Hóspede */}
                   <TableCell className="font-medium">
                     <div className="flex flex-col">
@@ -388,6 +477,23 @@ export default function ReservationTable({
                     </div>
                   </TableCell>
 
+                  {/* Quarto(s) */}
+                  <TableCell>
+                    <div className="flex items-center gap-1">
+                      <BedDouble className="h-3 w-3 text-gray-400" />
+                      <div className="flex flex-col">
+                        <span className="font-medium text-sm">
+                          {roomsInfo.display}
+                        </span>
+                        {roomsInfo.count > 1 && (
+                          <span className="text-xs text-gray-500">
+                            {roomsInfo.count} quarto{roomsInfo.count > 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </TableCell>
+
                   {/* Status */}
                   <TableCell>
                     <Badge
@@ -401,13 +507,39 @@ export default function ReservationTable({
                     </Badge>
                   </TableCell>
 
+                  {/* Data Criação */}
+                  <TableCell>
+                    <div className="flex flex-col">
+                      <span className="text-sm font-medium">
+                        {format(new Date(reservation.created_date), 'dd/MM/yy', { locale: ptBR })}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        {format(new Date(reservation.created_date), 'HH:mm', { locale: ptBR })}
+                      </span>
+                    </div>
+                  </TableCell>
+
+                  {/* Origem */}
+                  <TableCell>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        'text-xs font-medium border px-2 py-1 flex items-center gap-1 w-fit',
+                        sourceInfo.color
+                      )}
+                    >
+                      <sourceInfo.icon className="h-3 w-3" />
+                      {sourceInfo.label}
+                    </Badge>
+                  </TableCell>
+
                   {/* Valor Total */}
                   <TableCell className="text-right">
                     <div className="flex flex-col items-end">
                       <div className="flex items-center gap-1">
                         <DollarSign className="h-3 w-3 text-gray-400" />
                         <span className="font-semibold">
-                          {formatCurrency(parseFloat(reservation.total_amount.toString()))}
+                          {reservation.total_amount ? formatCurrency(parseFloat(reservation.total_amount.toString())) : 'N/A'}
                         </span>
                       </div>
                     </div>
@@ -419,7 +551,7 @@ export default function ReservationTable({
                       <div className="flex items-center gap-1">
                         <CreditCard className="h-3 w-3 text-gray-400" />
                         <span className="font-medium text-green-600">
-                          {formatCurrency(parseFloat(reservation.paid_amount.toString()))}
+                          {formatCurrency(parseFloat(reservation.paid_amount?.toString() || '0'))}
                         </span>
                       </div>
                       {reservation.balance_due && parseFloat(reservation.balance_due.toString()) > 0 && (
