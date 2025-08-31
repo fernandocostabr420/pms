@@ -1195,6 +1195,21 @@ def get_reservations_detailed(
                 property_phone=reservation.property_obj.phone if reservation.property_obj else None,
                 property_city=reservation.property_obj.city if reservation.property_obj else None,
                 
+                room_details=[
+                    {
+                        'id': room.room_id,
+                        'room_number': room.room.room_number if room.room else None,
+                        'room_type_name': room.room.room_type.name if (room.room and room.room.room_type) else None,
+                        'check_in_date': room.check_in_date.isoformat() if room.check_in_date else None,
+                        'check_out_date': room.check_out_date.isoformat() if room.check_out_date else None,
+                        'rate_per_night': float(room.rate_per_night) if room.rate_per_night else None,
+                        'total_amount': float(room.total_amount) if room.total_amount else None,
+                        'status': room.status,
+                        'notes': room.notes
+                    }
+                    for room in reservation.reservation_rooms if room.room
+                ] if reservation.reservation_rooms else [],
+                
                 # Campos adicionais específicos para reservas
                 deposit_paid=reservation.deposit_paid,
                 is_group_reservation=reservation.is_group_reservation,
@@ -1730,6 +1745,21 @@ def list_reservations_with_details(
                 property_address=reservation.property_obj.address_line1 if reservation.property_obj else None,
                 property_phone=reservation.property_obj.phone if reservation.property_obj else None,
                 property_city=reservation.property_obj.city if reservation.property_obj else None,
+                
+                room_details=[
+                    {
+                        'id': room.room_id,
+                        'room_number': room.room.room_number if room.room else None,
+                        'room_type_name': room.room.room_type.name if (room.room and room.room.room_type) else None,
+                        'check_in_date': room.check_in_date.isoformat() if room.check_in_date else None,
+                        'check_out_date': room.check_out_date.isoformat() if room.check_out_date else None,
+                        'rate_per_night': float(room.rate_per_night) if room.rate_per_night else None,
+                        'total_amount': float(room.total_amount) if room.total_amount else None,
+                        'status': room.status,
+                        'notes': room.notes
+                    }
+                    for room in reservation.reservation_rooms if room.room
+                ] if reservation.reservation_rooms else [],
                 
                 # Campos adicionais específicos para reservas
                 deposit_paid=reservation.deposit_paid,
