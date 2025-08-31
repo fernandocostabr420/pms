@@ -26,7 +26,8 @@ import {
   LogOut,
   User,
   Menu,
-  Map
+  Map,
+  DollarSign  // ← NOVO IMPORT
 } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -36,6 +37,7 @@ const navigation = [
   { name: 'Calendário', href: '/dashboard/calendar', icon: Calendar },
   { name: 'Mapa de Quartos', href: '/dashboard/room-map', icon: Map },
   { name: 'Reservas', href: '/dashboard/reservations', icon: Calendar },
+  { name: 'Pagamentos', href: '/dashboard/payments', icon: DollarSign }, // ← NOVA LINHA
   { name: 'Hóspedes', href: '/dashboard/guests', icon: Users },
   { name: 'Propriedades', href: '/dashboard/properties', icon: Building },
   { name: 'Tipos de Quartos', href: '/dashboard/room-types', icon: Tag },

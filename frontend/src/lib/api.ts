@@ -1,4 +1,4 @@
-// src/lib/api.ts
+// src/lib/api.ts - ARQUIVO ORIGINAL COMPLETO + NOVAS FUNCIONALIDADES
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import Cookies from 'js-cookie';
 import type { 
@@ -7,7 +7,40 @@ import type {
   PropertyListResponse,
   ReservationListResponse,
   GuestListResponse,
-  MessageResponse 
+  MessageResponse,
+  ReservationResponse,
+  ReservationCreate,
+  ReservationUpdate,
+  ReservationWithDetails,
+  GuestResponse,
+  GuestCreate,
+  GuestUpdate,
+  GuestWithStats,
+  GuestStats,
+  GuestFilters,
+  RoomResponse,
+  RoomCreate,
+  RoomUpdate,
+  RoomListResponse,
+  RoomFilters,
+  RoomWithDetails,
+  RoomBulkUpdate,
+  RoomStats,
+  RoomTypeResponse,
+  RoomTypeCreate,
+  RoomTypeUpdate,
+  RoomTypeListResponse,
+  RoomTypeFilters,
+  TodaysReservationsResponse,
+  CalendarStatsResponse,
+  ReservationStats,
+  ReservationFilters,
+  AvailabilityCheckRequest,
+  AvailabilityCheckResponse,
+  CheckInRequest,
+  CheckOutRequest,
+  CancelReservationRequest,
+  AvailabilityRequest
 } from '@/types/api';
 
 import {
@@ -33,7 +66,37 @@ import {
   CategorySummaryData,
 } from '@/types/room-map';
 
+// Novos tipos adicionados para funcionalidades expandidas
+import {
+  ReservationFilters as ReservationFiltersNew,
+  ReservationResponseWithGuestDetails,
+  ReservationListResponseWithDetails,
+  ReservationExportFilters,
+  ReservationExportResponse,
+  CheckInRequest as CheckInRequestNew,
+  CheckOutRequest as CheckOutRequestNew,
+  CancelReservationRequest as CancelReservationRequestNew,
+  AvailabilityRequest as AvailabilityRequestNew,
+  AvailabilityResponse,
+  DashboardStats,
+  GuestDetails,
+  PropertyDetails
+} from '@/types/reservation';
 
+interface ReservationStatsExtended {
+  total_reservations: number;
+  total_revenue: number;
+  avg_occupancy: number;
+  avg_nights: number;
+  avg_guests: number;
+  status_distribution: Record<string, number>;
+  source_distribution: Record<string, number>;
+  monthly_revenue: Array<{
+    month: string;
+    revenue: number;
+    reservations: number;
+  }>;
+}
 
 class PMSApiClient {
   private client: AxiosInstance;
@@ -219,6 +282,13 @@ class PMSApiClient {
     return response.data;
   }
 
+  // Novo método para compatibilidade com novas funcionalidades
+  async getPropertyById(id: number, includeRooms = false): Promise<PropertyDetails> {
+    const params = includeRooms ? { include_rooms: true } : {};
+    const response = await this.client.get<PropertyDetails>(`/properties/${id}`, { params });
+    return response.data;
+  }
+
   async createProperty(data: any) {
     // Normalizar dados para compatibilidade com backend
     const normalizedData = {
@@ -246,7 +316,7 @@ class PMSApiClient {
     return response.data;
   }
 
-   // ===== RESERVATIONS API (ATUALIZAR MÉTODOS EXISTENTES) =====
+   // ===== RESERVATIONS API (MÉTODOS ORIGINAIS MANTIDOS + EXPANDIDOS) =====
 
   async getReservations(params?: { 
     page?: number; 
@@ -267,9 +337,55 @@ class PMSApiClient {
     requires_deposit?: boolean;
     is_group_reservation?: boolean;
     search?: string;
-  }) {
-    const response = await this.client.get<ReservationListResponse>('/reservations/', { params });
-    return response.data;
+    
+    // ===== NOVOS PARÂMETROS ADICIONADOS =====
+    guest_email?: string;
+    guest_phone?: string;
+    guest_nationality?: string;
+    guest_city?: string;
+    guest_country?: string;
+    cancelled_from?: string;
+    cancelled_to?: string;
+    confirmed_from?: string;
+    confirmed_to?: string;
+    actual_checkin_from?: string;
+    actual_checkin_to?: string;
+    actual_checkout_from?: string;
+    actual_checkout_to?: string;
+    min_guests?: number;
+    max_guests?: number;
+    min_nights?: number;
+    max_nights?: number;
+    room_type_id?: number;
+    room_number?: string;
+    has_special_requests?: boolean;
+    has_internal_notes?: boolean;
+    deposit_paid?: boolean;
+    payment_status?: string;
+    include_guest_details?: boolean;
+    include_room_details?: boolean;
+    include_payment_summary?: boolean;
+  }): Promise<ReservationListResponse | ReservationListResponseWithDetails> {
+    // Limpar parâmetros nulos/vazios para os novos filtros
+    const cleanParams = Object.fromEntries(
+      Object.entries(params || {}).filter(([_, value]) => 
+        value !== null && value !== undefined && value !== '' && value !== 'all'
+      )
+    );
+
+    // Se tem parâmetros expandidos, usar a nova interface
+    const hasExpandedParams = cleanParams.include_guest_details || 
+                              cleanParams.include_room_details || 
+                              cleanParams.guest_email ||
+                              cleanParams.guest_phone;
+    
+    if (hasExpandedParams) {
+      const response = await this.client.get<ReservationListResponseWithDetails>('/reservations/', { params: cleanParams });
+      return response.data;
+    } else {
+      const response = await this.client.get<ReservationListResponse>('/reservations/', { params: cleanParams });
+      return response.data;
+    }
   }
 
   async createReservation(data: ReservationCreate) {
@@ -279,6 +395,13 @@ class PMSApiClient {
 
   async getReservation(id: number) {
     const response = await this.client.get<ReservationResponse>(`/reservations/${id}`);
+    return response.data;
+  }
+
+  // Novo método expandido
+  async getReservationById(id: number, includeDetails = true): Promise<ReservationResponseWithGuestDetails> {
+    const params = includeDetails ? { include_details: true } : {};
+    const response = await this.client.get<ReservationResponseWithGuestDetails>(`/reservations/${id}`, { params });
     return response.data;
   }
 
@@ -303,8 +426,15 @@ class PMSApiClient {
     return response.data;
   }
 
+  // Método original de disponibilidade
   async checkAvailability(data: AvailabilityRequest): Promise<AvailabilityResponse> {
     const response = await this.client.post<AvailabilityResponse>('/reservations/check-availability', data);
+    return response.data;
+  }
+
+  // Novo método de disponibilidade expandido
+  async checkAvailabilityNew(request: AvailabilityRequestNew): Promise<AvailabilityResponse> {
+    const response = await this.client.post<AvailabilityResponse>('/reservations/availability', request);
     return response.data;
   }
 
@@ -315,7 +445,7 @@ class PMSApiClient {
 
   async checkInReservation(
     reservationId: number,
-    data: CheckInRequest
+    data: CheckInRequest | CheckInRequestNew
   ): Promise<ReservationResponse> {
     const response = await this.client.post<ReservationResponse>(`/reservations/${reservationId}/check-in`, data);
     return response.data;
@@ -323,7 +453,7 @@ class PMSApiClient {
 
   async checkOutReservation(
     reservationId: number,
-    data: CheckOutRequest
+    data: CheckOutRequest | CheckOutRequestNew
   ): Promise<ReservationResponse> {
     const response = await this.client.post<ReservationResponse>(`/reservations/${reservationId}/check-out`, data);
     return response.data;
@@ -331,7 +461,7 @@ class PMSApiClient {
 
   async cancelReservation(
     reservationId: number,
-    data: CancelReservationRequest
+    data: CancelReservationRequest | CancelReservationRequestNew
   ): Promise<ReservationResponse> {
     const response = await this.client.post<ReservationResponse>(`/reservations/${reservationId}/cancel`, data);
     return response.data;
@@ -397,15 +527,38 @@ class PMSApiClient {
     return response.data;
   }
 
+  // Novo método de stats expandido
+  async getDashboardStatsExpanded(propertyId?: number, daysBack?: number): Promise<DashboardStats> {
+    const params = new URLSearchParams();
+    if (propertyId) {
+      params.append('property_id', propertyId.toString());
+    }
+    if (daysBack) {
+      params.append('days_back', daysBack.toString());
+    }
+
+    const response = await this.client.get(`/reservations/stats/dashboard?${params}`);
+    return response.data;
+  }
+
   async advancedSearchReservations(
-    filters: ReservationFilters,
+    filters: ReservationFilters | ReservationFiltersNew,
     page = 1,
-    per_page = 20
-  ): Promise<ReservationListResponse> {
-    const response = await this.client.post<ReservationListResponse>(
-      `/reservations/advanced-search?page=${page}&per_page=${per_page}`, 
+    per_page = 20,
+    order_by = 'created_date',
+    order_direction = 'desc'
+  ): Promise<ReservationListResponse | ReservationListResponseWithDetails> {
+    const response = await this.client.post<ReservationListResponseWithDetails>(
+      `/reservations/advanced-search?page=${page}&per_page=${per_page}&order_by=${order_by}&order_direction=${order_direction}`, 
       filters
     );
+    return response.data;
+  }
+
+  // ===== NOVOS MÉTODOS DE RESERVA ADICIONADOS =====
+
+  async exportReservationsCSV(filters: ReservationExportFilters): Promise<ReservationExportResponse> {
+    const response = await this.client.post<ReservationExportResponse>('/reservations/export', filters);
     return response.data;
   }
 
@@ -429,20 +582,142 @@ class PMSApiClient {
     return response.data;
   }
 
-  // ===== GUESTS API =====
+  // ===== GUESTS API (MÉTODOS ORIGINAIS MANTIDOS) =====
   
   async getGuests(params?: { 
     page?: number; 
     per_page?: number; 
     search?: string;
+    has_email?: boolean;
+    has_document?: boolean;
+    nationality?: string;
+    city?: string;
+    state?: string;
+    marketing_consent?: string;
   }) {
-    const response = await this.client.get<GuestListResponse>('/guests', { params });
+    const response = await this.client.get<GuestListResponse>('/guests/', { params });
     return response.data;
   }
 
-  // Adicionar estes métodos na classe PMSApiClient em frontend/src/lib/api.ts
+  async createGuest(data: GuestCreate) {
+    const response = await this.client.post<GuestResponse>('/guests/', data);
+    return response.data;
+  }
 
-// ===== ROOM TYPES API =====
+  async getGuest(id: number) {
+    const response = await this.client.get<GuestResponse>(`/guests/${id}`);
+    return response.data;
+  }
+
+  // Novo método expandido
+  async getGuestById(id: number, includeStats = false): Promise<GuestDetails> {
+    const params = includeStats ? { include_stats: true } : {};
+    const response = await this.client.get<GuestDetails>(`/guests/${id}`, { params });
+    return response.data;
+  }
+
+  async getGuestWithStats(id: number) {
+    const response = await this.client.get<GuestWithStats>(`/guests/${id}/stats`);
+    return response.data;
+  }
+
+  async updateGuest(id: number, data: GuestUpdate) {
+    const response = await this.client.put<GuestResponse>(`/guests/${id}`, data);
+    return response.data;
+  }
+
+  async deleteGuest(id: number) {
+    await this.client.delete(`/guests/${id}`);
+  }
+
+  async searchGuests(query: string, limit: number = 10) {
+    const response = await this.client.get<GuestResponse[]>('/guests/search', {
+      params: { q: query, limit }
+    });
+    return response.data;
+  }
+
+  // Novos métodos de busca expandida
+  async searchGuestsExpanded(params?: {
+    page?: number;
+    per_page?: number;
+    search?: string;
+    has_email?: boolean;
+    has_document?: boolean;
+    nationality?: string;
+    city?: string;
+    state?: string;
+    marketing_consent?: string;
+  }): Promise<GuestListResponse> {
+    const cleanParams = Object.fromEntries(
+      Object.entries(params || {}).filter(([_, value]) => 
+        value !== null && value !== undefined && value !== ''
+      )
+    );
+
+    const response = await this.client.get<GuestListResponse>('/guests', { params: cleanParams });
+    return response.data;
+  }
+
+  async checkEmailAvailability(email: string, excludeGuestId?: number) {
+    try {
+      if (!email || email.trim().length === 0) {
+        return { available: true };
+      }
+      
+      let url = `/guests/check/email?email=${encodeURIComponent(email.trim())}`;
+      if (excludeGuestId) {
+        url += `&exclude_guest_id=${excludeGuestId}`;
+      }
+      
+      const response = await this.client.get<{ available: boolean }>(url);
+      return response.data;
+    } catch (error: any) {
+      console.error('Erro ao verificar email:', error);
+      return { available: true };
+    }
+  }
+
+  async checkDocumentAvailability(document: string, excludeGuestId?: number) {
+    try {
+      // Validação básica - não enviar se documento estiver vazio
+      if (!document || document.trim().length === 0) {
+        return { available: true };
+      }
+      
+      const params = new URLSearchParams();
+      params.append('document_number', document.trim());
+      if (excludeGuestId) {
+        params.append('exclude_guest_id', excludeGuestId.toString());
+      }
+      
+      const response = await this.client.get<{ available: boolean }>(`/guests/check/document?${params.toString()}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('Erro ao verificar documento:', error);
+      throw error;
+    }
+  }
+
+  async getGuestStats() {
+    const response = await this.client.get<GuestStats>('/guests/stats/general');
+    return response.data;
+  }
+
+  async advancedSearchGuests(filters: GuestFilters, page = 1, per_page = 20) {
+    const response = await this.client.post<GuestListResponse>(`/guests/advanced-search?page=${page}&per_page=${per_page}`, filters);
+    return response.data;
+  }
+
+  async mergeGuests(primaryGuestId: number, secondaryGuestId: number) {
+    const response = await this.client.post<GuestResponse>('/guests/merge', {
+      primary_guest_id: primaryGuestId,
+      secondary_guest_id: secondaryGuestId
+    });
+    return response.data;
+  }
+
+// ===== ROOM TYPES API (MÉTODOS ORIGINAIS MANTIDOS) =====
 
 async getRoomTypes(params?: {
   page?: number;
@@ -501,7 +776,7 @@ async searchRoomTypes(filters: RoomTypeFilters, page = 1, per_page = 20): Promis
   return response.data;
 }
 
-// ===== ROOMS API =====
+// ===== ROOMS API (MÉTODOS ORIGINAIS MANTIDOS) =====
 
 async getRooms(params?: {
   page?: number;
@@ -582,7 +857,7 @@ async checkRoomNumberAvailability(roomNumber: string, propertyId: number): Promi
   return response.data;
 }
 
-  // ===== ROOM AVAILABILITY METHODS =====
+  // ===== ROOM AVAILABILITY METHODS (MÉTODOS ORIGINAIS MANTIDOS) =====
   
   async getRoomAvailabilities(params?: {
     page?: number;
@@ -715,115 +990,7 @@ async checkRoomNumberAvailability(roomNumber: string, propertyId: number): Promi
     return response.data;
   }
 
-// Adicionar estes métodos na classe PMSApiClient em frontend/src/lib/api.ts
-
-// ===== GUESTS API =====
-
-async getGuests(params?: { 
-  page?: number; 
-  per_page?: number; 
-  has_email?: boolean;
-  has_document?: boolean;
-  nationality?: string;
-  city?: string;
-  state?: string;
-  marketing_consent?: string;
-  search?: string;
-}) {
-  const response = await this.client.get<GuestListResponse>('/guests/', { params });
-  return response.data;
-}
-
-async createGuest(data: GuestCreate) {
-  const response = await this.client.post<GuestResponse>('/guests/', data);
-  return response.data;
-}
-
-async getGuest(id: number) {
-  const response = await this.client.get<GuestResponse>(`/guests/${id}`);
-  return response.data;
-}
-
-async getGuestWithStats(id: number) {
-  const response = await this.client.get<GuestWithStats>(`/guests/${id}/stats`);
-  return response.data;
-}
-
-async updateGuest(id: number, data: GuestUpdate) {
-  const response = await this.client.put<GuestResponse>(`/guests/${id}`, data);
-  return response.data;
-}
-
-async deleteGuest(id: number) {
-  await this.client.delete(`/guests/${id}`);
-}
-
-async searchGuests(query: string, limit: number = 10) {
-  const response = await this.client.get<GuestResponse[]>('/guests/search', {
-    params: { q: query, limit }
-  });
-  return response.data;
-}
-
-async checkEmailAvailability(email: string, excludeGuestId?: number) {
-  try {
-    if (!email || email.trim().length === 0) {
-      return { available: true };
-    }
-    
-    let url = `/guests/check/email?email=${encodeURIComponent(email.trim())}`;
-    if (excludeGuestId) {
-      url += `&exclude_guest_id=${excludeGuestId}`;
-    }
-    
-    const response = await this.client.get<{ available: boolean }>(url);
-    return response.data;
-  } catch (error: any) {
-    console.error('Erro ao verificar email:', error);
-    return { available: true };
-  }
-}
-
-async checkDocumentAvailability(document: string, excludeGuestId?: number) {
-  try {
-    // Validação básica - não enviar se documento estiver vazio
-    if (!document || document.trim().length === 0) {
-      return { available: true };
-    }
-    
-    const params = new URLSearchParams();
-    params.append('document_number', document.trim());
-    if (excludeGuestId) {
-      params.append('exclude_guest_id', excludeGuestId.toString());
-    }
-    
-    const response = await this.client.get<{ available: boolean }>(`/guests/check/document?${params.toString()}`);
-    return response.data;
-  } catch (error: any) {
-    console.error('Erro ao verificar documento:', error);
-    throw error;
-  }
-}
-
-async getGuestStats() {
-  const response = await this.client.get<GuestStats>('/guests/stats/general');
-  return response.data;
-}
-
-async advancedSearchGuests(filters: GuestFilters, page = 1, per_page = 20) {
-  const response = await this.client.post<GuestListResponse>(`/guests/advanced-search?page=${page}&per_page=${per_page}`, filters);
-  return response.data;
-}
-
-async mergeGuests(primaryGuestId: number, secondaryGuestId: number) {
-  const response = await this.client.post<GuestResponse>('/guests/merge', {
-    primary_guest_id: primaryGuestId,
-    secondary_guest_id: secondaryGuestId
-  });
-  return response.data;
-}
-
-// ===== MAPA DE QUARTOS API =====
+// ===== MAPA DE QUARTOS API (MÉTODOS ORIGINAIS MANTIDOS) =====
 
 async getMapData(filters: MapFilters): Promise<MapResponse> {
   const params = new URLSearchParams();
@@ -881,7 +1048,7 @@ async createQuickBooking(booking: MapQuickBooking): Promise<any> {
   return response.data;
 }
 
-async getRoomAvailability(
+async getRoomAvailabilityFromMap(
   roomId: number,
   startDate: string,
   endDate: string
@@ -913,9 +1080,27 @@ async getCategorySummary(
   return response.data;
 }
 
-  // ===== DASHBOARD STATS =====
+  // ===== CALENDAR METHODS (MÉTODOS ORIGINAIS MANTIDOS) =====
+
+  // Método original de disponibilidade para calendário
+  async checkAvailabilityCalendar(data: AvailabilityCheckRequest): Promise<AvailabilityCheckResponse> {
+    const response = await this.client.post('/reservations/check-availability', data);
+    return response.data;
+  }
+
+  async getTodaysReservationsCalendar(propertyId?: number): Promise<TodaysReservationsResponse> {
+    const params = new URLSearchParams();
+    if (propertyId) {
+      params.append('property_id', propertyId.toString());
+    }
+
+    const response = await this.client.get(`/reservations/today?${params}`);
+    return response.data;
+  }
+
+  // ===== DASHBOARD STATS (MÉTODOS ORIGINAIS MANTIDOS) =====
   
-  async getDashboardStats() {
+  async getDashboardStatsSimple() {
     try {
       const response = await this.client.get('/reservations/stats/dashboard');
       return response.data;
@@ -932,7 +1117,7 @@ async getCategorySummary(
     }
   }
 
-  // ===== GENERIC REQUEST METHOD =====
+  // ===== GENERIC REQUEST METHOD (MÉTODO ORIGINAL MANTIDO) =====
 
   async request<T>(endpoint: string, options?: AxiosRequestConfig): Promise<T> {
     const response: AxiosResponse<T> = await this.client.request({
@@ -942,106 +1127,8 @@ async getCategorySummary(
     return response.data;
   }
 
-  
+  // ===== CRIAR RESERVA RÁPIDA (MÉTODO ORIGINAL MANTIDO) =====
 
-  // ===== CALENDAR METHODS =====
-
-  async getCalendarMonth(
-    year: number,
-    month: number,
-    propertyId?: number
-  ): Promise<ReservationResponse[]> {
-    const params = new URLSearchParams({
-      year: year.toString(),
-      month: month.toString(),
-    });
-
-    if (propertyId) {
-      params.append('property_id', propertyId.toString());
-    }
-
-    const response = await this.client.get(`/reservations/calendar/month?${params}`);
-    return response.data;
-  }
-
-  async getCalendarRange(
-    startDate: string,
-    endDate: string,
-    propertyId?: number,
-    status?: string
-  ): Promise<ReservationResponse[]> {
-    const params = new URLSearchParams({
-      start_date: startDate,
-      end_date: endDate,
-    });
-
-    if (propertyId) {
-      params.append('property_id', propertyId.toString());
-    }
-
-    if (status) {
-      params.append('status', status);
-    }
-
-    const response = await this.client.get(`/reservations/calendar/range?${params}`);
-    return response.data;
-  }
-
-  async checkAvailability(data: AvailabilityCheckRequest): Promise<AvailabilityCheckResponse> {
-    const response = await this.client.post('/reservations/check-availability', data);
-    return response.data;
-  }
-
-  async getDashboardStats(propertyId?: number): Promise<CalendarStatsResponse> {
-    const params = new URLSearchParams();
-    if (propertyId) {
-      params.append('property_id', propertyId.toString());
-    }
-
-    const response = await this.client.get(`/reservations/stats/dashboard?${params}`);
-    return response.data;
-  }
-
-  async getTodaysReservations(propertyId?: number): Promise<TodaysReservationsResponse> {
-    const params = new URLSearchParams();
-    if (propertyId) {
-      params.append('property_id', propertyId.toString());
-    }
-
-    const response = await this.client.get(`/reservations/today?${params}`);
-    return response.data;
-  }
-
-  async confirmReservation(reservationId: number): Promise<ReservationResponse> {
-    const response = await this.client.patch(`/reservations/${reservationId}/confirm`);
-    return response.data;
-  }
-
-  async checkInReservation(
-    reservationId: number,
-    data: { notes?: string; actual_check_in_time?: string }
-  ): Promise<ReservationResponse> {
-    const response = await this.client.post(`/reservations/${reservationId}/check-in`, data);
-    return response.data;
-  }
-
-  async checkOutReservation(
-    reservationId: number,
-    data: { notes?: string; actual_check_out_time?: string; final_charges?: number }
-  ): Promise<ReservationResponse> {
-    const response = await this.client.post(`/reservations/${reservationId}/check-out`, data);
-    return response.data;
-  }
-
-  async cancelReservation(
-    reservationId: number,
-    data: { cancellation_reason: string; refund_amount?: number; notes?: string }
-  ): Promise<ReservationResponse> {
-    const response = await this.client.post(`/reservations/${reservationId}/cancel`, data);
-    return response.data;
-  }
-
-  // Criar reserva rápida (usando endpoint existente)
   async createQuickReservation(data: {
     guest_id?: number;
     guest_name?: string;
@@ -1089,9 +1176,69 @@ async getCategorySummary(
 
     return this.createReservation(reservationData);
   }
+
+  // ===== NOVOS MÉTODOS UTILITÁRIOS ADICIONADOS =====
+
+  // Método para fazer download de arquivos
+  async downloadFile(url: string, filename?: string): Promise<void> {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error('Erro ao fazer download do arquivo');
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename || 'download.csv';
+      document.body.appendChild(link);
+      link.click();
+      
+      // Limpar
+      window.URL.revokeObjectURL(downloadUrl);
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('Erro no download:', error);
+      throw error;
+    }
+  }
+
+  // Método para formatar parâmetros de URL
+  private buildQueryParams(params: Record<string, any>): URLSearchParams {
+    const queryParams = new URLSearchParams();
+    
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== null && value !== undefined && value !== '' && value !== 'all') {
+        if (Array.isArray(value)) {
+          value.forEach(v => queryParams.append(key, v.toString()));
+        } else {
+          queryParams.append(key, value.toString());
+        }
+      }
+    });
+    
+    return queryParams;
+  }
+
+  // Método para tratar erros de API
+  private handleApiError(error: any): never {
+    if (error.response) {
+      // Erro da API com resposta
+      const message = error.response.data?.detail || 
+                      error.response.data?.message || 
+                      'Erro na requisição';
+      throw new Error(message);
+    } else if (error.request) {
+      // Erro de rede
+      throw new Error('Erro de conexão. Verifique sua internet.');
+    } else {
+      // Outros erros
+      throw new Error(error.message || 'Erro desconhecido');
+    }
+  }
 }
-
-
 
 // Export singleton instance
 export const apiClient = new PMSApiClient();
