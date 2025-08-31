@@ -1,4 +1,4 @@
-# backend/app/models/reservation.py
+# app/models/reservation.py
 
 from sqlalchemy import Column, String, Date, DateTime, Numeric, Integer, Text, JSON, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
@@ -38,7 +38,7 @@ class Reservation(BaseModel, TenantMixin):
     # Valores financeiros
     room_rate = Column(Numeric(10, 2), nullable=True)        # Diária base
     total_amount = Column(Numeric(10, 2), nullable=True)     # Valor total
-    paid_amount = Column(Numeric(10, 2), default=0, nullable=False)  # Valor pago
+    paid_amount = Column(Numeric(10, 2), default=0, nullable=False)  # Valor pago (DEPRECATED - usar payments)
     discount = Column(Numeric(10, 2), default=0, nullable=False)     # Desconto
     taxes = Column(Numeric(10, 2), default=0, nullable=False)        # Impostos/taxas
     
@@ -71,6 +71,7 @@ class Reservation(BaseModel, TenantMixin):
     guest = relationship("Guest", back_populates="reservations")
     property_obj = relationship("Property")
     reservation_rooms = relationship("ReservationRoom", back_populates="reservation", cascade="all, delete-orphan")
+    payments = relationship("Payment", back_populates="reservation", cascade="all, delete-orphan")  # ✅ NOVO
     
     def __repr__(self):
         return (f"<Reservation(id={self.id}, number='{self.reservation_number}', "
@@ -85,23 +86,71 @@ class Reservation(BaseModel, TenantMixin):
         return (self.check_out_date - self.check_in_date).days
     
     @property
+    def total_paid(self):
+        """Total efetivamente pago (apenas pagamentos confirmados) - ✅ NOVO"""
+        confirmed_payments = [p for p in self.payments if p.status == "confirmed" and not p.is_refund]
+        return sum(p.amount for p in confirmed_payments)
+    
+    @property
+    def total_refunded(self):
+        """Total estornado - ✅ NOVO"""
+        refunds = [p for p in self.payments if p.status == "confirmed" and p.is_refund]
+        return sum(p.amount for p in refunds)
+    
+    @property
     def balance_due(self):
-        """Saldo devedor da reserva"""
+        """Saldo devedor baseado nos pagamentos reais - ✅ ATUALIZADO"""
+        if not self.total_amount:
+            return Decimal('0')
+        return self.total_amount - self.total_paid + self.total_refunded
+    
+    @property
+    def balance_due_legacy(self):
+        """Saldo devedor usando campo paid_amount (compatibilidade) - ✅ NOVO"""
         if not self.total_amount:
             return Decimal('0')
         return self.total_amount - self.paid_amount
     
     @property
     def is_paid(self):
-        """Verifica se a reserva está quitada"""
+        """Verifica se a reserva está quitada - ✅ ATUALIZADO"""
         return self.balance_due <= 0
+    
+    @property
+    def payment_status(self):
+        """Status do pagamento baseado nos pagamentos reais - ✅ NOVO"""
+        if not self.total_amount or self.total_amount == 0:
+            return "no_payment_required"
+        
+        balance = self.balance_due
+        total_paid = self.total_paid
+        
+        if balance <= 0:
+            return "paid"
+        elif total_paid > 0:
+            return "partial"
+        else:
+            return "unpaid"
+    
+    @property
+    def last_payment_date(self):
+        """Data do último pagamento confirmado - ✅ NOVO"""
+        confirmed_payments = [p for p in self.payments if p.status == "confirmed"]
+        if not confirmed_payments:
+            return None
+        return max(p.payment_date for p in confirmed_payments)
+    
+    @property
+    def payment_count(self):
+        """Número total de pagamentos (exceto estornos) - ✅ NOVO"""
+        return len([p for p in self.payments if not p.is_refund and p.status == "confirmed"])
     
     @property
     def status_display(self):
         """Status formatado para exibição"""
         status_map = {
             "pending": "Pendente",
-            "confirmed": "Confirmada", 
+            "confirmed": "Confirmada",
             "checked_in": "Check-in Realizado",
             "checked_out": "Check-out Realizado",
             "cancelled": "Cancelada",

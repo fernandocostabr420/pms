@@ -1,4 +1,4 @@
-# backend/app/models/__init__.py
+# app/models/__init__.py
 
 # Importar todos os modelos para que sejam detectados pelo Alembic
 
@@ -10,7 +10,8 @@ from .room_type import RoomType
 from .room import Room
 from .guest import Guest
 from .reservation import Reservation, ReservationRoom
-from .room_availability import RoomAvailability  # ✅ NOVO IMPORT
+from .room_availability import RoomAvailability
+from .payment import Payment  # ✅ NOVO IMPORT
 
 __all__ = [
     "Tenant",
@@ -22,5 +23,6 @@ __all__ = [
     "Guest",
     "Reservation",
     "ReservationRoom",
-    "RoomAvailability"  # ✅ NOVO EXPORT
+    "RoomAvailability",
+    "Payment"  # ✅ NOVO EXPORT
 ]

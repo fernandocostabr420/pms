@@ -1,4 +1,4 @@
-# backend/app/api/v1/endpoints/__init__.py
+# app/api/v1/endpoints/__init__.py
 
 """API v1 endpoints"""
 
@@ -11,9 +11,10 @@ from . import (
     room_types,
     rooms,
     room_availability,
-    map,  # ✅ NOVO MÓDULO
+    map,
     guests,
-    reservations
+    reservations,
+    payments  # ✅ NOVO MÓDULO
 )
 
 __all__ = [
@@ -25,7 +26,8 @@ __all__ = [
     "room_types",
     "rooms", 
     "room_availability",
-    "map",  # ✅ ADICIONADO
+    "map",
     "guests",
-    "reservations"
+    "reservations",
+    "payments"  # ✅ ADICIONADO
 ]

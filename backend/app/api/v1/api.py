@@ -1,11 +1,11 @@
-# backend/app/api/v1/api.py
+# app/api/v1/api.py
 
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     auth, users, tenants, audit, properties, 
     room_types, rooms, guests, reservations,
-    room_availability, map  # ✅ NOVO IMPORT
+    room_availability, map, payments  # ✅ NOVO IMPORT
 )
 
 api_router = APIRouter()
@@ -66,7 +66,7 @@ api_router.include_router(
     tags=["Disponibilidade de Quartos"]
 )
 
-# ✅ NOVO ROUTER - MAPA DE QUARTOS
+# Incluir rotas do mapa de quartos
 api_router.include_router(
     map.router,
     prefix="/map", 
@@ -85,4 +85,11 @@ api_router.include_router(
     reservations.router,
     prefix="/reservations", 
     tags=["Reservas"]
+)
+
+# ✅ NOVO ROUTER - PAGAMENTOS
+api_router.include_router(
+    payments.router,
+    prefix="/payments", 
+    tags=["Pagamentos"]
 )
