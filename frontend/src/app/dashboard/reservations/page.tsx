@@ -34,6 +34,10 @@ import ReservationCard from '@/components/reservations/ReservationCard';
 import ReservationDetails from '@/components/reservations/ReservationDetails';
 import LoadingSpinner from '@/components/ui/loading-spinner';
 
+// ✅ NOVOS IMPORTS - Componente Padronizado
+import StandardReservationModal from '@/components/reservations/StandardReservationModal';
+import { RESERVATION_MODAL_CONFIGS } from '@/components/reservations/configs/reservationModalConfigs';
+
 // Types
 import { ReservationFilters, ReservationResponseWithGuestDetails } from '@/types/reservation';
 
@@ -106,6 +110,11 @@ export default function ReservationsPage() {
   const [exporting, setExporting] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('table');
+
+  // ✅ NOVOS ESTADOS - Modais Padronizados
+  const [showNewReservationModal, setShowNewReservationModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [reservationToEdit, setReservationToEdit] = useState<ReservationResponseWithGuestDetails | null>(null);
 
   // ✅ NOVA FUNÇÃO: Handler para clique na reserva (navegar para página de detalhes)
   const handleReservationClick = useCallback((reservation: ReservationResponseWithGuestDetails) => {
@@ -205,11 +214,36 @@ export default function ReservationsPage() {
     setShowDetails(true);
   };
 
+  // ✅ HANDLER ATUALIZADO - Agora abre o modal padronizado
   const handleEditReservation = (reservation: ReservationResponseWithGuestDetails) => {
-    // TODO: Implementar edição
+    setReservationToEdit(reservation);
+    setShowEditModal(true);
+  };
+
+  // ✅ NOVOS HANDLERS - Modais Padronizados
+  const handleNewReservation = () => {
+    setReservationToEdit(null);
+    setShowNewReservationModal(true);
+  };
+
+  const handleNewReservationSuccess = () => {
+    setShowNewReservationModal(false);
+    loadReservations(); // Recarregar lista
+    loadQuickStats(); // Atualizar estatísticas
     toast({
-      title: "Funcionalidade em desenvolvimento",
-      description: "A edição de reservas será implementada em breve."
+      title: "Sucesso",
+      description: "Reserva criada com sucesso!"
+    });
+  };
+
+  const handleEditReservationSuccess = () => {
+    setShowEditModal(false);
+    setReservationToEdit(null);
+    loadReservations(); // Recarregar lista
+    loadQuickStats(); // Atualizar estatísticas
+    toast({
+      title: "Sucesso", 
+      description: "Reserva atualizada com sucesso!"
     });
   };
 
@@ -398,7 +432,8 @@ export default function ReservationsPage() {
             Exportar
           </Button>
           
-          <Button size="sm">
+          {/* ✅ BOTÃO ATUALIZADO - Conectado ao handler */}
+          <Button size="sm" onClick={handleNewReservation}>
             <Plus className="h-4 w-4 mr-2" />
             Nova Reserva
           </Button>
@@ -649,6 +684,28 @@ export default function ReservationsPage() {
           }}
         />
       )}
+
+      {/* ===== NOVOS MODAIS PADRONIZADOS ===== */}
+      
+      {/* Modal para Nova Reserva */}
+      <StandardReservationModal
+        isOpen={showNewReservationModal}
+        onClose={() => setShowNewReservationModal(false)}
+        onSuccess={handleNewReservationSuccess}
+        {...RESERVATION_MODAL_CONFIGS.FULL_RESERVATION}
+      />
+
+      {/* Modal para Editar Reserva */}
+      <StandardReservationModal
+        isOpen={showEditModal}
+        onClose={() => {
+          setShowEditModal(false);
+          setReservationToEdit(null);
+        }}
+        onSuccess={handleEditReservationSuccess}
+        reservation={reservationToEdit}
+        {...RESERVATION_MODAL_CONFIGS.EDIT_RESERVATION}
+      />
     </div>
   );
 }
