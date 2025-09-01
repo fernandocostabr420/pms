@@ -137,7 +137,7 @@ def list_reservations(
     query = db.query(Reservation).options(
         joinedload(Reservation.guest),           # ✅ SEMPRE CARREGAR HÓSPEDE
         joinedload(Reservation.property_obj),
-        joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room) # ✅ SEMPRE CARREGAR PROPRIEDADE
+        joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room).joinedload(Room.room_type) # ✅ SEMPRE CARREGAR PROPRIEDADE
     ).filter(
         Reservation.tenant_id == current_user.tenant_id,
         Reservation.is_active == True
@@ -1053,7 +1053,7 @@ def get_reservations_detailed(
         query = db.query(Reservation).options(
             joinedload(Reservation.guest),
             joinedload(Reservation.property_obj),
-            joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room)
+            joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room).joinedload(Room.room_type)
         ).filter(
             Reservation.tenant_id == current_user.tenant_id,
             Reservation.is_active == True
@@ -1178,7 +1178,7 @@ def get_reservations_detailed(
             # Criar response expandido
             detailed_reservation = ReservationResponseWithGuestDetails(
                 **base_dict,
-                
+
                 # Dados do hóspede expandidos
                 guest_phone=reservation.guest.phone if reservation.guest else None,
                 guest_document_type=reservation.guest.document_type if reservation.guest else None,
@@ -1189,27 +1189,30 @@ def get_reservations_detailed(
                 guest_country=reservation.guest.country if reservation.guest else None,
                 guest_address=reservation.guest.address_line1 if reservation.guest else None,
                 guest_date_of_birth=reservation.guest.date_of_birth if reservation.guest else None,
-                
+
                 # Dados da propriedade expandidos
                 property_address=reservation.property_obj.address_line1 if reservation.property_obj else None,
                 property_phone=reservation.property_obj.phone if reservation.property_obj else None,
                 property_city=reservation.property_obj.city if reservation.property_obj else None,
-                
-                room_details=[
-                    {
-                        'id': room.room_id,
-                        'room_number': room.room.room_number if room.room else None,
-                        'room_type_name': room.room.room_type.name if (room.room and room.room.room_type) else None,
-                        'check_in_date': room.check_in_date.isoformat() if room.check_in_date else None,
-                        'check_out_date': room.check_out_date.isoformat() if room.check_out_date else None,
-                        'rate_per_night': float(room.rate_per_night) if room.rate_per_night else None,
-                        'total_amount': float(room.total_amount) if room.total_amount else None,
-                        'status': room.status,
-                        'notes': room.notes
-                    }
+
+                rooms=[
+                    ReservationRoomResponse(
+                        id=room.id,
+                        reservation_id=room.reservation_id,
+                        room_id=room.room_id,
+                        check_in_date=room.check_in_date.isoformat() if room.check_in_date else None,
+                        check_out_date=room.check_out_date.isoformat() if room.check_out_date else None,
+                        rate_per_night=float(room.rate_per_night) if room.rate_per_night else None,
+                        total_amount=float(room.total_amount) if room.total_amount else None,
+                        status=room.status,
+                        notes=room.notes,
+                        room_number=room.room.room_number if room.room else None,
+                        room_name=room.room.name if room.room else None,
+                        room_type_name=room.room.room_type.name if (room.room and room.room.room_type) else None,
+                    )
                     for room in reservation.reservation_rooms if room.room
                 ] if reservation.reservation_rooms else [],
-                
+
                 # Campos adicionais específicos para reservas
                 deposit_paid=reservation.deposit_paid,
                 is_group_reservation=reservation.is_group_reservation,
