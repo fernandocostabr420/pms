@@ -60,6 +60,7 @@ interface ReservationTableProps {
   onView?: (reservation: ReservationResponseWithGuestDetails) => void;
   onEdit?: (reservation: ReservationResponseWithGuestDetails) => void;
   onQuickAction?: (reservation: ReservationResponseWithGuestDetails, action: string) => void;
+  onReservationClick?: (reservation: ReservationResponseWithGuestDetails) => void; // ✅ Nova prop
   actionLoading?: { [key: number]: string | null };
 }
 
@@ -247,6 +248,7 @@ export default function ReservationTable({
   onView,
   onEdit,
   onQuickAction,
+  onReservationClick, // ✅ Nova prop
   actionLoading = {},
 }: ReservationTableProps) {
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'id', direction: 'desc' });
@@ -271,6 +273,18 @@ export default function ReservationTable({
     } else {
       setSortConfig({ key, direction: 'asc' });
     }
+  };
+
+  // ✅ Handler do clique na linha
+  const handleRowClick = (reservation: ReservationResponseWithGuestDetails, event: React.MouseEvent) => {
+    // Ignorar clique se foi em um botão/dropdown (para não interferir com ações)
+    const target = event.target as HTMLElement;
+    if (target.closest('button') || target.closest('[role="menuitem"]')) {
+      return;
+    }
+    
+    // Chamar callback se disponível
+    onReservationClick?.(reservation);
   };
 
   const SortButton = ({ children, columnKey }: { children: React.ReactNode; columnKey: string }) => (
@@ -380,7 +394,8 @@ export default function ReservationTable({
               return (
                 <TableRow 
                   key={reservation.id} 
-                  className="hover:bg-gray-50/50 transition-colors"
+                  className="hover:bg-gray-50/50 transition-colors cursor-pointer" // ✅ Adicionar cursor pointer
+                  onClick={(e) => handleRowClick(reservation, e)} // ✅ Handler do clique
                 >
                   {/* ID */}
                   <TableCell className="font-mono text-sm text-gray-600">

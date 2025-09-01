@@ -40,6 +40,7 @@ interface ReservationCardProps {
   onView: () => void;
   onEdit: () => void;
   onQuickAction: (action: string) => void;
+  onClick?: (reservation: ReservationResponse) => void; // ✅ Nova prop para navegação
   actionLoading?: string | null;
 }
 
@@ -48,6 +49,7 @@ export default function ReservationCard({
   onView,
   onEdit,
   onQuickAction,
+  onClick, // ✅ Nova prop
   actionLoading
 }: ReservationCardProps) {
 
@@ -99,8 +101,23 @@ export default function ReservationCard({
     return <Badge variant="destructive" className="bg-red-100 text-red-800">Pendente</Badge>;
   };
 
+  // ✅ Handler do clique no card
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Ignorar clique se foi em um botão/dropdown/link
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('[role="menuitem"]') || target.closest('a')) {
+      return;
+    }
+    
+    // Chamar callback se disponível
+    onClick?.(reservation);
+  };
+
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-6 hover:shadow-md transition-all duration-200">
+    <div 
+      className="bg-white border border-gray-200 rounded-lg p-6 hover:shadow-md transition-all duration-200 cursor-pointer" // ✅ Adicionar cursor pointer
+      onClick={handleCardClick} // ✅ Handler do clique
+    >
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* Seção Principal - Informações da Reserva */}
@@ -135,7 +152,10 @@ export default function ReservationCard({
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => onQuickAction('confirm')}
+                  onClick={(e) => {
+                    e.stopPropagation(); // ✅ Prevenir propagação
+                    onQuickAction('confirm');
+                  }}
                   disabled={actionLoading === 'confirm'}
                   className="text-green-600 border-green-600 hover:bg-green-50"
                 >
@@ -148,7 +168,10 @@ export default function ReservationCard({
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => onQuickAction('check-in')}
+                  onClick={(e) => {
+                    e.stopPropagation(); // ✅ Prevenir propagação
+                    onQuickAction('check-in');
+                  }}
                   disabled={actionLoading === 'check-in'}
                   className="text-blue-600 border-blue-600 hover:bg-blue-50"
                 >
@@ -161,7 +184,10 @@ export default function ReservationCard({
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => onQuickAction('check-out')}
+                  onClick={(e) => {
+                    e.stopPropagation(); // ✅ Prevenir propagação
+                    onQuickAction('check-out');
+                  }}
                   disabled={actionLoading === 'check-out'}
                   className="text-orange-600 border-orange-600 hover:bg-orange-50"
                 >
@@ -172,7 +198,11 @@ export default function ReservationCard({
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm">
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={(e) => e.stopPropagation()} // ✅ Prevenir propagação
+                  >
                     <MoreVertical className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -317,6 +347,7 @@ export default function ReservationCard({
                   <a 
                     href={`mailto:${reservation.guest_email}`} 
                     className="text-blue-600 hover:underline break-all"
+                    onClick={(e) => e.stopPropagation()} // ✅ Prevenir propagação para links
                   >
                     {reservation.guest_email}
                   </a>
@@ -329,6 +360,7 @@ export default function ReservationCard({
                   <a 
                     href={`tel:${reservation.guest.phone}`}
                     className="text-blue-600 hover:underline"
+                    onClick={(e) => e.stopPropagation()} // ✅ Prevenir propagação para links
                   >
                     {reservation.guest.phone}
                   </a>

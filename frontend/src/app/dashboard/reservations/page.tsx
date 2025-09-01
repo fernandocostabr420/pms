@@ -3,6 +3,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation'; // ✅ Adicionar import do router
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -84,6 +85,8 @@ const PER_PAGE = 20;
 type ViewMode = 'table' | 'cards';
 
 export default function ReservationsPage() {
+  const router = useRouter(); // ✅ Hook do router
+
   // Estados principais
   const [state, setState] = useState<ReservationPageState>({
     reservations: [],
@@ -103,6 +106,11 @@ export default function ReservationsPage() {
   const [exporting, setExporting] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('table');
+
+  // ✅ NOVA FUNÇÃO: Handler para clique na reserva (navegar para página de detalhes)
+  const handleReservationClick = useCallback((reservation: ReservationResponseWithGuestDetails) => {
+    router.push(`/dashboard/reservations/${reservation.id}`);
+  }, [router]);
 
   // Carregar reservas
   const loadReservations = useCallback(async (page?: number) => {
@@ -565,6 +573,7 @@ export default function ReservationsPage() {
                   onView={handleViewReservation}
                   onEdit={handleEditReservation}
                   onQuickAction={handleQuickAction}
+                  onReservationClick={handleReservationClick} // ✅ Nova prop
                   actionLoading={actionLoading}
                 />
               </CardContent>
@@ -578,6 +587,7 @@ export default function ReservationsPage() {
                       onView={() => handleViewReservation(reservation)}
                       onEdit={() => handleEditReservation(reservation)}
                       onQuickAction={(action) => handleQuickAction(reservation, action)}
+                      onClick={handleReservationClick} // ✅ Adicionar para os cards também
                       actionLoading={getActionLoadingForReservation(reservation.id)}
                     />
                   ))}
