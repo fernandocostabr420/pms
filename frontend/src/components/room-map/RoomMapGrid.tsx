@@ -1,7 +1,7 @@
 // frontend/src/components/room-map/RoomMapGrid.tsx
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Card } from '@/components/ui/card';
@@ -19,6 +19,9 @@ import {
   Calendar,
   DollarSign
 } from 'lucide-react';
+// ✅ NOVAS IMPORTAÇÕES - Modal de reserva
+import { ReservationQuickView } from './ReservationQuickView';
+import { useReservationQuickView } from '@/hooks/useReservationQuickView';
 
 interface RoomMapGridProps {
   mapData: MapResponse;
@@ -43,6 +46,23 @@ export default function RoomMapGrid({
   onCellClick,
   loading = false
 }: RoomMapGridProps) {
+  
+  // ✅ NOVO: Hook para o modal de reservas
+  const { 
+    isOpen, 
+    reservation, 
+    room, 
+    openQuickView, 
+    closeQuickView 
+  } = useReservationQuickView();
+
+  // ✅ NOVO: Handler para lidar com clique na reserva
+  const handleReservationClick = useCallback((
+    clickedReservation: MapReservationResponse, 
+    clickedRoom: MapRoomData
+  ) => {
+    openQuickView(clickedReservation, clickedRoom);
+  }, [openQuickView]);
   
   // ✅ Hook 1: Gerar cabeçalhos de data
   const dateHeaders = useMemo((): DateHeader[] => {
@@ -295,7 +315,7 @@ export default function RoomMapGrid({
             return (
               <div
                 key={reservation.id}
-                onClick={() => onReservationClick?.(reservation, room)}
+                onClick={() => handleReservationClick(reservation, room)} // ✅ ATUALIZADO: Novo handler
                 className={cn(
                   "absolute cursor-pointer text-[9px] sm:text-[10px] font-medium flex items-center justify-center",
                   getReservationColor(reservation.status)
@@ -310,7 +330,7 @@ export default function RoomMapGrid({
                   clipPath: clipPath,
                   borderRadius: '0px'
                 }}
-                title={`${reservation.guest_name} - ${reservation.reservation_number}`}
+                title={`${reservation.guest_name} - ${reservation.reservation_number} - Clique para detalhes`} // ✅ ATUALIZADO: Texto do tooltip
               >
                 {/* NOME COMPLETO DO HÓSPEDE */}
                 <span className="font-medium truncate leading-tight px-2">
@@ -426,102 +446,112 @@ export default function RoomMapGrid({
     );
   }
 
-  // ✅ RENDER PRINCIPAL - TOTALMENTE RESPONSIVO
+  // ✅ RENDER PRINCIPAL - TOTALMENTE RESPONSIVO COM MODAL
   return (
-    <div 
-      className="bg-white room-map-grid-container w-full"
-      style={{ 
-        minWidth: `${gridDimensions.totalWidth}px`
-      }}
-    >
-      {/* ✅ Header das datas - RESPONSIVO E STICKY */}
-      <div className="flex room-map-header sticky top-0 z-20 bg-white shadow-sm">
-        {/* Coluna "Quartos" - RESPONSIVO */}
-        <div 
-          className="px-2 sm:px-3 py-2 room-map-header-title flex-shrink-0 flex items-center border-r border-gray-600 bg-slate-700"
-          style={{ 
-            width: `${gridDimensions.roomColumnWidth}px`,
-            height: '48px'
-          }}
-        >
-          <div className="font-bold text-xs sm:text-sm text-white truncate">Quartos</div>
-        </div>
-        
-        {/* Células das datas - LAYOUT IGUAL AO EXEMPLO */}
-        <div className="flex room-map-dates-header">
-          {dateHeaders.map(header => {
-            const occupancy = dailyOccupancy[header.date] || { occupied: 0, total: 0, percentage: 0 };
-            const monthName = format(new Date(header.date + 'T00:00:00'), 'MMM', { locale: ptBR }).toUpperCase();
-            
-            return (
-              <div 
-                key={header.date}
-                className={cn(
-                  "border-r border-gray-600 flex-shrink-0 flex flex-col room-map-date-cell-enhanced relative",
-                  header.isWeekend && "room-map-date-weekend-enhanced",
-                  header.isToday && "room-map-date-today-enhanced"
-                )}
-                style={{ 
-                  width: `${gridDimensions.cellWidth}px`,
-                  height: '48px'
-                }}
-              >
-                {/* Header com dia da semana e percentagem */}
-                <div className="flex items-center justify-between px-1 py-0.5 bg-slate-700 text-white">
-                  <span className="text-[8px] font-bold truncate flex-1">
-                    {header.dayOfWeek.substring(0, 3).toUpperCase()}
-                  </span>
-                  <span className={cn(
-                    "px-1 py-0 rounded text-[8px] font-bold min-w-[18px] text-center ml-1",
-                    occupancy.percentage >= 80 ? 'bg-red-500' : 
-                    occupancy.percentage >= 50 ? 'bg-yellow-500' : 
-                    occupancy.percentage >= 25 ? 'bg-blue-500' : 'bg-green-500'
-                  )}>
-                    {occupancy.percentage}%
-                  </span>
-                </div>
-
-                {/* Número do dia e mês lado a lado */}
-                <div className="flex-1 bg-slate-600 text-white flex items-center justify-center px-1 gap-1">
-                  <div className="text-lg font-bold leading-none">
-                    {header.dayOfMonth.padStart(2, '0')}
-                  </div>
-                  <div className="text-[10px] font-medium opacity-90 leading-none">
-                    {monthName}
-                  </div>
-                </div>
-
-                {/* Indicador para hoje */}
-                {header.isToday && (
-                  <div className="absolute inset-0 border-2 border-orange-400 rounded-sm pointer-events-none"></div>
-                )}
-
-                {/* Indicador de fim de semana */}
-                {header.isWeekend && (
-                  <div className="absolute top-0 right-0 w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[4px] border-t-blue-500"></div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Categorias e quartos - RESPONSIVOS */}
-      <div className="room-map-content">
-        {mapData.categories.length === 0 ? (
-          <div className="p-4 sm:p-6 text-center">
-            <Bed className="h-8 w-8 sm:h-12 sm:w-12 text-gray-300 mx-auto mb-3" />
-            <h3 className="text-sm sm:text-base font-medium text-gray-900 mb-1">
-              Nenhum quarto encontrado
-            </h3>
-            <p className="text-xs sm:text-sm text-gray-500">
-              Não há quartos cadastrados para os filtros selecionados.
-            </p>
+    <>
+      <div 
+        className="bg-white room-map-grid-container w-full"
+        style={{ 
+          minWidth: `${gridDimensions.totalWidth}px`
+        }}
+      >
+        {/* ✅ Header das datas - RESPONSIVO E STICKY */}
+        <div className="flex room-map-header sticky top-0 z-20 bg-white shadow-sm">
+          {/* Coluna "Quartos" - RESPONSIVO */}
+          <div 
+            className="px-2 sm:px-3 py-2 room-map-header-title flex-shrink-0 flex items-center border-r border-gray-600 bg-slate-700"
+            style={{ 
+              width: `${gridDimensions.roomColumnWidth}px`,
+              height: '48px'
+            }}
+          >
+            <div className="font-bold text-xs sm:text-sm text-white truncate">Quartos</div>
           </div>
-        ) : (
-          mapData.categories.map(category => renderCategory(category))
-        )}
+          
+          {/* Células das datas - LAYOUT IGUAL AO EXEMPLO */}
+          <div className="flex room-map-dates-header">
+            {dateHeaders.map(header => {
+              const occupancy = dailyOccupancy[header.date] || { occupied: 0, total: 0, percentage: 0 };
+              const monthName = format(new Date(header.date + 'T00:00:00'), 'MMM', { locale: ptBR }).toUpperCase();
+              
+              return (
+                <div 
+                  key={header.date}
+                  className={cn(
+                    "border-r border-gray-600 flex-shrink-0 flex flex-col room-map-date-cell-enhanced relative",
+                    header.isWeekend && "room-map-date-weekend-enhanced",
+                    header.isToday && "room-map-date-today-enhanced"
+                  )}
+                  style={{ 
+                    width: `${gridDimensions.cellWidth}px`,
+                    height: '48px'
+                  }}
+                >
+                  {/* Header com dia da semana e percentagem */}
+                  <div className="flex items-center justify-between px-1 py-0.5 bg-slate-700 text-white">
+                    <span className="text-[8px] font-bold truncate flex-1">
+                      {header.dayOfWeek.substring(0, 3).toUpperCase()}
+                    </span>
+                    <span className={cn(
+                      "px-1 py-0 rounded text-[8px] font-bold min-w-[18px] text-center ml-1",
+                      occupancy.percentage >= 80 ? 'bg-red-500' : 
+                      occupancy.percentage >= 50 ? 'bg-yellow-500' : 
+                      occupancy.percentage >= 25 ? 'bg-blue-500' : 'bg-green-500'
+                    )}>
+                      {occupancy.percentage}%
+                    </span>
+                  </div>
+
+                  {/* Número do dia e mês lado a lado */}
+                  <div className="flex-1 bg-slate-600 text-white flex items-center justify-center px-1 gap-1">
+                    <div className="text-lg font-bold leading-none">
+                      {header.dayOfMonth.padStart(2, '0')}
+                    </div>
+                    <div className="text-[10px] font-medium opacity-90 leading-none">
+                      {monthName}
+                    </div>
+                  </div>
+
+                  {/* Indicador para hoje */}
+                  {header.isToday && (
+                    <div className="absolute inset-0 border-2 border-orange-400 rounded-sm pointer-events-none"></div>
+                  )}
+
+                  {/* Indicador de fim de semana */}
+                  {header.isWeekend && (
+                    <div className="absolute top-0 right-0 w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[4px] border-t-blue-500"></div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Categorias e quartos - RESPONSIVOS */}
+        <div className="room-map-content">
+          {mapData.categories.length === 0 ? (
+            <div className="p-4 sm:p-6 text-center">
+              <Bed className="h-8 w-8 sm:h-12 sm:w-12 text-gray-300 mx-auto mb-3" />
+              <h3 className="text-sm sm:text-base font-medium text-gray-900 mb-1">
+                Nenhum quarto encontrado
+              </h3>
+              <p className="text-xs sm:text-sm text-gray-500">
+                Não há quartos cadastrados para os filtros selecionados.
+              </p>
+            </div>
+          ) : (
+            mapData.categories.map(category => renderCategory(category))
+          )}
+        </div>
       </div>
-    </div>
+
+      {/* ✅ NOVO: Modal de detalhes rápidos da reserva */}
+      <ReservationQuickView
+        isOpen={isOpen}
+        onClose={closeQuickView}
+        reservation={reservation}
+        room={room}
+      />
+    </>
   );
 }

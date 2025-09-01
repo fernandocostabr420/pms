@@ -119,8 +119,10 @@ export default function RoomMapPage() {
     console.log('Room clicked:', room);
   };
 
+  // ✅ ATUALIZADO: Handler de reserva agora é opcional (o modal é gerenciado internamente pelo RoomMapGrid)
   const handleReservationClick = (reservation: MapReservationResponse, room: MapRoomData) => {
-    console.log('Reservation clicked:', reservation, room);
+    console.log('Reservation clicked (fallback):', reservation, room);
+    // Este handler agora é apenas um fallback, pois o modal é gerenciado pelo RoomMapGrid
   };
 
   const handleCellClick = (room: MapRoomData, date: string) => {
@@ -214,37 +216,37 @@ export default function RoomMapPage() {
 
   return (
     <div className="space-y-4 w-full max-w-full px-4 sm:px-6 lg:px-8">
-      {/* Header COMPACTO da página */}
+      {/* Header da página */}
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-        <div className="p-3"> {/* Reduzido de p-6 para p-3 */}
-          {/* Linha superior: Título e botão principal - COMPACTA */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3"> {/* Reduzido gaps e margin */}
+        <div className="p-3">
+          {/* Linha superior: Título e botão principal */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-3">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-100 rounded-lg"> {/* Reduzido de p-3 para p-2 */}
-                <Map className="h-5 w-5 text-blue-600" /> {/* Reduzido de h-7 w-7 para h-5 w-5 */}
+              <div className="p-2 bg-blue-100 rounded-lg">
+                <Map className="h-5 w-5 text-blue-600" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gray-900">Mapa de Quartos</h1> {/* Reduzido de text-2xl para text-xl */}
-                <p className="text-sm text-gray-500"> {/* Reduzido margin top */}
+                <h1 className="text-xl font-bold text-gray-900">Mapa de Quartos</h1>
+                <p className="text-sm text-gray-500">
                   {mapData ? `${mapData.total_rooms} quartos cadastrados` : 'Carregando informações...'}
                 </p>
               </div>
             </div>
             
-            {/* Botão Nova Reserva - COMPACTO */}
-            <Button onClick={handleQuickBooking} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 font-medium text-sm"> {/* Reduzido padding e font */}
+            {/* Botão Nova Reserva */}
+            <Button onClick={handleQuickBooking} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 font-medium text-sm">
               <Plus className="h-4 w-4 mr-2" />
               Nova Reserva
             </Button>
           </div>
 
-          {/* Linha inferior: Controles e informações - OTIMIZADA */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end"> {/* Reduzido gap */}
-            {/* Controles de data - COMPACTOS */}
-            <div className="lg:col-span-5 space-y-2"> {/* Reduzido space-y */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2"> {/* Reduzido gap */}
+          {/* Linha inferior: Controles e informações */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
+            {/* Controles de data */}
+            <div className="lg:col-span-5 space-y-2">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
                 <div className="flex items-center gap-2">
-                  <Label htmlFor="start-date" className="text-xs font-medium text-gray-700 whitespace-nowrap"> {/* Reduzido font size */}
+                  <Label htmlFor="start-date" className="text-xs font-medium text-gray-700 whitespace-nowrap">
                     Data inicial:
                   </Label>
                   <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
@@ -252,11 +254,11 @@ export default function RoomMapPage() {
                       <Button
                         variant="outline"
                         className={cn(
-                          "justify-start text-left font-normal w-[130px] sm:w-[140px] border-gray-300 h-8 text-xs", /* Reduzido tamanho e height */
+                          "justify-start text-left font-normal w-[130px] sm:w-[140px] border-gray-300 h-8 text-xs",
                           !selectedStartDate && "text-muted-foreground"
                         )}
                       >
-                        <CalendarIcon className="mr-1 h-3 w-3 flex-shrink-0 text-gray-500" /> {/* Reduzido ícone */}
+                        <CalendarIcon className="mr-1 h-3 w-3 flex-shrink-0 text-gray-500" />
                         <span className="truncate">
                           {selectedStartDate ? format(new Date(selectedStartDate), "dd/MM/yyyy") : "Selecionar"}
                         </span>
@@ -278,52 +280,52 @@ export default function RoomMapPage() {
                   onClick={handleRefresh} 
                   disabled={loading}
                   variant="outline"
-                  className="border-gray-300 hover:bg-gray-50 h-8 px-3 text-xs" /* Reduzido height e padding */
+                  className="border-gray-300 hover:bg-gray-50 h-8 px-3 text-xs"
                 >
-                  <RefreshCw className={`mr-1 h-3 w-3 ${loading ? 'animate-spin' : ''}`} /> {/* Reduzido ícone */}
+                  <RefreshCw className={`mr-1 h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
                   Atualizar
                 </Button>
               </div>
               
-              <div className="text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded"> {/* Reduzido padding e font */}
+              <div className="text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded">
                 <span className="font-medium">Período:</span>{' '}
                 {format(new Date(selectedStartDate), 'dd/MM/yyyy')} - {format(addDays(new Date(selectedStartDate), 30), 'dd/MM/yyyy')}
               </div>
             </div>
 
-            {/* Cards de estatísticas - SUPER COMPACTOS */}
+            {/* Cards de estatísticas */}
             <div className="lg:col-span-7">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2"> {/* Reduzido gap de gap-3 para gap-2 */}
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-2"> {/* Reduzido padding de p-3 para p-2 */}
-                  <div className="text-blue-600 text-[10px] font-medium uppercase tracking-wide">Total</div> {/* Reduzido font size */}
-                  <div className="text-blue-900 text-lg font-bold leading-none"> {/* Reduzido de text-xl para text-lg, added leading-none */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-2">
+                  <div className="text-blue-600 text-[10px] font-medium uppercase tracking-wide">Total</div>
+                  <div className="text-blue-900 text-lg font-bold leading-none">
                     {mapData?.total_rooms || 0}
                   </div>
-                  <div className="text-blue-600 text-[10px]">Quartos</div> {/* Reduzido font size */}
+                  <div className="text-blue-600 text-[10px]">Quartos</div>
                 </div>
                 
-                <div className="bg-green-50 border border-green-200 rounded-lg p-2"> {/* Reduzido padding */}
-                  <div className="text-green-600 text-[10px] font-medium uppercase tracking-wide">Ocupados</div> {/* Reduzido font size */}
-                  <div className="text-green-900 text-lg font-bold leading-none"> {/* Reduzido font size */}
+                <div className="bg-green-50 border border-green-200 rounded-lg p-2">
+                  <div className="text-green-600 text-[10px] font-medium uppercase tracking-wide">Ocupados</div>
+                  <div className="text-green-900 text-lg font-bold leading-none">
                     {totalOccupied}
                   </div>
-                  <div className="text-green-600 text-[10px]">Hoje</div> {/* Reduzido font size */}
+                  <div className="text-green-600 text-[10px]">Hoje</div>
                 </div>
                 
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-2"> {/* Reduzido padding */}
-                  <div className="text-amber-600 text-[10px] font-medium uppercase tracking-wide">Livres</div> {/* Reduzido font size */}
-                  <div className="text-amber-900 text-lg font-bold leading-none"> {/* Reduzido font size */}
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-2">
+                  <div className="text-amber-600 text-[10px] font-medium uppercase tracking-wide">Livres</div>
+                  <div className="text-amber-900 text-lg font-bold leading-none">
                     {totalAvailable}
                   </div>
-                  <div className="text-amber-600 text-[10px]">Hoje</div> {/* Reduzido font size */}
+                  <div className="text-amber-600 text-[10px]">Hoje</div>
                 </div>
                 
-                <div className="bg-purple-50 border border-purple-200 rounded-lg p-2"> {/* Reduzido padding */}
-                  <div className="text-purple-600 text-[10px] font-medium uppercase tracking-wide">Ocupação</div> {/* Reduzido font size */}
-                  <div className="text-purple-900 text-lg font-bold leading-none"> {/* Reduzido font size */}
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-2">
+                  <div className="text-purple-600 text-[10px] font-medium uppercase tracking-wide">Ocupação</div>
+                  <div className="text-purple-900 text-lg font-bold leading-none">
                     {occupancyRate}%
                   </div>
-                  <div className="text-purple-600 text-[10px]">Taxa</div> {/* Reduzido font size */}
+                  <div className="text-purple-600 text-[10px]">Taxa</div>
                 </div>
               </div>
             </div>
@@ -358,7 +360,6 @@ export default function RoomMapPage() {
                 <RoomMapGrid
                   mapData={mapData}
                   onRoomClick={handleRoomClick}
-                  onReservationClick={handleReservationClick}
                   onCellClick={handleCellClick}
                   loading={loading}
                 />

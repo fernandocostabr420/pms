@@ -1105,3 +1105,177 @@ main,
   border: 2px solid purple;
 }
 */
+
+/* frontend/src/app/globals.css - ESTILOS ADICIONAIS PARA O MODAL */
+
+/* ===== RESERVATION QUICK VIEW MODAL ===== */
+
+/* Animação suave para o modal */
+.reservation-quick-view-overlay {
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  transition: all 0.2s ease-in-out;
+}
+
+/* Animação de entrada do conteúdo do modal */
+.reservation-quick-view-content {
+  transform: scale(0.95) translateY(-10px);
+  opacity: 0;
+  animation: reservationModalEnter 0.2s ease-out forwards;
+}
+
+@keyframes reservationModalEnter {
+  to {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Hover suave nos blocos de informação */
+.reservation-info-block {
+  transition: all 0.15s ease-in-out;
+}
+
+.reservation-info-block:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* Indicadores de status mais visíveis */
+.status-indicator {
+  position: relative;
+  overflow: hidden;
+}
+
+.status-indicator::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: currentColor;
+  opacity: 0.3;
+}
+
+/* Melhoria visual dos badges de status */
+.status-badge-pending {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-color: #f59e0b;
+}
+
+.status-badge-confirmed {
+  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+  border-color: #3b82f6;
+}
+
+.status-badge-checked-in {
+  background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+  border-color: #10b981;
+}
+
+.status-badge-checked-out {
+  background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+  border-color: #6b7280;
+}
+
+.status-badge-cancelled {
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  border-color: #ef4444;
+}
+
+/* Indicadores de chegada/partida mais destacados */
+.arrival-indicator {
+  background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+  border-left: 3px solid #10b981;
+  animation: pulseGreen 2s infinite;
+}
+
+.departure-indicator {
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  border-left: 3px solid #ef4444;
+  animation: pulseRed 2s infinite;
+}
+
+@keyframes pulseGreen {
+  0%, 100% { 
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.3); 
+  }
+  50% { 
+    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.1); 
+  }
+}
+
+@keyframes pulseRed {
+  0%, 100% { 
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.3); 
+  }
+  50% { 
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.1); 
+  }
+}
+
+/* Melhoria nos botões de ação */
+.reservation-action-button {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s ease-in-out;
+}
+
+.reservation-action-button::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: all 0.3s ease-out;
+}
+
+.reservation-action-button:hover::before {
+  width: 100%;
+  height: 100%;
+}
+
+/* Texto truncado com tooltip hover */
+.truncate-with-hover {
+  position: relative;
+  cursor: help;
+}
+
+.truncate-with-hover:hover::after {
+  content: attr(data-full-text);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.9);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 1000;
+  margin-bottom: 4px;
+}
+
+/* Responsividade para dispositivos menores */
+@media (max-width: 640px) {
+  .reservation-quick-view-content {
+    margin: 16px;
+    max-height: calc(100vh - 32px);
+  }
+  
+  .reservation-info-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  
+  .reservation-action-buttons {
+    flex-direction: column;
+    gap: 8px;
+  }
+}
