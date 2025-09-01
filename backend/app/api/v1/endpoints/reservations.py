@@ -29,6 +29,8 @@ from app.schemas.reservation import (
     AvailabilityRequest,
     AvailabilityResponse,
     ReservationRoomResponse,
+    # NOVO IMPORT NECESSÁRIO:
+    ReservationDetailedResponse
 )
 from app.schemas.common import MessageResponse
 from app.api.deps import get_current_active_user, get_current_superuser
@@ -2318,6 +2320,85 @@ def check_out_reservation_expanded(
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao fazer check-out: {str(e)}"
+        )
+
+@router.get("/{reservation_id}/detailed", response_model=ReservationDetailedResponse)
+def get_reservation_detailed(
+    reservation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Busca reserva com todos os detalhes para página individual
+    Inclui dados completos do hóspede, propriedade, quartos, pagamentos e histórico
+    """
+    try:
+        reservation_service = ReservationService(db)
+        detailed_data = reservation_service.get_reservation_detailed(
+            reservation_id, 
+            current_user.tenant_id
+        )
+        
+        if not detailed_data:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail="Reserva não encontrada"
+            )
+        
+        # Converter datetime para string onde necessário
+        if detailed_data.get('created_date') and hasattr(detailed_data['created_date'], 'isoformat'):
+            detailed_data['created_date'] = detailed_data['created_date'].isoformat()
+        if detailed_data.get('confirmed_date') and hasattr(detailed_data['confirmed_date'], 'isoformat'):
+            detailed_data['confirmed_date'] = detailed_data['confirmed_date'].isoformat()
+        if detailed_data.get('checked_in_date') and hasattr(detailed_data['checked_in_date'], 'isoformat'):
+            detailed_data['checked_in_date'] = detailed_data['checked_in_date'].isoformat()
+        if detailed_data.get('checked_out_date') and hasattr(detailed_data['checked_out_date'], 'isoformat'):
+            detailed_data['checked_out_date'] = detailed_data['checked_out_date'].isoformat()
+        if detailed_data.get('cancelled_date') and hasattr(detailed_data['cancelled_date'], 'isoformat'):
+            detailed_data['cancelled_date'] = detailed_data['cancelled_date'].isoformat()
+        
+        # Converter datas nos dados do hóspede
+        guest_data = detailed_data.get('guest', {})
+        if guest_data.get('date_of_birth') and hasattr(guest_data['date_of_birth'], 'isoformat'):
+            guest_data['date_of_birth'] = guest_data['date_of_birth'].isoformat()
+        if guest_data.get('last_stay_date') and hasattr(guest_data['last_stay_date'], 'isoformat'):
+            guest_data['last_stay_date'] = guest_data['last_stay_date'].isoformat()
+        if guest_data.get('created_at') and hasattr(guest_data['created_at'], 'isoformat'):
+            guest_data['created_at'] = guest_data['created_at'].isoformat()
+        if guest_data.get('updated_at') and hasattr(guest_data['updated_at'], 'isoformat'):
+            guest_data['updated_at'] = guest_data['updated_at'].isoformat()
+        
+        # Converter datas nos dados da propriedade
+        property_data = detailed_data.get('property', {})
+        if property_data.get('created_at') and hasattr(property_data['created_at'], 'isoformat'):
+            property_data['created_at'] = property_data['created_at'].isoformat()
+        if property_data.get('updated_at') and hasattr(property_data['updated_at'], 'isoformat'):
+            property_data['updated_at'] = property_data['updated_at'].isoformat()
+        
+        # Converter timestamps no histórico de auditoria
+        for entry in detailed_data.get('audit_history', []):
+            if entry.get('timestamp') and hasattr(entry['timestamp'], 'isoformat'):
+                entry['timestamp'] = entry['timestamp'].isoformat()
+        
+        # Converter datas principais
+        if detailed_data.get('check_in_date') and hasattr(detailed_data['check_in_date'], 'isoformat'):
+            detailed_data['check_in_date'] = detailed_data['check_in_date'].isoformat()
+        if detailed_data.get('check_out_date') and hasattr(detailed_data['check_out_date'], 'isoformat'):
+            detailed_data['check_out_date'] = detailed_data['check_out_date'].isoformat()
+        if detailed_data.get('created_at') and hasattr(detailed_data['created_at'], 'isoformat'):
+            detailed_data['created_at'] = detailed_data['created_at'].isoformat()
+        if detailed_data.get('updated_at') and hasattr(detailed_data['updated_at'], 'isoformat'):
+            detailed_data['updated_at'] = detailed_data['updated_at'].isoformat()
+        
+        return ReservationDetailedResponse(**detailed_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao buscar detalhes da reserva {reservation_id}: {str(e)}")
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro interno do servidor"
         )
 
 

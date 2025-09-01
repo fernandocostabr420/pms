@@ -1,9 +1,9 @@
 # backend/app/services/reservation_service.py
 
 from typing import Optional, List, Dict, Any
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import and_, or_, func, not_
+from sqlalchemy import and_, or_, func, not_, desc
 from fastapi import Request
 from datetime import datetime, date
 from decimal import Decimal
@@ -14,6 +14,7 @@ from app.models.room import Room
 from app.models.room_type import RoomType
 from app.models.property import Property
 from app.models.user import User
+from app.models.audit_log import AuditLog
 from app.schemas.reservation import (
     ReservationCreate, ReservationUpdate, ReservationFilters,
     CheckInRequest, CheckOutRequest, CancelReservationRequest,
@@ -21,6 +22,7 @@ from app.schemas.reservation import (
 )
 from app.services.audit_service import AuditService
 from app.utils.decorators import _extract_model_data, AuditContext
+from app.schemas.reservation import ReservationDetailedResponse
 
 
 class ReservationService:
@@ -781,3 +783,355 @@ class ReservationService:
             'total_revenue': float(total_revenue or 0),
             'pending_revenue': float(pending_revenue or 0)
         }
+
+    def get_reservation_detailed(self, reservation_id: int, tenant_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Busca reserva com todos os detalhes para página individual
+        Inclui dados expandidos do hóspede, propriedade, quartos, pagamentos e auditoria
+        """
+        # Buscar reserva com relacionamentos
+        reservation = self.db.query(Reservation).options(
+            joinedload(Reservation.guest),
+            joinedload(Reservation.property_obj),
+            selectinload(Reservation.reservation_rooms).joinedload(ReservationRoom.room)
+        ).filter(
+            Reservation.id == reservation_id,
+            Reservation.tenant_id == tenant_id,
+            Reservation.is_active == True
+        ).first()
+        
+        if not reservation:
+            return None
+        
+# === 1. DADOS DO HÓSPEDE EXPANDIDOS ===
+        # Query básica de estatísticas (sem cálculo de nights por enquanto)
+        guest_stats = self.db.query(
+            func.count(Reservation.id).label('total_reservations'),
+            func.sum(Reservation.total_amount).label('total_spent'),
+            func.max(Reservation.check_out_date).label('last_stay_date')
+        ).filter(
+            Reservation.guest_id == reservation.guest_id,
+            Reservation.tenant_id == tenant_id,
+            Reservation.is_active == True
+        ).first()
+        
+        # Contar status específicos separadamente
+        completed_stays = self.db.query(func.count(Reservation.id)).filter(
+            Reservation.guest_id == reservation.guest_id,
+            Reservation.tenant_id == tenant_id,
+            Reservation.status == 'checked_out',
+            Reservation.is_active == True
+        ).scalar() or 0
+        
+        cancelled_reservations = self.db.query(func.count(Reservation.id)).filter(
+            Reservation.guest_id == reservation.guest_id,
+            Reservation.tenant_id == tenant_id,
+            Reservation.status == 'cancelled',
+            Reservation.is_active == True
+        ).scalar() or 0
+        
+        # Calcular total de noites manualmente (mais seguro)
+        guest_reservations = self.db.query(Reservation.check_in_date, Reservation.check_out_date).filter(
+            Reservation.guest_id == reservation.guest_id,
+            Reservation.tenant_id == tenant_id,
+            Reservation.is_active == True
+        ).all()
+        
+        total_nights = 0
+        for res in guest_reservations:
+            if res.check_in_date and res.check_out_date:
+                total_nights += (res.check_out_date - res.check_in_date).days
+        
+        # Endereço completo do hóspede (construído)
+        guest_address_parts = [
+            reservation.guest.address_line1,
+            reservation.guest.address_line2,
+            reservation.guest.city,
+            reservation.guest.state,
+            reservation.guest.country
+        ]
+        guest_full_address = ', '.join([part for part in guest_address_parts if part])
+        
+        guest_data = {
+            'id': reservation.guest.id,
+            'first_name': reservation.guest.first_name,
+            'last_name': reservation.guest.last_name,
+            'full_name': reservation.guest.full_name,
+            'email': reservation.guest.email,
+            'phone': reservation.guest.phone,
+            'document_type': reservation.guest.document_type,
+            'document_number': reservation.guest.document_number,
+            'date_of_birth': reservation.guest.date_of_birth,
+            'nationality': reservation.guest.nationality,
+            'address_line1': reservation.guest.address_line1,
+            'address_line2': reservation.guest.address_line2,
+            'city': reservation.guest.city,
+            'state': reservation.guest.state,
+            'country': reservation.guest.country,
+            'postal_code': reservation.guest.postal_code,
+            'full_address': guest_full_address if guest_full_address else None,
+            'preferences': reservation.guest.preferences,
+            'notes': reservation.guest.notes,
+            'marketing_consent': reservation.guest.marketing_consent,
+            'total_reservations': int(guest_stats.total_reservations or 0),
+            'completed_stays': completed_stays,
+            'cancelled_reservations': cancelled_reservations,
+            'total_nights': total_nights,
+            'last_stay_date': guest_stats.last_stay_date,
+            'total_spent': guest_stats.total_spent or Decimal('0.00'),
+            'created_at': reservation.guest.created_at,
+            'updated_at': reservation.guest.updated_at,
+            'is_active': reservation.guest.is_active,
+        }
+        
+        # === 2. DADOS DA PROPRIEDADE EXPANDIDOS ===
+        # Endereço completo da propriedade (construído)
+        property_address_parts = [
+            reservation.property_obj.address_line1,
+            reservation.property_obj.address_line2,
+            reservation.property_obj.city,
+            reservation.property_obj.state,
+            reservation.property_obj.country
+        ]
+        property_full_address = ', '.join([part for part in property_address_parts if part])
+        
+        # Estatísticas da propriedade
+        property_stats = self.db.query(
+            func.count(func.distinct(Room.id)).label('total_rooms'),
+            func.count(Reservation.id).label('total_reservations')
+        ).select_from(Property)\
+         .outerjoin(Room, Property.id == Room.property_id)\
+         .outerjoin(Reservation, Property.id == Reservation.property_id)\
+         .filter(Property.id == reservation.property_id).first()
+        
+        property_data = {
+            'id': reservation.property_obj.id,
+            'name': reservation.property_obj.name,
+            'description': reservation.property_obj.description,
+            'property_type': reservation.property_obj.property_type,
+            'address_line1': reservation.property_obj.address_line1,
+            'address_line2': reservation.property_obj.address_line2,
+            'city': reservation.property_obj.city,
+            'state': reservation.property_obj.state,
+            'country': reservation.property_obj.country,
+            'postal_code': reservation.property_obj.postal_code,
+            'full_address': property_full_address if property_full_address else None,
+            'phone': reservation.property_obj.phone,
+            'email': reservation.property_obj.email,
+            'website': reservation.property_obj.website,
+            'total_rooms': property_stats.total_rooms or 0,
+            'total_reservations': property_stats.total_reservations or 0,
+            'created_at': reservation.property_obj.created_at,
+            'updated_at': reservation.property_obj.updated_at,
+            'is_active': reservation.property_obj.is_active,
+        }
+        
+        # === 3. DADOS DOS QUARTOS EXPANDIDOS ===
+        rooms_data = []
+        for res_room in reservation.reservation_rooms:
+            room = res_room.room
+            nights = (res_room.check_out_date - res_room.check_in_date).days
+            
+            # Buscar tipo de quarto se disponível
+            room_type_name = None
+            if room and hasattr(room, 'room_type') and room.room_type:
+                room_type_name = room.room_type.name
+            
+            room_data = {
+                'id': room.id if room else res_room.id,
+                'room_number': room.room_number if room else f'Room #{res_room.id}',
+                'name': getattr(room, 'name', None) if room else None,
+                'room_type_id': room.room_type_id if room else None,
+                'room_type_name': room_type_name,
+                'max_occupancy': (getattr(room, 'max_occupancy', None) if room else None) or 2,
+                'floor': getattr(room, 'floor', None) if room else None,
+                'building': getattr(room, 'building', None) if room else None,
+                'description': getattr(room, 'description', None) if room else None,
+                'amenities': getattr(room, 'amenities', None) if room else None,
+                'rate_per_night': float(res_room.rate_per_night) if res_room.rate_per_night else None,
+                'total_nights': nights,
+                'total_amount': float(res_room.total_amount) if res_room.total_amount else None,
+                'status': res_room.status,
+            }
+            rooms_data.append(room_data)
+        
+        # === 4. DADOS DE PAGAMENTO EXPANDIDOS ===
+        balance_due = (reservation.total_amount or Decimal('0.00')) - reservation.paid_amount
+        deposit_amount = None
+        if reservation.requires_deposit and reservation.total_amount:
+            deposit_amount = reservation.total_amount * Decimal('0.30')  # 30% como depósito padrão
+        
+        payment_data = {
+            'total_amount': float(reservation.total_amount or Decimal('0.00')),
+            'paid_amount': float(reservation.paid_amount),
+            'balance_due': float(balance_due),
+            'discount': float(reservation.discount),
+            'taxes': float(reservation.taxes),
+            'deposit_required': reservation.requires_deposit,
+            'deposit_amount': float(deposit_amount) if deposit_amount else None,
+            'deposit_paid': (reservation.paid_amount >= deposit_amount) if deposit_amount else False,
+            'last_payment_date': None,  # TODO: Implementar quando tiver tabela de pagamentos
+            'payment_method_last': None,  # TODO: Implementar quando tiver tabela de pagamentos
+            'total_payments': 1 if reservation.paid_amount > 0 else 0,  # TODO: Implementar quando tiver tabela de pagamentos
+            'is_overdue': balance_due > 0 and reservation.check_in_date < date.today(),
+            'payment_status': 'paid' if balance_due <= 0 else 'partial' if reservation.paid_amount > 0 else 'pending',
+        }
+        
+        # === 5. AÇÕES CONTEXTUAIS ===
+        today = date.today()
+        current_status = reservation.status
+        
+        actions = {
+            'can_edit': current_status in ['pending', 'confirmed'],
+            'can_confirm': current_status == 'pending',
+            'can_check_in': current_status == 'confirmed' and reservation.check_in_date <= today,
+            'can_check_out': current_status == 'checked_in',
+            'can_cancel': current_status in ['pending', 'confirmed'],
+            'can_add_payment': balance_due > 0,
+            'can_modify_rooms': current_status in ['pending', 'confirmed'],
+            'can_send_confirmation': current_status in ['confirmed', 'pending'],
+            'edit_blocked_reason': None if current_status in ['pending', 'confirmed'] else f'Não é possível editar reservas com status: {current_status}',
+            'confirm_blocked_reason': None if current_status == 'pending' else f'Reserva já está {current_status}',
+            'checkin_blocked_reason': None if (current_status == 'confirmed' and reservation.check_in_date <= today) else 'Check-in ainda não disponível',
+            'checkout_blocked_reason': None if current_status == 'checked_in' else 'Hóspede ainda não fez check-in',
+            'cancel_blocked_reason': None if current_status in ['pending', 'confirmed'] else f'Não é possível cancelar reservas com status: {current_status}',
+        }
+        
+        # === 6. HISTÓRICO DE AUDITORIA ===
+        audit_logs = self.db.query(AuditLog).options(
+            joinedload(AuditLog.user)
+        ).filter(
+            AuditLog.table_name.in_(['reservations', 'reservation_rooms']),
+            or_(
+                and_(AuditLog.table_name == 'reservations', AuditLog.record_id == reservation.id),
+                and_(AuditLog.table_name == 'reservation_rooms', AuditLog.record_id.in_([rr.id for rr in reservation.reservation_rooms]))
+            ),
+            AuditLog.tenant_id == tenant_id
+        ).order_by(desc(AuditLog.created_at)).limit(50).all()
+        
+        audit_history = []
+        for log in audit_logs:
+            # Mapear ações para descrições mais legíveis
+            action_descriptions = {
+                'CREATE': 'Criação',
+                'UPDATE': 'Atualização', 
+                'DELETE': 'Exclusão',
+            }
+            
+            # Descrição mais específica baseada nos campos alterados
+            description = action_descriptions.get(log.action, log.action)
+            if log.action == 'UPDATE' and log.changed_fields:
+                if 'status' in log.changed_fields:
+                    if log.new_values and log.new_values.get('status'):
+                        new_status = log.new_values.get('status', '')
+                        if new_status == 'confirmed':
+                            description = 'Reserva confirmada'
+                        elif new_status == 'checked_in':
+                            description = 'Check-in realizado'
+                        elif new_status == 'checked_out':
+                            description = 'Check-out realizado'
+                        elif new_status == 'cancelled':
+                            description = 'Reserva cancelada'
+                elif 'paid_amount' in log.changed_fields:
+                    description = 'Pagamento adicionado'
+                elif any(field in log.changed_fields for field in ['check_in_date', 'check_out_date']):
+                    description = 'Datas alteradas'
+            
+            user_data = None
+            if log.user:
+                user_data = {
+                    'id': log.user.id,
+                    'name': log.user.full_name,
+                    'email': log.user.email,
+                    'role': getattr(log.user, 'role', None)
+                }
+            
+            audit_entry = {
+                'id': log.id,
+                'timestamp': log.created_at,
+                'user': user_data,
+                'action': log.action.lower(),
+                'description': description,
+                'table_name': log.table_name,
+                'record_id': log.record_id,
+                'old_values': log.old_values,
+                'new_values': log.new_values,
+                'ip_address': log.ip_address,
+                'user_agent': log.user_agent,
+            }
+            audit_history.append(audit_entry)
+        
+        # === 7. CAMPOS COMPUTADOS ===
+        nights = (reservation.check_out_date - reservation.check_in_date).days
+        
+        # Status display mais amigável
+        status_map = {
+            'pending': 'Pendente',
+            'confirmed': 'Confirmada',
+            'checked_in': 'Check-in Feito',
+            'checked_out': 'Check-out Feito',
+            'cancelled': 'Cancelada',
+            'no_show': 'Não Compareceu'
+        }
+        
+        # Calcular dias até check-in ou desde check-out
+        days_until_checkin = None
+        days_since_checkout = None
+        
+        if current_status in ['pending', 'confirmed']:
+            days_until_checkin = (reservation.check_in_date - today).days
+        elif current_status == 'checked_out':
+            days_since_checkout = (today - reservation.check_out_date).days
+        
+        # === 8. MONTAR RESPOSTA FINAL ===
+        detailed_response = {
+            # Dados básicos
+            'id': reservation.id,
+            'reservation_number': reservation.reservation_number,
+            'status': reservation.status,
+            'created_date': reservation.created_date or reservation.created_at,
+            'confirmed_date': reservation.confirmed_date,
+            'checked_in_date': reservation.checked_in_date,
+            'checked_out_date': reservation.checked_out_date,
+            'cancelled_date': reservation.cancelled_date,
+            'cancellation_reason': reservation.cancellation_reason,
+            
+            # Período e ocupação
+            'check_in_date': reservation.check_in_date,
+            'check_out_date': reservation.check_out_date,
+            'nights': nights,
+            'adults': reservation.adults,
+            'children': reservation.children,
+            'total_guests': reservation.total_guests,
+            
+            # Origem e observações
+            'source': reservation.source,
+            'source_reference': reservation.source_reference,
+            'guest_requests': reservation.guest_requests,
+            'internal_notes': reservation.internal_notes,
+            
+            # Flags
+            'is_group_reservation': reservation.is_group_reservation,
+            'requires_deposit': reservation.requires_deposit,
+            
+            # Dados relacionados
+            'guest': guest_data,
+            'property': property_data,
+            'rooms': rooms_data,
+            'payment': payment_data,
+            'actions': actions,
+            'audit_history': audit_history,
+            
+            # Campos computados
+            'status_display': status_map.get(reservation.status, reservation.status),
+            'is_current': current_status == 'checked_in',
+            'days_until_checkin': days_until_checkin,
+            'days_since_checkout': days_since_checkout,
+            
+            # Metadados
+            'created_at': reservation.created_at,
+            'updated_at': reservation.updated_at,
+            'tenant_id': reservation.tenant_id,
+        }
+        
+        return detailed_response

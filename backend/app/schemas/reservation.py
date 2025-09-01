@@ -60,114 +60,75 @@ class ReservationBase(BaseModel):
     # Valores
     room_rate: Optional[Decimal] = Field(None, ge=0, description="Diária base")
     total_amount: Optional[Decimal] = Field(None, ge=0, description="Valor total")
-    discount: Decimal = Field(default=0, ge=0, description="Desconto")
-    taxes: Decimal = Field(default=0, ge=0, description="Impostos/taxas")
+    discount: Decimal = Field(default=Decimal('0.00'), ge=0, description="Desconto")
+    taxes: Decimal = Field(default=Decimal('0.00'), ge=0, description="Taxas")
     
     # Origem
-    source: Optional[str] = Field(None, max_length=50, description="Canal de reserva")
-    source_reference: Optional[str] = Field(None, max_length=100, description="Referência externa")
+    source: Optional[str] = Field(None, max_length=100, description="Canal de origem")
+    source_reference: Optional[str] = Field(None, max_length=200, description="Referência no canal")
     
     # Observações
-    guest_requests: Optional[str] = Field(None, max_length=2000, description="Pedidos do hóspede")
-    internal_notes: Optional[str] = Field(None, max_length=2000, description="Notas internas")
+    guest_requests: Optional[str] = Field(None, max_length=1000, description="Pedidos do hóspede")
+    internal_notes: Optional[str] = Field(None, max_length=1000, description="Notas internas")
     
-    # Metadados
-    preferences: Optional[Dict[str, Any]] = Field(None, description="Preferências")
+    # Dados adicionais
+    preferences: Optional[Dict[str, Any]] = Field(None, description="Preferências específicas")
     extra_data: Optional[Dict[str, Any]] = Field(None, description="Dados extras")
     
     # Flags
-    is_group_reservation: bool = Field(default=False, description="Reserva em grupo")
-    requires_deposit: bool = Field(default=False, description="Exige depósito")
+    is_group_reservation: bool = Field(default=False, description="É reserva em grupo")
+    requires_deposit: bool = Field(default=False, description="Requer depósito")
+    
+    @field_validator('check_out_date')
+    @classmethod
+    def validate_checkout_date(cls, v, info):
+        check_in = info.data.get('check_in_date')
+        if check_in and v <= check_in:
+            raise ValueError('Check-out deve ser posterior ao check-in')
+        return v
 
 
 class ReservationCreate(ReservationBase):
     """Schema para criação de Reservation"""
-    rooms: List[ReservationRoomCreate] = Field(..., min_items=1, max_items=10, description="Quartos da reserva")
-    
-    @field_validator('check_out_date')
-    @classmethod
-    def validate_dates(cls, v, info):
-        check_in = info.data.get('check_in_date')
-        if check_in and v <= check_in:
-            raise ValueError('Check-out deve ser posterior ao check-in')
-        
-        # Validar período máximo (ex: 1 ano)
-        if check_in and (v - check_in).days > 365:
-            raise ValueError('Período de reserva não pode exceder 365 dias')
-        
-        return v
-    
-    @field_validator('source')
-    @classmethod
-    def validate_source(cls, v):
-        if not v:
-            return v
-        allowed_sources = [
-            'direct', 'phone', 'email', 'walk_in',
-            'booking.com', 'expedia', 'airbnb', 'agoda',
-            'website', 'app', 'other'
-        ]
-        if v.lower() not in allowed_sources:
-            raise ValueError(f'Canal deve ser um de: {", ".join(allowed_sources)}')
-        return v.lower()
-    
-    @field_validator('rooms')
-    @classmethod
-    def validate_rooms(cls, v, info):
-        check_in = info.data.get('check_in_date')
-        check_out = info.data.get('check_out_date')
-        
-        if check_in and check_out:
-            for room in v:
-                # Verificar se as datas dos quartos estão dentro do período da reserva
-                if room.check_in_date < check_in or room.check_out_date > check_out:
-                    raise ValueError('Datas dos quartos devem estar dentro do período da reserva')
-        
-        # Verificar quartos duplicados
-        room_ids = [room.room_id for room in v]
-        if len(room_ids) != len(set(room_ids)):
-            raise ValueError('Não é possível reservar o mesmo quarto múltiplas vezes')
-        
-        return v
+    rooms: List[ReservationRoomCreate] = Field(..., min_length=1, description="Quartos da reserva")
 
 
 class ReservationUpdate(BaseModel):
     """Schema para atualização de Reservation"""
-    guest_id: Optional[int] = None
-    
+    # Período
     check_in_date: Optional[date] = None
     check_out_date: Optional[date] = None
     
+    # Hóspedes
     adults: Optional[int] = Field(None, ge=1, le=10)
     children: Optional[int] = Field(None, ge=0, le=10)
     
+    # Valores
     room_rate: Optional[Decimal] = Field(None, ge=0)
     total_amount: Optional[Decimal] = Field(None, ge=0)
     discount: Optional[Decimal] = Field(None, ge=0)
     taxes: Optional[Decimal] = Field(None, ge=0)
-    paid_amount: Optional[Decimal] = Field(None, ge=0)
     
-    source: Optional[str] = Field(None, max_length=50)
-    source_reference: Optional[str] = Field(None, max_length=100)
+    # Observações
+    guest_requests: Optional[str] = Field(None, max_length=1000)
+    internal_notes: Optional[str] = Field(None, max_length=1000)
     
-    guest_requests: Optional[str] = Field(None, max_length=2000)
-    internal_notes: Optional[str] = Field(None, max_length=2000)
-    
+    # Dados adicionais
     preferences: Optional[Dict[str, Any]] = None
     extra_data: Optional[Dict[str, Any]] = None
     
+    # Flags
     is_group_reservation: Optional[bool] = None
     requires_deposit: Optional[bool] = None
-    deposit_paid: Optional[bool] = None
     
-    # Validações similares ao Create
+    # Quartos (opcional)
+    rooms: Optional[List[ReservationRoomCreate]] = None
+    
     @field_validator('check_out_date')
     @classmethod
-    def validate_dates(cls, v, info):
-        if not v:
-            return v
+    def validate_checkout_date(cls, v, info):
         check_in = info.data.get('check_in_date')
-        if check_in and v <= check_in:
+        if check_in and v and v <= check_in:
             raise ValueError('Check-out deve ser posterior ao check-in')
         return v
 
@@ -243,87 +204,93 @@ class CheckOutRequest(BaseModel):
     """Schema para check-out"""
     actual_check_out_time: Optional[datetime] = Field(None, description="Hora real do check-out")
     notes: Optional[str] = Field(None, max_length=500, description="Observações do check-out")
-    final_charges: Optional[Decimal] = Field(None, ge=0, description="Taxas finais")
+    final_charges: Optional[Decimal] = Field(None, ge=0, description="Cobranças finais")
 
 
 class CancelReservationRequest(BaseModel):
     """Schema para cancelamento"""
-    cancellation_reason: str = Field(..., min_length=3, max_length=500, description="Motivo do cancelamento")
+    cancellation_reason: str = Field(..., min_length=10, max_length=500, description="Motivo do cancelamento")
     refund_amount: Optional[Decimal] = Field(None, ge=0, description="Valor a ser reembolsado")
     notes: Optional[str] = Field(None, max_length=500, description="Observações do cancelamento")
 
 
 class AvailabilityRequest(BaseModel):
-    """Schema para verificar disponibilidade"""
-    property_id: int = Field(..., description="ID da propriedade")
-    check_in_date: date = Field(..., description="Data de check-in")
-    check_out_date: date = Field(..., description="Data de check-out")
-    adults: int = Field(default=1, ge=1, le=10, description="Número de adultos")
-    children: int = Field(default=0, ge=0, le=10, description="Número de crianças")
-    room_type_id: Optional[int] = Field(None, description="Filtrar por tipo de quarto")
+    """Schema para verificação de disponibilidade"""
+    property_id: int
+    check_in_date: date
+    check_out_date: date
+    adults: Optional[int] = Field(default=1, ge=1, le=10)
+    children: Optional[int] = Field(default=0, ge=0, le=10)
+    room_type_id: Optional[int] = None
+    
+    @field_validator('check_out_date')
+    @classmethod
+    def validate_checkout_date(cls, v, info):
+        check_in = info.data.get('check_in_date')
+        if check_in and v <= check_in:
+            raise ValueError('Check-out deve ser posterior ao check-in')
+        return v
+
+
+class AvailableRoom(BaseModel):
+    """Schema para quarto disponível"""
+    id: int
+    room_number: str
+    name: Optional[str] = None
+    room_type_id: int
+    room_type_name: Optional[str] = None
+    max_occupancy: int
+    floor: Optional[int] = None
+    building: Optional[str] = None
 
 
 class AvailabilityResponse(BaseModel):
     """Schema para resposta de disponibilidade"""
     available: bool
-    available_rooms: List[Dict[str, Any]]
+    available_rooms: List[AvailableRoom]
     total_available_rooms: int
-    conflicting_reservations: Optional[List[str]] = None  # Números das reservas em conflito
+    conflicting_reservations: Optional[List[str]] = None
 
 
-# Schema para filtros - EXPANDIDO COM NOVOS CAMPOS
+# ===== SCHEMAS PARA FILTROS =====
+
 class ReservationFilters(BaseModel):
-    """Schema para filtros de busca de reservas - VERSÃO EXPANDIDA"""
+    """Schema para filtros de reserva"""
+    # Filtros básicos
+    status: Optional[str] = Field(None, description="Status da reserva")
+    source: Optional[str] = Field(None, description="Canal de origem")
+    property_id: Optional[int] = Field(None, description="ID da propriedade")
+    guest_id: Optional[int] = Field(None, description="ID do hóspede")
+    search: Optional[str] = Field(None, description="Busca geral")
     
-    # Filtros básicos existentes
-    status: Optional[str] = None
-    source: Optional[str] = None
-    property_id: Optional[int] = None
-    guest_id: Optional[int] = None
-    
-    check_in_from: Optional[date] = None
-    check_in_to: Optional[date] = None
-    check_out_from: Optional[date] = None
-    check_out_to: Optional[date] = None
-    
-    created_from: Optional[datetime] = None
-    created_to: Optional[datetime] = None
-    
-    min_amount: Optional[Decimal] = Field(None, ge=0)
-    max_amount: Optional[Decimal] = Field(None, ge=0)
-    
-    is_paid: Optional[bool] = None
-    requires_deposit: Optional[bool] = None
-    is_group_reservation: Optional[bool] = None
-    
-    search: Optional[str] = None  # Busca em reservation_number, guest name, etc.
-    
-    # ===== NOVOS FILTROS ADICIONADOS =====
+    # Filtros de data
+    check_in_from: Optional[date] = Field(None, description="Check-in a partir de")
+    check_in_to: Optional[date] = Field(None, description="Check-in até")
+    check_out_from: Optional[date] = Field(None, description="Check-out a partir de")
+    check_out_to: Optional[date] = Field(None, description="Check-out até")
+    created_from: Optional[datetime] = Field(None, description="Criação a partir de")
+    created_to: Optional[datetime] = Field(None, description="Criação até")
+    confirmed_from: Optional[datetime] = Field(None, description="Confirmação a partir de")
+    confirmed_to: Optional[datetime] = Field(None, description="Confirmação até")
+    cancelled_from: Optional[date] = Field(None, description="Cancelamento a partir de")
+    cancelled_to: Optional[date] = Field(None, description="Cancelamento até")
     
     # Filtros do hóspede
-    guest_email: Optional[str] = Field(None, description="E-mail do hóspede")
+    guest_email: Optional[str] = Field(None, description="Email do hóspede")
     guest_phone: Optional[str] = Field(None, description="Telefone do hóspede")
     guest_document_type: Optional[str] = Field(None, description="Tipo de documento")
-    guest_nationality: Optional[str] = Field(None, description="Nacionalidade do hóspede")
+    guest_nationality: Optional[str] = Field(None, description="Nacionalidade")
     guest_city: Optional[str] = Field(None, description="Cidade do hóspede")
     guest_state: Optional[str] = Field(None, description="Estado do hóspede")
     guest_country: Optional[str] = Field(None, description="País do hóspede")
     
-    # Filtros de data expandidos
-    cancelled_from: Optional[date] = Field(None, description="Data de cancelamento inicial")
-    cancelled_to: Optional[date] = Field(None, description="Data de cancelamento final")
-    confirmed_from: Optional[datetime] = Field(None, description="Data de confirmação inicial")
-    confirmed_to: Optional[datetime] = Field(None, description="Data de confirmação final")
-    actual_checkin_from: Optional[datetime] = Field(None, description="Check-in realizado a partir de")
-    actual_checkin_to: Optional[datetime] = Field(None, description="Check-in realizado até")
-    actual_checkout_from: Optional[datetime] = Field(None, description="Check-out realizado a partir de")
-    actual_checkout_to: Optional[datetime] = Field(None, description="Check-out realizado até")
-    
-    # Filtros por número de hóspedes e noites
-    min_guests: Optional[int] = Field(None, ge=1, description="Número mínimo de hóspedes")
-    max_guests: Optional[int] = Field(None, ge=1, description="Número máximo de hóspedes")
-    min_nights: Optional[int] = Field(None, ge=1, description="Número mínimo de noites")
-    max_nights: Optional[int] = Field(None, ge=1, description="Número máximo de noites")
+    # Filtros de valores
+    min_amount: Optional[Decimal] = Field(None, ge=0, description="Valor mínimo")
+    max_amount: Optional[Decimal] = Field(None, ge=0, description="Valor máximo")
+    min_guests: Optional[int] = Field(None, ge=1, description="Mínimo de hóspedes")
+    max_guests: Optional[int] = Field(None, ge=1, description="Máximo de hóspedes")
+    min_nights: Optional[int] = Field(None, ge=1, description="Mínimo de noites")
+    max_nights: Optional[int] = Field(None, ge=1, description="Máximo de noites")
     
     # Filtros de quarto
     room_type_id: Optional[int] = Field(None, description="ID do tipo de quarto")
@@ -341,6 +308,9 @@ class ReservationFilters(BaseModel):
     can_check_in: Optional[bool] = Field(None, description="Pode fazer check-in")
     can_check_out: Optional[bool] = Field(None, description="Pode fazer check-out")
     can_cancel: Optional[bool] = Field(None, description="Pode ser cancelada")
+    is_paid: Optional[bool] = Field(None, description="Está pago")
+    requires_deposit: Optional[bool] = Field(None, description="Requer depósito")
+    is_group_reservation: Optional[bool] = Field(None, description="É reserva em grupo")
 
 
 # ===== NOVOS SCHEMAS PARA FUNCIONALIDADES EXPANDIDAS =====
@@ -487,72 +457,221 @@ class DashboardStatsResponse(BaseModel):
     alerts: List[Dict[str, Any]]
 
 
-# ===== SCHEMAS PARA RELATÓRIOS =====
-
 class ReservationReportFilters(BaseModel):
     """Schema para filtros de relatórios"""
-    period_start: date
-    period_end: date
+    start_date: date
+    end_date: date
     property_ids: Optional[List[int]] = None
-    room_type_ids: Optional[List[int]] = None
-    sources: Optional[List[str]] = None
-    include_cancelled: bool = Field(default=False)
-    group_by: str = Field(default="day")  # day, week, month
+    status_list: Optional[List[str]] = None
+    source_list: Optional[List[str]] = None
+    include_cancelled: bool = False
+    group_by: Optional[str] = Field(None, description="Agrupar por: daily, monthly, yearly, status, source")
 
 
-class ReservationReportResponse(BaseModel):
-    """Schema para resposta de relatórios"""
-    period: Dict[str, Any]
-    summary: ReservationSummary
-    breakdown: Dict[str, Any]
-    trends: List[Dict[str, Any]]
-    top_performers: Dict[str, Any]
-    
-    # Metadados do relatório
-    generated_at: datetime
-    total_records: int
-    filters_applied: Dict[str, Any]
+# ===== SCHEMAS NOVOS PARA PÁGINA DE DETALHES =====
+
+class AuditUser(BaseModel):
+    """Schema para usuário no histórico de auditoria"""
+    id: int
+    name: str
+    email: Optional[str] = None
+    role: Optional[str] = None
 
 
-# ===== SCHEMAS PARA BUSCA AVANÇADA =====
-
-class ReservationSearchCriteria(BaseModel):
-    """Schema para critérios de busca avançada"""
+class AuditEntry(BaseModel):
+    """Schema para entrada de auditoria"""
+    id: int
+    timestamp: datetime
+    user: Optional[AuditUser] = None
+    action: str  # reservation_created, payment_added, check_in_completed, etc.
+    description: str  # Descrição legível da ação
+    table_name: str
+    record_id: int
+    old_values: Optional[Dict[str, Any]] = None
+    new_values: Optional[Dict[str, Any]] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
     
-    # Critérios básicos
-    text_search: Optional[str] = None
-    status_filter: Optional[List[str]] = None
-    source_filter: Optional[List[str]] = None
-    
-    # Critérios de data
-    date_range: Optional[Dict[str, Any]] = None
-    
-    # Critérios de hóspede
-    guest_criteria: Optional[Dict[str, Any]] = None
-    
-    # Critérios financeiros
-    financial_criteria: Optional[Dict[str, Any]] = None
-    
-    # Critérios de acomodação
-    accommodation_criteria: Optional[Dict[str, Any]] = None
-    
-    # Critérios especiais
-    special_criteria: Optional[Dict[str, Any]] = None
+    class Config:
+        from_attributes = True
 
 
-class AdvancedSearchResponse(BaseModel):
-    """Schema para resposta de busca avançada"""
-    reservations: List[ReservationResponseWithGuestDetails]
-    total: int
-    page: int
-    pages: int
-    per_page: int
+class GuestDetailsExpanded(BaseModel):
+    """Schema expandido para dados do hóspede"""
+    id: int
+    first_name: str
+    last_name: str
+    full_name: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    document_type: Optional[str] = None
+    document_number: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    nationality: str
     
-    # Facetas da busca
-    facets: Optional[Dict[str, Any]] = None
+    # Endereço completo
+    address_line1: Optional[str] = None
+    address_line2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: str
+    postal_code: Optional[str] = None
+    full_address: Optional[str] = None
     
-    # Tempo de processamento
-    search_time_ms: Optional[int] = None
+    # Preferências e observações
+    preferences: Optional[Dict[str, Any]] = None
+    notes: Optional[str] = None
+    marketing_consent: str
     
-    # Critérios aplicados
-    applied_criteria: ReservationSearchCriteria
+    # Estatísticas do hóspede
+    total_reservations: int = 0
+    completed_stays: int = 0
+    cancelled_reservations: int = 0
+    total_nights: int = 0
+    last_stay_date: Optional[date] = None
+    total_spent: Decimal = Decimal('0.00')
+    
+    # Metadados
+    created_at: datetime
+    updated_at: datetime
+    is_active: bool
+
+
+class PropertyDetailsExpanded(BaseModel):
+    """Schema expandido para dados da propriedade"""
+    id: int
+    name: str
+    description: Optional[str] = None
+    property_type: str
+    
+    # Endereço completo
+    address_line1: Optional[str] = None
+    address_line2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    postal_code: Optional[str] = None
+    full_address: Optional[str] = None
+    
+    # Contatos
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    website: Optional[str] = None
+    
+    # Estatísticas
+    total_rooms: int = 0
+    total_reservations: int = 0
+    
+    # Metadados
+    created_at: datetime
+    updated_at: datetime
+    is_active: bool
+
+
+class RoomDetailsExpanded(BaseModel):
+    """Schema expandido para dados do quarto"""
+    id: int
+    room_number: str
+    name: Optional[str] = None
+    room_type_id: int
+    room_type_name: Optional[str] = None
+    max_occupancy: int
+    floor: Optional[int] = None
+    building: Optional[str] = None
+    description: Optional[str] = None
+    amenities: Optional[List[str]] = None
+    rate_per_night: Optional[Decimal] = None
+    total_nights: int = 0
+    total_amount: Optional[Decimal] = None
+    status: str = "active"
+
+
+class PaymentDetailsExpanded(BaseModel):
+    """Schema expandido para dados de pagamento"""
+    total_amount: Decimal
+    paid_amount: Decimal
+    balance_due: Decimal
+    discount: Decimal
+    taxes: Decimal
+    deposit_required: bool = False
+    deposit_amount: Optional[Decimal] = None
+    deposit_paid: bool = False
+    last_payment_date: Optional[datetime] = None
+    payment_method_last: Optional[str] = None
+    total_payments: int = 0
+    is_overdue: bool = False
+    payment_status: str = "pending"
+
+
+class ContextualActions(BaseModel):
+    """Schema para ações contextuais disponíveis"""
+    can_edit: bool = False
+    can_confirm: bool = False
+    can_check_in: bool = False
+    can_check_out: bool = False
+    can_cancel: bool = False
+    can_add_payment: bool = False
+    can_modify_rooms: bool = False
+    can_send_confirmation: bool = False
+    
+    # Razões para ações bloqueadas
+    edit_blocked_reason: Optional[str] = None
+    confirm_blocked_reason: Optional[str] = None
+    checkin_blocked_reason: Optional[str] = None
+    checkout_blocked_reason: Optional[str] = None
+    cancel_blocked_reason: Optional[str] = None
+
+
+class ReservationDetailedResponse(BaseModel):
+    """Schema completo para página de detalhes da reserva"""
+    # Dados básicos da reserva
+    id: int
+    reservation_number: str
+    status: str
+    created_date: datetime
+    confirmed_date: Optional[datetime] = None
+    checked_in_date: Optional[datetime] = None
+    checked_out_date: Optional[datetime] = None
+    cancelled_date: Optional[datetime] = None
+    cancellation_reason: Optional[str] = None
+    
+    # Período e ocupação
+    check_in_date: date
+    check_out_date: date
+    nights: int
+    adults: int
+    children: int
+    total_guests: int
+    
+    # Origem e observações
+    source: Optional[str] = None
+    source_reference: Optional[str] = None
+    guest_requests: Optional[str] = None
+    internal_notes: Optional[str] = None
+    
+    # Flags especiais
+    is_group_reservation: bool = False
+    requires_deposit: bool = False
+    
+    # Dados relacionados expandidos
+    guest: GuestDetailsExpanded
+    property: PropertyDetailsExpanded
+    rooms: List[RoomDetailsExpanded]
+    payment: PaymentDetailsExpanded
+    
+    # Ações disponíveis
+    actions: ContextualActions
+    
+    # Histórico de auditoria
+    audit_history: List[AuditEntry]
+    
+    # Campos computados
+    status_display: str
+    is_current: bool = False
+    days_until_checkin: Optional[int] = None
+    days_since_checkout: Optional[int] = None
+    
+    # Metadados
+    created_at: datetime
+    updated_at: datetime
+    tenant_id: int
