@@ -85,7 +85,7 @@ class ReservationService:
             ReservationRoom.room_id.in_(room_ids),
             Reservation.tenant_id == tenant_id,
             Reservation.is_active == True,
-            Reservation.status.in_(['confirmed', 'checked_in']),
+            Reservation.status.in_(['pending', 'confirmed', 'checked_in']),
             not_(
                 or_(
                     ReservationRoom.check_out_date <= check_in_date,
@@ -162,7 +162,7 @@ class ReservationService:
             Reservation.property_id == availability_request.property_id,
             Reservation.tenant_id == tenant_id,
             Reservation.is_active == True,
-            Reservation.status.in_(['confirmed', 'checked_in']),
+            Reservation.status.in_(['pending', 'confirmed', 'checked_in']),
             not_(
                 or_(
                     ReservationRoom.check_out_date <= availability_request.check_in_date,
@@ -769,7 +769,7 @@ class ReservationService:
         ).scalar()
         
         pending_revenue = query.filter(
-            Reservation.status.in_(['confirmed', 'checked_in'])
+            Reservation.status.in_(['pending', 'confirmed', 'checked_in'])
         ).with_entities(
             func.coalesce(func.sum(Reservation.total_amount - Reservation.paid_amount), 0)
         ).scalar()

@@ -303,10 +303,10 @@ export default function StandardReservationModal({
     }
   }, [isOpen]);
 
-  // Carregar disponibilidade quando datas mudarem
+  // Carregar quartos disponíveis (sem conflitos de reserva) quando datas mudarem
   useEffect(() => {
     if (checkInDate && checkOutDate && selectedProperty) {
-      checkRoomAvailability();
+      loadAvailableRooms();
     }
   }, [checkInDate, checkOutDate, selectedProperty, watchedAdults, watchedChildren]);
 
@@ -391,7 +391,8 @@ export default function StandardReservationModal({
     }
   };
 
-  const checkRoomAvailability = async () => {
+  // ===== BUSCAR QUARTOS DISPONÍVEIS (SEM CONFLITOS DE RESERVA) =====
+  const loadAvailableRooms = async () => {
     if (!checkInDate || !checkOutDate || !selectedProperty) return;
     
     setCheckingAvailability(true);
@@ -404,16 +405,17 @@ export default function StandardReservationModal({
         children: watchedChildren,
       });
       
+      // ✅ SIMPLIFICADO: Backend já retorna apenas quartos sem conflitos de reserva
       setAvailableRooms(response.rooms || []);
       
-      // Para modo mapa: manter quarto pré-selecionado se ainda disponível
+      // Para modo mapa: verificar se quarto pré-selecionado ainda está disponível
       if (mode === 'map' && prefilledData?.room_id) {
         const isStillAvailable = response.rooms?.some((room: any) => room.id === prefilledData.room_id);
         if (!isStillAvailable) {
           setValue('selected_rooms', []);
           toast({
-            title: "Quarto Indisponível",
-            description: "O quarto selecionado não está mais disponível. Selecione outro.",
+            title: "Quarto Ocupado",
+            description: "O quarto selecionado está ocupado para o período. Selecione outro.",
             variant: "destructive",
           });
         }
@@ -423,7 +425,7 @@ export default function StandardReservationModal({
       console.error('Erro ao verificar disponibilidade:', error);
       toast({
         title: "Erro",
-        description: "Erro ao verificar disponibilidade dos quartos",
+        description: "Erro ao carregar quartos disponíveis",
         variant: "destructive",
       });
     } finally {
@@ -879,6 +881,10 @@ export default function StandardReservationModal({
                   <AlertCircle className="h-4 w-4" />
                   Nenhum quarto disponível para o período selecionado.
                 </div>
+                <p className="text-sm mt-1">
+                  Todos os quartos estão ocupados nas datas escolhidas. 
+                  Tente alterar as datas ou verificar outras propriedades.
+                </p>
               </div>
             ) : null}
 
