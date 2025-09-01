@@ -1406,6 +1406,12 @@ async getCategorySummary(
     return this.createReservation(reservationData);
   }
 
+  // Método para buscar detalhes completos da reserva
+  async getReservationDetailed(id: number): Promise<ReservationDetailedResponse> {
+    const response = await this.client.get(`/reservations/${id}/detailed`);
+    return response.data;
+  }
+
   // ===== NOVOS MÉTODOS UTILITÁRIOS ADICIONADOS =====
 
   // Método para fazer download de arquivos
@@ -1418,13 +1424,13 @@ async getCategorySummary(
 
       const blob = await response.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
-      
+
       const link = document.createElement('a');
       link.href = downloadUrl;
       link.download = filename || 'download.csv';
       document.body.appendChild(link);
       link.click();
-      
+
       // Limpar
       window.URL.revokeObjectURL(downloadUrl);
       document.body.removeChild(link);
