@@ -43,6 +43,8 @@ import {
   Home,
   Hash,
   BedDouble,
+  CalendarCheck,
+  CalendarX,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ReservationResponseWithGuestDetails } from '@/types/reservation';
@@ -97,13 +99,11 @@ const formatDate = (dateString: string) => {
   }
 };
 
-const formatDateRange = (checkIn: string, checkOut: string) => {
+const formatShortDate = (dateString: string) => {
   try {
-    const checkInDate = format(new Date(checkIn), 'dd/MM', { locale: ptBR });
-    const checkOutDate = format(new Date(checkOut), 'dd/MM/yy', { locale: ptBR });
-    return `${checkInDate} - ${checkOutDate}`;
+    return format(new Date(dateString), 'dd/MM/yy', { locale: ptBR });
   } catch {
-    return `${checkIn} - ${checkOut}`;
+    return dateString;
   }
 };
 
@@ -130,35 +130,60 @@ const formatRooms = (rooms: any[] | undefined) => {
     const roomType = room.room_type_name || '';
     return {
       display: roomType ? `${roomNumber} - ${roomType}` : roomNumber,
-      count: 1
+      count: 1,
     };
   }
 
-  // Múltiplos quartos
-  const roomNumbers = rooms
-    .map(room => room.room_number)
-    .filter(Boolean)
-    .sort((a, b) => {
-      // Tentar ordenar numericamente
-      const numA = parseInt(a);
-      const numB = parseInt(b);
-      if (!isNaN(numA) && !isNaN(numB)) {
-        return numA - numB;
-      }
-      return a.localeCompare(b);
-    });
-
-  if (roomNumbers.length <= 3) {
-    return {
-      display: roomNumbers.join(', '),
-      count: rooms.length
-    };
-  }
-
+  const roomNumbers = rooms.map(r => r.room_number || 'N/A').join(', ');
   return {
-    display: `${rooms.length} quartos`,
-    count: rooms.length
+    display: `${rooms.length} quartos (${roomNumbers})`,
+    count: rooms.length,
   };
+};
+
+const getQuickActions = (reservation: ReservationResponseWithGuestDetails) => {
+  const actions: Array<{
+    key: string;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    variant?: 'default' | 'destructive';
+    disabled?: boolean;
+  }> = [];
+
+  if (reservation.status === 'pending') {
+    actions.push({
+      key: 'confirm',
+      label: 'Confirmar',
+      icon: CheckCircle,
+    });
+  }
+
+  if (reservation.status === 'confirmed') {
+    actions.push({
+      key: 'checkin',
+      label: 'Check-in',
+      icon: LogIn,
+    });
+  }
+
+  if (reservation.status === 'checked_in') {
+    actions.push({
+      key: 'checkout',
+      label: 'Check-out',
+      icon: LogOut,
+    });
+  }
+
+  if (['pending', 'confirmed'].includes(reservation.status)) {
+    actions.push({
+      key: 'cancel',
+      label: 'Cancelar',
+      icon: XCircle,
+      variant: 'destructive',
+    });
+  }
+
+  return actions;
 };
 
 export default function ReservationTable({
@@ -169,177 +194,58 @@ export default function ReservationTable({
   onQuickAction,
   actionLoading = {},
 }: ReservationTableProps) {
-  const [sortConfig, setSortConfig] = useState<SortConfig>({
-    key: 'check_in_date',
-    direction: 'desc',
-  });
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'id', direction: 'desc' });
 
   const handleSort = (key: string) => {
-    let direction: 'asc' | 'desc' = 'asc';
-    if (sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
+    if (sortConfig.key === key) {
+      setSortConfig({
+        key,
+        direction: sortConfig.direction === 'asc' ? 'desc' : 'asc',
+      });
+    } else {
+      setSortConfig({ key, direction: 'asc' });
     }
-    setSortConfig({ key, direction });
   };
 
   const SortButton = ({ children, columnKey }: { children: React.ReactNode; columnKey: string }) => (
     <Button
       variant="ghost"
       size="sm"
-      className="h-auto p-0 font-semibold hover:bg-transparent"
+      className="h-8 px-2 font-semibold hover:bg-transparent"
       onClick={() => handleSort(columnKey)}
     >
-      <span className="mr-1">{children}</span>
+      {children}
       {sortConfig.key === columnKey ? (
         sortConfig.direction === 'asc' ? (
-          <ArrowUp className="h-3 w-3" />
+          <ArrowUp className="ml-2 h-4 w-4" />
         ) : (
-          <ArrowDown className="h-3 w-3" />
+          <ArrowDown className="ml-2 h-4 w-4" />
         )
       ) : (
-        <ArrowUpDown className="h-3 w-3 opacity-50" />
+        <ArrowUpDown className="ml-2 h-4 w-4 opacity-50" />
       )}
     </Button>
   );
 
-  const getSortedReservations = () => {
-    if (!reservations.length) return [];
-
-    return [...reservations].sort((a, b) => {
-      let aValue: any;
-      let bValue: any;
-
-      switch (sortConfig.key) {
-        case 'id':
-          aValue = a.id || 0;
-          bValue = b.id || 0;
-          break;
-        case 'guest_name':
-          aValue = (a.guest_name || '').toLowerCase();
-          bValue = (b.guest_name || '').toLowerCase();
-          break;
-        case 'check_in_date':
-          aValue = new Date(a.check_in_date).getTime();
-          bValue = new Date(b.check_in_date).getTime();
-          break;
-        case 'check_out_date':
-          aValue = new Date(a.check_out_date).getTime();
-          bValue = new Date(b.check_out_date).getTime();
-          break;
-        case 'total_guests':
-          aValue = a.total_guests || 0;
-          bValue = b.total_guests || 0;
-          break;
-        case 'total_amount':
-          aValue = parseFloat(a.total_amount?.toString() || '0');
-          bValue = parseFloat(b.total_amount?.toString() || '0');
-          break;
-        case 'paid_amount':
-          aValue = parseFloat(a.paid_amount?.toString() || '0');
-          bValue = parseFloat(b.paid_amount?.toString() || '0');
-          break;
-        case 'status':
-          aValue = a.status || '';
-          bValue = b.status || '';
-          break;
-        case 'property_name':
-          aValue = (a.property_name || '').toLowerCase();
-          bValue = (b.property_name || '').toLowerCase();
-          break;
-        case 'created_date':
-          aValue = new Date(a.created_date).getTime();
-          bValue = new Date(b.created_date).getTime();
-          break;
-        case 'created_at':
-          aValue = new Date(a.created_at).getTime();
-          bValue = new Date(b.created_at).getTime();
-          break;
-        case 'source':
-          aValue = (a.source || '').toLowerCase();
-          bValue = (b.source || '').toLowerCase();
-          break;
-        default:
-          return 0;
-      }
-
-      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
-      return 0;
-    });
-  };
-
-  const getQuickActions = (reservation: ReservationResponseWithGuestDetails) => {
-    const actions = [];
-
-    if (reservation.can_check_in && reservation.status === 'confirmed') {
-      actions.push({
-        key: 'checkin',
-        label: 'Check-in',
-        icon: LogIn,
-        color: 'text-green-600 hover:text-green-700',
-      });
-    }
-
-    if (reservation.can_check_out && reservation.status === 'checked_in') {
-      actions.push({
-        key: 'checkout',
-        label: 'Check-out',
-        icon: LogOut,
-        color: 'text-blue-600 hover:text-blue-700',
-      });
-    }
-
-    if (reservation.can_cancel && ['pending', 'confirmed'].includes(reservation.status)) {
-      actions.push({
-        key: 'cancel',
-        label: 'Cancelar',
-        icon: XCircle,
-        color: 'text-red-600 hover:text-red-700',
-      });
-    }
-
-    if (reservation.status === 'pending') {
-      actions.push({
-        key: 'confirm',
-        label: 'Confirmar',
-        icon: CheckCircle,
-        color: 'text-green-600 hover:text-green-700',
-      });
-    }
-
-    return actions;
-  };
-
-  const getSourceInfo = (source: string | undefined) => {
-    if (!source) return { label: 'N/A', color: 'bg-gray-100 text-gray-800 border-gray-200', icon: Hash };
-    return sourceConfig[source] || { label: source, color: 'bg-gray-100 text-gray-800 border-gray-200', icon: Globe };
-  };
-
-  const sortedReservations = getSortedReservations();
-
   if (loading) {
     return (
-      <div className="bg-white border rounded-lg shadow-sm">
-        <div className="flex items-center justify-center p-8">
-          <div className="flex items-center gap-2 text-gray-500">
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600" />
-            <span>Carregando reservas...</span>
-          </div>
+      <div className="bg-white border rounded-lg shadow-sm p-8">
+        <div className="flex items-center justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <span className="ml-2 text-gray-600">Carregando reservas...</span>
         </div>
       </div>
     );
   }
 
-  if (!reservations.length) {
+  if (!reservations?.length) {
     return (
-      <div className="bg-white border rounded-lg shadow-sm">
-        <div className="flex flex-col items-center justify-center p-8 text-center">
-          <Calendar className="h-12 w-12 text-gray-300 mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">
-            Nenhuma reserva encontrada
-          </h3>
-          <p className="text-gray-500">
-            Não há reservas que correspondam aos filtros aplicados.
+      <div className="bg-white border rounded-lg shadow-sm p-8">
+        <div className="text-center text-gray-500">
+          <Calendar className="mx-auto h-12 w-12 mb-4 opacity-50" />
+          <h3 className="text-lg font-medium mb-2">Nenhuma reserva encontrada</h3>
+          <p className="text-sm">
+            Não há reservas que correspondam aos filtros selecionados.
           </p>
         </div>
       </div>
@@ -362,7 +268,10 @@ export default function ReservationTable({
                 Contato
               </TableHead>
               <TableHead className="font-semibold text-gray-700">
-                <SortButton columnKey="check_in_date">Período</SortButton>
+                <SortButton columnKey="check_in_date">Check In</SortButton>
+              </TableHead>
+              <TableHead className="font-semibold text-gray-700">
+                <SortButton columnKey="check_out_date">Check Out</SortButton>
               </TableHead>
               <TableHead className="font-semibold text-gray-700 text-center">
                 <SortButton columnKey="total_guests">Hóspedes</SortButton>
@@ -382,40 +291,41 @@ export default function ReservationTable({
               <TableHead className="font-semibold text-gray-700">
                 <SortButton columnKey="source">Origem</SortButton>
               </TableHead>
-              <TableHead className="font-semibold text-gray-700 text-right">
+              <TableHead className="font-semibold text-gray-700">
                 <SortButton columnKey="total_amount">Valor</SortButton>
               </TableHead>
-              <TableHead className="font-semibold text-gray-700 text-right">
-                <SortButton columnKey="paid_amount">Pago</SortButton>
+              <TableHead className="font-semibold text-gray-700">
+                Pagamento
               </TableHead>
-              <TableHead className="font-semibold text-gray-700 text-center">
+              <TableHead className="font-semibold text-gray-700 w-24">
                 Ações
               </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sortedReservations.map((reservation) => {
-              const statusInfo = statusConfig[reservation.status as keyof typeof statusConfig] || statusConfig.pending;
-              const sourceInfo = getSourceInfo(reservation.source);
-              const roomsInfo = formatRooms(reservation.rooms);
+            {reservations.map((reservation) => {
               const nights = calculateNights(reservation.check_in_date, reservation.check_out_date);
+              const rooms = formatRooms(reservation.rooms);
+              const status = statusConfig[reservation.status as keyof typeof statusConfig] || 
+                           { label: reservation.status, color: 'bg-gray-100 text-gray-800' };
+              const source = sourceConfig[reservation.source as keyof typeof sourceConfig];
               const quickActions = getQuickActions(reservation);
-              const isLoading = actionLoading[reservation.id];
+              const isActionLoading = actionLoading[reservation.id];
 
               return (
-                <TableRow
-                  key={reservation.id}
-                  className="hover:bg-gray-50/50 transition-colors"
-                >
+                <TableRow key={reservation.id} className="hover:bg-gray-50/50">
                   {/* ID */}
-                  <TableCell className="font-mono text-xs text-gray-600">
-                    #{reservation.id}
+                  <TableCell className="font-medium">
+                    <div className="flex items-center gap-1">
+                      <Hash className="h-3 w-3 text-gray-400" />
+                      <span>{reservation.id}</span>
+                    </div>
                   </TableCell>
 
                   {/* Hóspede */}
-                  <TableCell className="font-medium">
+                  <TableCell>
                     <div className="flex flex-col">
-                      <span className="font-semibold text-gray-900">
+                      <span className="font-medium text-gray-900">
                         {reservation.guest_name || 'N/A'}
                       </span>
                       <span className="text-xs text-gray-500">
@@ -444,26 +354,42 @@ export default function ReservationTable({
                     </div>
                   </TableCell>
 
-                  {/* Período */}
+                  {/* Check In */}
                   <TableCell>
                     <div className="flex flex-col">
                       <div className="flex items-center gap-1 text-sm font-medium">
-                        <Calendar className="h-3 w-3 text-gray-400" />
-                        <span>
-                          {formatDateRange(reservation.check_in_date, reservation.check_out_date)}
-                        </span>
+                        <CalendarCheck className="h-3 w-3 text-green-600" />
+                        <span>{formatShortDate(reservation.check_in_date)}</span>
                       </div>
                       <span className="text-xs text-gray-500">
-                        {nights} {nights === 1 ? 'noite' : 'noites'}
+                        {format(new Date(reservation.check_in_date), 'EEEE', { locale: ptBR })}
                       </span>
+                    </div>
+                  </TableCell>
+
+                  {/* Check Out */}
+                  <TableCell>
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-1 text-sm font-medium">
+                        <CalendarX className="h-3 w-3 text-red-600" />
+                        <span>{formatShortDate(reservation.check_out_date)}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-xs text-gray-500">
+                        <span>{nights} {nights === 1 ? 'noite' : 'noites'}</span>
+                      </div>
                     </div>
                   </TableCell>
 
                   {/* Hóspedes */}
                   <TableCell className="text-center">
-                    <div className="flex items-center justify-center gap-1">
-                      <Users className="h-4 w-4 text-gray-400" />
-                      <span className="font-medium">{reservation.total_guests}</span>
+                    <div className="flex flex-col items-center">
+                      <div className="flex items-center gap-1">
+                        <Users className="h-3 w-3 text-gray-400" />
+                        <span className="font-medium">{reservation.total_guests}</span>
+                      </div>
+                      <span className="text-xs text-gray-500">
+                        {reservation.adults}A + {reservation.children}C
+                      </span>
                     </div>
                   </TableCell>
 
@@ -471,26 +397,19 @@ export default function ReservationTable({
                   <TableCell>
                     <div className="flex items-center gap-1">
                       <Building className="h-3 w-3 text-gray-400" />
-                      <span className="font-medium text-sm">
+                      <span className="truncate max-w-32">
                         {reservation.property_name || 'N/A'}
                       </span>
                     </div>
                   </TableCell>
 
-                  {/* Quarto(s) */}
+                  {/* Quartos */}
                   <TableCell>
                     <div className="flex items-center gap-1">
                       <BedDouble className="h-3 w-3 text-gray-400" />
-                      <div className="flex flex-col">
-                        <span className="font-medium text-sm">
-                          {roomsInfo.display}
-                        </span>
-                        {roomsInfo.count > 1 && (
-                          <span className="text-xs text-gray-500">
-                            {roomsInfo.count} quarto{roomsInfo.count > 1 ? 's' : ''}
-                          </span>
-                        )}
-                      </div>
+                      <span className="truncate max-w-32" title={rooms.display}>
+                        {rooms.display}
+                      </span>
                     </div>
                   </TableCell>
 
@@ -498,113 +417,126 @@ export default function ReservationTable({
                   <TableCell>
                     <Badge
                       variant="outline"
-                      className={cn(
-                        'text-xs font-medium border px-2 py-1',
-                        statusInfo.color
-                      )}
+                      className={cn('text-xs', status.color)}
                     >
-                      {statusInfo.label}
+                      {status.label}
                     </Badge>
                   </TableCell>
 
                   {/* Data Criação */}
                   <TableCell>
-                    <div className="flex flex-col">
-                      <span className="text-sm font-medium">
-                        {format(new Date(reservation.created_date), 'dd/MM/yy', { locale: ptBR })}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        {format(new Date(reservation.created_date), 'HH:mm', { locale: ptBR })}
-                      </span>
+                    <div className="text-sm">
+                      {formatShortDate(reservation.created_date)}
                     </div>
                   </TableCell>
 
                   {/* Origem */}
                   <TableCell>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        'text-xs font-medium border px-2 py-1 flex items-center gap-1 w-fit',
-                        sourceInfo.color
-                      )}
-                    >
-                      <sourceInfo.icon className="h-3 w-3" />
-                      {sourceInfo.label}
-                    </Badge>
-                  </TableCell>
-
-                  {/* Valor Total */}
-                  <TableCell className="text-right">
-                    <div className="flex flex-col items-end">
-                      <div className="flex items-center gap-1">
-                        <DollarSign className="h-3 w-3 text-gray-400" />
-                        <span className="font-semibold">
-                          {reservation.total_amount ? formatCurrency(parseFloat(reservation.total_amount.toString())) : 'N/A'}
+                    <div className="flex items-center gap-1">
+                      {source ? (
+                        <>
+                          <source.icon className="h-3 w-3" />
+                          <Badge
+                            variant="outline"
+                            className={cn('text-xs', source.color)}
+                          >
+                            {source.label}
+                          </Badge>
+                        </>
+                      ) : (
+                        <span className="text-xs text-gray-500 capitalize">
+                          {reservation.source || 'N/A'}
                         </span>
-                      </div>
+                      )}
                     </div>
                   </TableCell>
 
-                  {/* Valor Pago */}
-                  <TableCell className="text-right">
-                    <div className="flex flex-col items-end">
+                  {/* Valor */}
+                  <TableCell>
+                    <div className="flex items-center gap-1">
+                      <DollarSign className="h-3 w-3 text-gray-400" />
+                      <span className="font-medium">
+                        {formatCurrency(reservation.total_amount)}
+                      </span>
+                    </div>
+                  </TableCell>
+
+                  {/* Pagamento */}
+                  <TableCell>
+                    <div className="flex flex-col space-y-1">
                       <div className="flex items-center gap-1">
                         <CreditCard className="h-3 w-3 text-gray-400" />
-                        <span className="font-medium text-green-600">
-                          {formatCurrency(parseFloat(reservation.paid_amount?.toString() || '0'))}
+                        <span className="text-sm font-medium text-green-600">
+                          {formatCurrency(reservation.paid_amount || 0)}
                         </span>
                       </div>
-                      {reservation.balance_due && parseFloat(reservation.balance_due.toString()) > 0 && (
-                        <span className="text-xs text-red-500">
-                          Saldo: {formatCurrency(parseFloat(reservation.balance_due.toString()))}
-                        </span>
+                      {(reservation.total_amount - (reservation.paid_amount || 0)) > 0 && (
+                        <div className="text-xs text-red-600">
+                          Saldo: {formatCurrency(reservation.total_amount - (reservation.paid_amount || 0))}
+                        </div>
                       )}
                     </div>
                   </TableCell>
 
                   {/* Ações */}
-                  <TableCell className="text-center">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
+                  <TableCell>
+                    <div className="flex items-center gap-1">
+                      {onView && (
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-8 w-8 p-0"
-                          disabled={!!isLoading}
+                          onClick={() => onView(reservation)}
+                          title="Ver detalhes"
                         >
-                          {isLoading ? (
-                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600" />
-                          ) : (
-                            <MoreHorizontal className="h-4 w-4" />
-                          )}
+                          <Eye className="h-4 w-4" />
                         </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-48">
-                        {onView && (
-                          <DropdownMenuItem onClick={() => onView(reservation)}>
-                            <Eye className="h-4 w-4 mr-2" />
-                            Ver Detalhes
-                          </DropdownMenuItem>
-                        )}
-                        {onEdit && (
-                          <DropdownMenuItem onClick={() => onEdit(reservation)}>
-                            <Edit className="h-4 w-4 mr-2" />
-                            Editar
-                          </DropdownMenuItem>
-                        )}
-                        {quickActions.length > 0 && <div className="border-t my-1" />}
-                        {quickActions.map((action) => (
-                          <DropdownMenuItem
-                            key={action.key}
-                            onClick={() => onQuickAction?.(reservation, action.key)}
-                            className={action.color}
-                          >
-                            <action.icon className="h-4 w-4 mr-2" />
-                            {action.label}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                      )}
+                      
+                      {(onEdit || (onQuickAction && quickActions.length > 0)) && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              disabled={!!isActionLoading}
+                            >
+                              {isActionLoading ? (
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                              ) : (
+                                <MoreHorizontal className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48">
+                            {onEdit && (
+                              <DropdownMenuItem onClick={() => onEdit(reservation)}>
+                                <Edit className="mr-2 h-4 w-4" />
+                                Editar
+                              </DropdownMenuItem>
+                            )}
+                            
+                            {onQuickAction && quickActions.map((action) => {
+                              const IconComponent = action.icon;
+                              return (
+                                <DropdownMenuItem
+                                  key={action.key}
+                                  onClick={() => onQuickAction(reservation, action.key)}
+                                  className={cn(
+                                    action.variant === 'destructive' && 'text-red-600 focus:text-red-600'
+                                  )}
+                                  disabled={action.disabled || !!isActionLoading}
+                                >
+                                  <IconComponent className="mr-2 h-4 w-4" />
+                                  {action.label}
+                                </DropdownMenuItem>
+                              );
+                            })}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               );

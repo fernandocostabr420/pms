@@ -28,6 +28,7 @@ from app.schemas.reservation import (
     CancelReservationRequest,
     AvailabilityRequest,
     AvailabilityResponse,
+    ReservationRoomResponse,
 )
 from app.schemas.common import MessageResponse
 from app.api.deps import get_current_active_user, get_current_superuser
@@ -1172,83 +1173,94 @@ def get_reservations_detailed(
         # Aplicar paginação
         reservations = query.offset(skip).limit(per_page).all()
         
-        # Converter para response expandido
+        # ✅ CORREÇÃO: Converter para response expandido com guest_phone garantido
         detailed_reservations = []
         
         for reservation in reservations:
-            # Base response
-            base_data = ReservationResponse.model_validate(reservation)
-            base_dict = base_data.model_dump()
-            
-            # ✅ SEMPRE POPULAR CAMPOS BÁSICOS PRIMEIRO
-            if reservation.guest:
-                base_dict['guest_name'] = reservation.guest.full_name
-                base_dict['guest_email'] = reservation.guest.email
-            else:
-                base_dict['guest_name'] = "Hóspede não encontrado"
-                base_dict['guest_email'] = None
+            try:
+                # ✅ CORREÇÃO: Base response sem conflitos
+                base_data = ReservationResponse.model_validate(reservation)
+                base_dict = base_data.model_dump()
                 
-            if reservation.property_obj:
-                base_dict['property_name'] = reservation.property_obj.name
-            else:
-                base_dict['property_name'] = "Propriedade não encontrada"
-            
-            # Remover campos que serão sobrescritos para evitar conflito
-            fields_to_override = [
-                'guest_phone', 'guest_document_type', 'guest_document_number',
-                'guest_nationality', 'guest_city', 'guest_state', 'guest_country',
-                'guest_address', 'guest_date_of_birth', 'property_address', 
-                'property_phone', 'property_city', 'deposit_paid', 
-                'is_group_reservation', 'requires_deposit'
-            ]
-            for field in fields_to_override:
-                base_dict.pop(field, None)
-            
-            # Criar response expandido
-            detailed_reservation = ReservationResponseWithGuestDetails(
-                **base_dict,
+                # ✅ SEMPRE POPULAR CAMPOS BÁSICOS PRIMEIRO
+                if reservation.guest:
+                    base_dict['guest_name'] = reservation.guest.full_name
+                    base_dict['guest_email'] = reservation.guest.email
+                else:
+                    base_dict['guest_name'] = "Hóspede não encontrado"
+                    base_dict['guest_email'] = None
+                    
+                if reservation.property_obj:
+                    base_dict['property_name'] = reservation.property_obj.name
+                else:
+                    base_dict['property_name'] = "Propriedade não encontrada"
+                
+                # ✅ CORREÇÃO: Remover campos que conflitam (INCLUINDO 'rooms')
+                fields_to_override = [
+                    'guest_phone', 'guest_document_type', 'guest_document_number',
+                    'guest_nationality', 'guest_city', 'guest_state', 'guest_country',
+                    'guest_address', 'guest_date_of_birth', 'property_address', 
+                    'property_phone', 'property_city', 'deposit_paid', 
+                    'is_group_reservation', 'requires_deposit', 'rooms'  # ✅ ADICIONADO 'rooms'
+                ]
+                for field in fields_to_override:
+                    base_dict.pop(field, None)
 
-                # Dados do hóspede expandidos
-                guest_phone=reservation.guest.phone if reservation.guest else None,
-                guest_document_type=reservation.guest.document_type if reservation.guest else None,
-                guest_document_number=reservation.guest.document_number if reservation.guest else None,
-                guest_nationality=reservation.guest.nationality if reservation.guest else None,
-                guest_city=reservation.guest.city if reservation.guest else None,
-                guest_state=reservation.guest.state if reservation.guest else None,
-                guest_country=reservation.guest.country if reservation.guest else None,
-                guest_address=reservation.guest.address_line1 if reservation.guest else None,
-                guest_date_of_birth=reservation.guest.date_of_birth if reservation.guest else None,
+                # ✅ CORREÇÃO: Criar response expandido MANTENDO a estrutura de rooms original
+                detailed_reservation = ReservationResponseWithGuestDetails(
+                    **base_dict,
 
-                # Dados da propriedade expandidos
-                property_address=reservation.property_obj.address_line1 if reservation.property_obj else None,
-                property_phone=reservation.property_obj.phone if reservation.property_obj else None,
-                property_city=reservation.property_obj.city if reservation.property_obj else None,
+                    # ✅ DADOS DO HÓSPEDE EXPANDIDOS - SEMPRE INCLUIR
+                    guest_phone=reservation.guest.phone if reservation.guest else None,
+                    guest_document_type=reservation.guest.document_type if reservation.guest else None,
+                    guest_document_number=reservation.guest.document_number if reservation.guest else None,
+                    guest_nationality=reservation.guest.nationality if reservation.guest else None,
+                    guest_city=reservation.guest.city if reservation.guest else None,
+                    guest_state=reservation.guest.state if reservation.guest else None,
+                    guest_country=reservation.guest.country if reservation.guest else None,
+                    guest_address=reservation.guest.address_line1 if reservation.guest else None,
+                    guest_date_of_birth=reservation.guest.date_of_birth if reservation.guest else None,
 
-                rooms=[
-                    ReservationRoomResponse(
-                        id=room.id,
-                        reservation_id=room.reservation_id,
-                        room_id=room.room_id,
-                        check_in_date=room.check_in_date.isoformat() if room.check_in_date else None,
-                        check_out_date=room.check_out_date.isoformat() if room.check_out_date else None,
-                        rate_per_night=float(room.rate_per_night) if room.rate_per_night else None,
-                        total_amount=float(room.total_amount) if room.total_amount else None,
-                        status=room.status,
-                        notes=room.notes,
-                        room_number=room.room.room_number if room.room else None,
-                        room_name=room.room.name if room.room else None,
-                        room_type_name=room.room.room_type.name if (room.room and room.room.room_type) else None,
-                    )
-                    for room in reservation.reservation_rooms if room.room
-                ] if reservation.reservation_rooms else [],
+                    # ✅ DADOS DA PROPRIEDADE EXPANDIDOS
+                    property_address=reservation.property_obj.address_line1 if reservation.property_obj else None,
+                    property_phone=reservation.property_obj.phone if reservation.property_obj else None,
+                    property_city=reservation.property_obj.city if reservation.property_obj else None,
 
-                # Campos adicionais específicos para reservas
-                deposit_paid=reservation.deposit_paid,
-                is_group_reservation=reservation.is_group_reservation,
-                requires_deposit=reservation.requires_deposit,
-            )
-            
-            detailed_reservations.append(detailed_reservation)
+                    # ✅ MANTER ESTRUTURA ORIGINAL DE QUARTOS (que funcionava!)
+                    rooms=[
+                        ReservationRoomResponse(
+                            id=room.id,
+                            reservation_id=room.reservation_id,
+                            room_id=room.room_id,
+                            check_in_date=room.check_in_date.isoformat() if room.check_in_date else None,
+                            check_out_date=room.check_out_date.isoformat() if room.check_out_date else None,
+                            rate_per_night=float(room.rate_per_night) if room.rate_per_night else None,
+                            total_amount=float(room.total_amount) if room.total_amount else None,
+                            status=room.status,
+                            notes=room.notes,
+                            room_number=room.room.room_number if room.room else None,
+                            room_name=room.room.name if room.room else None,
+                            room_type_name=room.room.room_type.name if (room.room and room.room.room_type) else None,
+                        )
+                        for room in reservation.reservation_rooms if room.room
+                    ] if reservation.reservation_rooms else [],
+
+                    # ✅ CAMPOS ADICIONAIS ESPECÍFICOS PARA RESERVAS
+                    deposit_paid=reservation.deposit_paid,
+                    is_group_reservation=reservation.is_group_reservation,
+                    requires_deposit=reservation.requires_deposit,
+                )
+                
+                detailed_reservations.append(detailed_reservation)
+                
+            except Exception as e:
+                # ✅ Log individual para debug sem quebrar o endpoint
+                logger.error(f"Erro ao processar reserva {reservation.id}: {str(e)}")
+                logger.error(f"Guest exists: {reservation.guest is not None}")
+                if reservation.guest:
+                    logger.error(f"Guest phone: {reservation.guest.phone}")
+                # Continuar processando as outras reservas
+                continue
         
         # Calcular estatísticas da busca
         summary = None
