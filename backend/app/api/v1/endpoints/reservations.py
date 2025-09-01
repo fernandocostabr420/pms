@@ -32,10 +32,11 @@ from app.schemas.reservation import (
 from app.schemas.common import MessageResponse
 from app.api.deps import get_current_active_user, get_current_superuser
 from app.models.user import User
-from app.models.reservation import Reservation
+from app.models.reservation import Reservation, ReservationRoom
 from app.models.guest import Guest
 from app.models.property import Property
-from app.models.reservation import Reservation, ReservationRoom
+from app.models.room import Room  # ✅ ADICIONADO - corrige o erro NameError
+from app.models.room_type import RoomType  # ✅ ADICIONADO - caso precise usar
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -123,10 +124,10 @@ def list_reservations(
     payment_status: Optional[str] = Query(None, description="Status do pagamento"),
     
     # Parâmetros para incluir dados expandidos
-    include_room_details: Optional[bool] = Query(False, description="Incluir detalhes dos quartos"),
+    include_room_details: Optional[bool] = Query(True, description="Incluir detalhes dos quartos"),  # ✅ MUDOU PARA TRUE
     include_payment_details: Optional[bool] = Query(False, description="Incluir detalhes de pagamento"),
 ):
-    """Lista reservas do tenant com filtros avançados e paginação - ✅ CORRIGIDO PARA SEMPRE MOSTRAR NOME DO HÓSPEDE"""
+    """Lista reservas do tenant com filtros avançados e paginação - ✅ CORRIGIDO PARA SEMPRE MOSTRAR NOME DO HÓSPEDE E QUARTOS"""
     
     # ✅ NOVA LÓGICA: Sempre usar query direta para carregar dados relacionados
     
@@ -136,8 +137,8 @@ def list_reservations(
     # ✅ Query base com joins OBRIGATÓRIOS para carregar dados relacionados
     query = db.query(Reservation).options(
         joinedload(Reservation.guest),           # ✅ SEMPRE CARREGAR HÓSPEDE
-        joinedload(Reservation.property_obj),
-        joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room).joinedload(Room.room_type) # ✅ SEMPRE CARREGAR PROPRIEDADE
+        joinedload(Reservation.property_obj),    # ✅ SEMPRE CARREGAR PROPRIEDADE
+        joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room).joinedload(Room.room_type)  # ✅ SEMPRE CARREGAR QUARTOS
     ).filter(
         Reservation.tenant_id == current_user.tenant_id,
         Reservation.is_active == True
@@ -309,7 +310,7 @@ def list_reservations(
         # Base response
         reservation_data = ReservationResponse.model_validate(reservation)
         
-        # ✅ POPULAR CAMPOS RELACIONADOS SEMPRE
+        # ✅ POPULAR CAMPOS RELACIONADOS SEMPRE - HÓSPEDE
         if reservation.guest:
             reservation_data.guest_name = reservation.guest.full_name
             reservation_data.guest_email = reservation.guest.email
@@ -317,10 +318,38 @@ def list_reservations(
             reservation_data.guest_name = "Hóspede não encontrado"
             reservation_data.guest_email = None
         
+        # ✅ POPULAR CAMPOS RELACIONADOS SEMPRE - PROPRIEDADE
         if reservation.property_obj:
             reservation_data.property_name = reservation.property_obj.name
         else:
             reservation_data.property_name = "Propriedade não encontrada"
+        
+        # ✅ NOVA CORREÇÃO: POPULAR CAMPOS DOS QUARTOS SEMPRE
+        if reservation.reservation_rooms and include_room_details:
+            from app.schemas.reservation import ReservationRoomResponse
+            rooms_data = []
+            
+            for room in reservation.reservation_rooms:
+                if room.room:  # Só processar se o quarto existir
+                    room_response = ReservationRoomResponse(
+                        id=room.id,
+                        reservation_id=room.reservation_id,
+                        room_id=room.room_id,
+                        check_in_date=room.check_in_date.isoformat() if room.check_in_date else None,
+                        check_out_date=room.check_out_date.isoformat() if room.check_out_date else None,
+                        rate_per_night=float(room.rate_per_night) if room.rate_per_night else None,
+                        total_amount=float(room.total_amount) if room.total_amount else None,
+                        status=room.status,
+                        notes=room.notes,
+                        room_number=room.room.room_number,  # ✅ CAMPO OBRIGATÓRIO PARA EXIBIÇÃO
+                        room_name=room.room.name,           # ✅ CAMPO OBRIGATÓRIO PARA EXIBIÇÃO  
+                        room_type_name=room.room.room_type.name if room.room.room_type else None,  # ✅ TIPO DO QUARTO
+                    )
+                    rooms_data.append(room_response)
+            
+            reservation_data.rooms = rooms_data
+        else:
+            reservation_data.rooms = []
         
         reservations_response.append(reservation_data)
     
