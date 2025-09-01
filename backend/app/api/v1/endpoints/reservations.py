@@ -65,11 +65,9 @@ def list_reservations(
     check_out_from: Optional[date] = Query(None, description="Check-out a partir de"),
     check_out_to: Optional[date] = Query(None, description="Check-out até"),
     
-    # ✅ CORREÇÃO: Sempre carregar dados do hóspede por padrão
-    include_guest_details: bool = Query(True, description="Incluir dados do hóspede"),
-    include_property_details: bool = Query(True, description="Incluir dados da propriedade"),
-    created_from: Optional[datetime] = Query(None, description="Criação a partir de"),
-    created_to: Optional[datetime] = Query(None, description="Criação até"),
+    # ✅ CORREÇÃO: Suportar datetime e date para created_from/to
+    created_from: Optional[str] = Query(None, description="Criação a partir de (datetime ou date)"),
+    created_to: Optional[str] = Query(None, description="Criação até (datetime ou date)"),
     
     # Filtros financeiros existentes
     min_amount: Optional[float] = Query(None, ge=0, description="Valor mínimo"),
@@ -78,8 +76,8 @@ def list_reservations(
     requires_deposit: Optional[bool] = Query(None, description="Exige depósito"),
     is_group_reservation: Optional[bool] = Query(None, description="Reserva em grupo"),
     
-    # Busca textual existente
-    search: Optional[str] = Query(None, description="Busca textual"),
+    # 🔍 BUSCA TEXTUAL - PRINCIPAL CORREÇÃO
+    search: Optional[str] = Query(None, description="Buscar por nome, email, número reserva"),
     
     # ===== FILTROS EXPANDIDOS ORIGINAIS =====
     
@@ -125,246 +123,344 @@ def list_reservations(
     payment_status: Optional[str] = Query(None, description="Status do pagamento"),
     
     # Parâmetros para incluir dados expandidos
-    include_room_details: Optional[bool] = Query(True, description="Incluir detalhes dos quartos"),  # ✅ MUDOU PARA TRUE
+    include_guest_details: bool = Query(True, description="Incluir dados do hóspede"),
+    include_property_details: bool = Query(True, description="Incluir dados da propriedade"),
+    include_room_details: Optional[bool] = Query(True, description="Incluir detalhes dos quartos"),
     include_payment_details: Optional[bool] = Query(False, description="Incluir detalhes de pagamento"),
 ):
-    """Lista reservas do tenant com filtros avançados e paginação - ✅ CORRIGIDO PARA SEMPRE MOSTRAR NOME DO HÓSPEDE E QUARTOS"""
+    """
+    Lista reservas do tenant com filtros avançados e paginação
+    ✅ VERSÃO CORRIGIDA - BUSCA POR NOME FUNCIONAL
+    """
     
-    # ✅ NOVA LÓGICA: Sempre usar query direta para carregar dados relacionados
-    
-    # Calcular offset
-    skip = (page - 1) * per_page
-    
-    # ✅ Query base com joins OBRIGATÓRIOS para carregar dados relacionados
-    query = db.query(Reservation).options(
-        joinedload(Reservation.guest),           # ✅ SEMPRE CARREGAR HÓSPEDE
-        joinedload(Reservation.property_obj),    # ✅ SEMPRE CARREGAR PROPRIEDADE
-        joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room).joinedload(Room.room_type)  # ✅ SEMPRE CARREGAR QUARTOS
-    ).filter(
-        Reservation.tenant_id == current_user.tenant_id,
-        Reservation.is_active == True
-    )
-    
-    # Aplicar filtros básicos
-    if status:
-        query = query.filter(Reservation.status == status)
-    
-    if source:
-        query = query.filter(Reservation.source == source)
-    
-    if property_id:
-        query = query.filter(Reservation.property_id == property_id)
-    
-    if guest_id:
-        query = query.filter(Reservation.guest_id == guest_id)
-    
-    # ✅ BUSCA TEXTUAL COM JOIN ADEQUADO
-    if search:
-        search_term = f"%{search}%"
-        # Como já temos joinedload, podemos usar Guest diretamente
-        query = query.filter(
-            or_(
-                Guest.first_name.ilike(search_term),
-                Guest.last_name.ilike(search_term), 
-                Guest.email.ilike(search_term),
-                Reservation.reservation_number.ilike(search_term)
-            )
+    try:
+        # Calcular offset
+        skip = (page - 1) * per_page
+        
+        # 🔧 QUERY BASE COM JOINS EXPLÍCITOS (CORREÇÃO PRINCIPAL)
+        query = db.query(Reservation).join(
+            Guest, Reservation.guest_id == Guest.id
+        ).join(
+            Property, Reservation.property_id == Property.id  
+        ).options(
+            joinedload(Reservation.guest),
+            joinedload(Reservation.property_obj),
+            selectinload(Reservation.reservation_rooms)
+                .joinedload(ReservationRoom.room)
+                .joinedload(Room.room_type)
+        ).filter(
+            Reservation.tenant_id == current_user.tenant_id,
+            Reservation.is_active == True
         )
-    
-    # Filtros de data
-    if check_in_from:
-        query = query.filter(Reservation.check_in_date >= check_in_from)
-    
-    if check_in_to:
-        query = query.filter(Reservation.check_in_date <= check_in_to)
-    
-    if check_out_from:
-        query = query.filter(Reservation.check_out_date >= check_out_from)
-    
-    if check_out_to:
-        query = query.filter(Reservation.check_out_date <= check_out_to)
         
-    if created_from:
-        query = query.filter(Reservation.created_date >= created_from)
+        # ===== APLICAR FILTROS BÁSICOS =====
         
-    if created_to:
-        query = query.filter(Reservation.created_date <= created_to)
-    
-    # Filtros financeiros
-    if min_amount is not None:
-        query = query.filter(Reservation.total_amount >= Decimal(str(min_amount)))
-    
-    if max_amount is not None:
-        query = query.filter(Reservation.total_amount <= Decimal(str(max_amount)))
-    
-    if is_paid is not None:
-        if is_paid:
-            query = query.filter(Reservation.paid_amount >= Reservation.total_amount)
-        else:
-            query = query.filter(Reservation.paid_amount < Reservation.total_amount)
-    
-    if requires_deposit is not None:
-        query = query.filter(Reservation.requires_deposit == requires_deposit)
-    
-    if is_group_reservation is not None:
-        query = query.filter(Reservation.is_group_reservation == is_group_reservation)
+        if status:
+            query = query.filter(Reservation.status == status)
         
-    # ===== FILTROS EXPANDIDOS =====
-    
-    # Filtros do hóspede expandidos - SEM JOIN CONDICIONAL
-    if guest_email:
-        query = query.filter(Guest.email.ilike(f"%{guest_email}%"))
+        if source:
+            query = query.filter(Reservation.source == source)
         
-    if guest_phone:
-        query = query.filter(Guest.phone.ilike(f"%{guest_phone}%"))
+        if property_id:
+            query = query.filter(Reservation.property_id == property_id)
         
-    if guest_document_type:
-        query = query.filter(Guest.document_type == guest_document_type)
+        if guest_id:
+            query = query.filter(Reservation.guest_id == guest_id)
         
-    if guest_nationality:
-        query = query.filter(Guest.nationality == guest_nationality)
+        # 🎯 BUSCA TEXTUAL CORRIGIDA - COM JOIN EXPLÍCITO
+        if search and search.strip():
+            search_term = f"%{search.strip()}%"
+            query = query.filter(
+                or_(
+                    Guest.first_name.ilike(search_term),
+                    Guest.last_name.ilike(search_term),
+                    func.concat(Guest.first_name, ' ', Guest.last_name).ilike(search_term),
+                    Guest.email.ilike(search_term),
+                    Reservation.reservation_number.ilike(search_term)
+                )
+            )
         
-    if guest_city:
-        query = query.filter(Guest.city.ilike(f"%{guest_city}%"))
+        # ===== FILTROS DE DATA =====
         
-    if guest_state:
-        query = query.filter(Guest.state == guest_state)
+        if check_in_from:
+            query = query.filter(Reservation.check_in_date >= check_in_from)
         
-    if guest_country:
-        query = query.filter(Guest.country == guest_country)
-    
-    # Filtros de data expandidos
-    if cancelled_from:
-        query = query.filter(Reservation.cancelled_date >= cancelled_from)
+        if check_in_to:
+            query = query.filter(Reservation.check_in_date <= check_in_to)
         
-    if cancelled_to:
-        query = query.filter(Reservation.cancelled_date <= cancelled_to)
+        if check_out_from:
+            query = query.filter(Reservation.check_out_date >= check_out_from)
         
-    if confirmed_from:
-        query = query.filter(Reservation.confirmed_date >= confirmed_from)
+        if check_out_to:
+            query = query.filter(Reservation.check_out_date <= check_out_to)
         
-    if confirmed_to:
-        query = query.filter(Reservation.confirmed_date <= confirmed_to)
+        # 🔧 CORREÇÃO: Tratamento flexível de created_from/to (date ou datetime)
+        if created_from:
+            try:
+                if 'T' in created_from:
+                    # É datetime completo
+                    start_datetime = datetime.fromisoformat(created_from.replace('Z', '+00:00'))
+                else:
+                    # É apenas date, converter para início do dia
+                    date_obj = datetime.strptime(created_from, '%Y-%m-%d').date()
+                    start_datetime = datetime.combine(date_obj, datetime.min.time())
+                query = query.filter(Reservation.created_date >= start_datetime)
+            except (ValueError, TypeError):
+                logger.warning(f"Formato de data inválido para created_from: {created_from}")
+                
+        if created_to:
+            try:
+                if 'T' in created_to:
+                    # É datetime completo
+                    end_datetime = datetime.fromisoformat(created_to.replace('Z', '+00:00'))
+                else:
+                    # É apenas date, converter para final do dia
+                    date_obj = datetime.strptime(created_to, '%Y-%m-%d').date()
+                    end_datetime = datetime.combine(date_obj, datetime.max.time())
+                query = query.filter(Reservation.created_date <= end_datetime)
+            except (ValueError, TypeError):
+                logger.warning(f"Formato de data inválido para created_to: {created_to}")
         
-    if actual_checkin_from:
-        query = query.filter(Reservation.checked_in_date >= actual_checkin_from)
+        # ===== FILTROS DO HÓSPEDE =====
         
-    if actual_checkin_to:
-        query = query.filter(Reservation.checked_in_date <= actual_checkin_to)
-        
-    if actual_checkout_from:
-        query = query.filter(Reservation.checked_out_date >= actual_checkout_from)
-        
-    if actual_checkout_to:
-        query = query.filter(Reservation.checked_out_date <= actual_checkout_to)
-    
-    # Filtros de hóspedes e noites
-    if min_guests:
-        query = query.filter(Reservation.total_guests >= min_guests)
-        
-    if max_guests:
-        query = query.filter(Reservation.total_guests <= max_guests)
-        
-    if min_nights:
-        query = query.filter(func.date_part('day', Reservation.check_out_date - Reservation.check_in_date) >= min_nights)
-        
-    if max_nights:
-        query = query.filter(func.date_part('day', Reservation.check_out_date - Reservation.check_in_date) <= max_nights)
-    
-    # Filtros especiais
-    if has_special_requests is not None:
-        if has_special_requests:
-            query = query.filter(Reservation.guest_requests.isnot(None))
-            query = query.filter(Reservation.guest_requests != '')
-        else:
-            query = query.filter(or_(
-                Reservation.guest_requests.is_(None),
-                Reservation.guest_requests == ''
-            ))
+        if guest_email:
+            query = query.filter(Guest.email.ilike(f"%{guest_email}%"))
             
-    if has_internal_notes is not None:
-        if has_internal_notes:
-            query = query.filter(Reservation.internal_notes.isnot(None))
-            query = query.filter(Reservation.internal_notes != '')
-        else:
-            query = query.filter(or_(
-                Reservation.internal_notes.is_(None),
-                Reservation.internal_notes == ''
-            ))
+        if guest_phone:
+            query = query.filter(Guest.phone.ilike(f"%{guest_phone}%"))
             
-    if deposit_paid is not None:
-        query = query.filter(Reservation.deposit_paid == deposit_paid)
-    
-    # Contar total antes da paginação
-    total = query.count()
-    
-    # Ordenação (mais recente primeiro)
-    query = query.order_by(desc(Reservation.created_date))
-    
-    # Aplicar paginação
-    reservations = query.offset(skip).limit(per_page).all()
-    
-    # ✅ CONVERTER PARA RESPONSE POPULANDO OS CAMPOS RELACIONADOS OBRIGATORIAMENTE
-    reservations_response = []
-    
-    for reservation in reservations:
-        # Base response
-        reservation_data = ReservationResponse.model_validate(reservation)
-        
-        # ✅ POPULAR CAMPOS RELACIONADOS SEMPRE - HÓSPEDE
-        if reservation.guest:
-            reservation_data.guest_name = reservation.guest.full_name
-            reservation_data.guest_email = reservation.guest.email
-        else:
-            reservation_data.guest_name = "Hóspede não encontrado"
-            reservation_data.guest_email = None
-        
-        # ✅ POPULAR CAMPOS RELACIONADOS SEMPRE - PROPRIEDADE
-        if reservation.property_obj:
-            reservation_data.property_name = reservation.property_obj.name
-        else:
-            reservation_data.property_name = "Propriedade não encontrada"
-        
-        # ✅ NOVA CORREÇÃO: POPULAR CAMPOS DOS QUARTOS SEMPRE
-        if reservation.reservation_rooms and include_room_details:
-            from app.schemas.reservation import ReservationRoomResponse
-            rooms_data = []
+        if guest_document_type:
+            query = query.filter(Guest.document_type == guest_document_type)
             
-            for room in reservation.reservation_rooms:
-                if room.room:  # Só processar se o quarto existir
-                    room_response = ReservationRoomResponse(
-                        id=room.id,
-                        reservation_id=room.reservation_id,
-                        room_id=room.room_id,
-                        check_in_date=room.check_in_date.isoformat() if room.check_in_date else None,
-                        check_out_date=room.check_out_date.isoformat() if room.check_out_date else None,
-                        rate_per_night=float(room.rate_per_night) if room.rate_per_night else None,
-                        total_amount=float(room.total_amount) if room.total_amount else None,
-                        status=room.status,
-                        notes=room.notes,
-                        room_number=room.room.room_number,  # ✅ CAMPO OBRIGATÓRIO PARA EXIBIÇÃO
-                        room_name=room.room.name,           # ✅ CAMPO OBRIGATÓRIO PARA EXIBIÇÃO  
-                        room_type_name=room.room.room_type.name if room.room.room_type else None,  # ✅ TIPO DO QUARTO
+        if guest_nationality:
+            query = query.filter(Guest.nationality == guest_nationality)
+            
+        if guest_city:
+            query = query.filter(Guest.city.ilike(f"%{guest_city}%"))
+            
+        if guest_state:
+            query = query.filter(Guest.state == guest_state)
+            
+        if guest_country:
+            query = query.filter(Guest.country == guest_country)
+        
+        # ===== FILTROS DE DATA EXPANDIDOS =====
+        
+        if cancelled_from:
+            query = query.filter(func.date(Reservation.cancelled_date) >= cancelled_from)
+            
+        if cancelled_to:
+            query = query.filter(func.date(Reservation.cancelled_date) <= cancelled_to)
+            
+        if confirmed_from:
+            query = query.filter(Reservation.confirmed_date >= confirmed_from)
+            
+        if confirmed_to:
+            query = query.filter(Reservation.confirmed_date <= confirmed_to)
+            
+        if actual_checkin_from:
+            query = query.filter(Reservation.checked_in_date >= actual_checkin_from)
+            
+        if actual_checkin_to:
+            query = query.filter(Reservation.checked_in_date <= actual_checkin_to)
+            
+        if actual_checkout_from:
+            query = query.filter(Reservation.checked_out_date >= actual_checkout_from)
+            
+        if actual_checkout_to:
+            query = query.filter(Reservation.checked_out_date <= actual_checkout_to)
+        
+        # ===== FILTROS NUMÉRICOS =====
+        
+        if min_amount is not None:
+            query = query.filter(Reservation.total_amount >= Decimal(str(min_amount)))
+        
+        if max_amount is not None:
+            query = query.filter(Reservation.total_amount <= Decimal(str(max_amount)))
+        
+        if min_guests:
+            query = query.filter(Reservation.total_guests >= min_guests)
+            
+        if max_guests:
+            query = query.filter(Reservation.total_guests <= max_guests)
+            
+        if min_nights:
+            query = query.filter(func.date_part('day', Reservation.check_out_date - Reservation.check_in_date) >= min_nights)
+            
+        if max_nights:
+            query = query.filter(func.date_part('day', Reservation.check_out_date - Reservation.check_in_date) <= max_nights)
+        
+        # ===== FILTROS BOOLEAN =====
+        
+        if is_paid is not None:
+            if is_paid:
+                query = query.filter(Reservation.paid_amount >= Reservation.total_amount)
+            else:
+                query = query.filter(Reservation.paid_amount < Reservation.total_amount)
+        
+        if requires_deposit is not None:
+            query = query.filter(Reservation.requires_deposit == requires_deposit)
+        
+        if is_group_reservation is not None:
+            query = query.filter(Reservation.is_group_reservation == is_group_reservation)
+            
+        if deposit_paid is not None:
+            query = query.filter(Reservation.deposit_paid == deposit_paid)
+        
+        # ===== FILTROS ESPECIAIS =====
+        
+        if has_special_requests is not None:
+            if has_special_requests:
+                query = query.filter(
+                    and_(
+                        Reservation.guest_requests.isnot(None),
+                        Reservation.guest_requests != ''
                     )
-                    rooms_data.append(room_response)
-            
-            reservation_data.rooms = rooms_data
-        else:
-            reservation_data.rooms = []
+                )
+            else:
+                query = query.filter(
+                    or_(
+                        Reservation.guest_requests.is_(None),
+                        Reservation.guest_requests == ''
+                    )
+                )
+                
+        if has_internal_notes is not None:
+            if has_internal_notes:
+                query = query.filter(
+                    and_(
+                        Reservation.internal_notes.isnot(None),
+                        Reservation.internal_notes != ''
+                    )
+                )
+            else:
+                query = query.filter(
+                    or_(
+                        Reservation.internal_notes.is_(None),
+                        Reservation.internal_notes == ''
+                    )
+                )
         
-        reservations_response.append(reservation_data)
-    
-    # Calcular páginas
-    total_pages = math.ceil(total / per_page) if total > 0 else 0
-    
-    # ✅ SEMPRE RETORNAR COM DADOS POPULADOS - NÃO REDIRECIONAR
-    return ReservationListResponse(
-        reservations=reservations_response,
-        total=total,
-        page=page,
-        pages=total_pages,
-        per_page=per_page
-    )
+        # ===== EXECUTAR QUERY =====
+        
+        # Contar total antes da paginação
+        total = query.count()
+        
+        # Ordenação (mais recente primeiro)
+        query = query.order_by(desc(Reservation.created_date))
+        
+        # Aplicar paginação
+        reservations = query.offset(skip).limit(per_page).all()
+        
+        # ===== CONVERTER PARA RESPONSE =====
+        
+        reservations_response = []
+        
+        for reservation in reservations:
+            # Criar response básico
+            reservation_dict = {
+                'id': reservation.id,
+                'reservation_number': reservation.reservation_number,
+                'property_id': reservation.property_id,
+                'guest_id': reservation.guest_id,
+                'check_in_date': reservation.check_in_date,
+                'check_out_date': reservation.check_out_date,
+                'status': reservation.status,
+                'adults': reservation.adults,
+                'children': reservation.children,
+                'total_guests': reservation.total_guests,
+                'room_rate': reservation.room_rate,
+                'total_amount': reservation.total_amount,
+                'paid_amount': reservation.paid_amount,
+                'discount': reservation.discount,
+                'taxes': reservation.taxes,
+                'source': reservation.source,
+                'source_reference': reservation.source_reference,
+                'created_date': reservation.created_date,
+                'confirmed_date': reservation.confirmed_date,
+                'checked_in_date': reservation.checked_in_date,
+                'checked_out_date': reservation.checked_out_date,
+                'cancelled_date': reservation.cancelled_date,
+                'guest_requests': reservation.guest_requests,
+                'internal_notes': reservation.internal_notes,
+                'cancellation_reason': reservation.cancellation_reason,
+                'preferences': reservation.preferences,
+                'extra_data': reservation.extra_data,
+                'is_group_reservation': reservation.is_group_reservation,
+                'requires_deposit': reservation.requires_deposit,
+                'deposit_paid': reservation.deposit_paid,
+                'tenant_id': reservation.tenant_id,
+                'created_at': reservation.created_at,
+                'updated_at': reservation.updated_at,
+                'is_active': reservation.is_active,
+            }
+            
+            # ✅ CAMPOS COMPUTADOS - HÓSPEDE
+            if reservation.guest:
+                reservation_dict['guest_name'] = f"{reservation.guest.first_name} {reservation.guest.last_name}".strip()
+                reservation_dict['guest_email'] = reservation.guest.email
+            else:
+                reservation_dict['guest_name'] = "Hóspede não encontrado"
+                reservation_dict['guest_email'] = None
+            
+            # ✅ CAMPOS COMPUTADOS - PROPRIEDADE
+            if reservation.property_obj:
+                reservation_dict['property_name'] = reservation.property_obj.name
+            else:
+                reservation_dict['property_name'] = "Propriedade não encontrada"
+            
+            # ✅ CAMPOS COMPUTADOS - PAGAMENTO
+            total_amount = float(reservation.total_amount) if reservation.total_amount else 0
+            paid_amount = float(reservation.paid_amount) if reservation.paid_amount else 0
+            
+            reservation_dict['is_paid'] = paid_amount >= total_amount if total_amount > 0 else True
+            reservation_dict['balance'] = max(0, total_amount - paid_amount)
+            
+            # ✅ CAMPOS COMPUTADOS - NOITES
+            if reservation.check_in_date and reservation.check_out_date:
+                reservation_dict['nights'] = (reservation.check_out_date - reservation.check_in_date).days
+            else:
+                reservation_dict['nights'] = 0
+            
+            # ✅ CAMPOS COMPUTADOS - QUARTOS
+            if include_room_details and reservation.reservation_rooms:
+                rooms_data = []
+                for room_reservation in reservation.reservation_rooms:
+                    if room_reservation.room:  # Verificar se o quarto existe
+                        room_data = {
+                            'id': room_reservation.room_id,
+                            'room_number': room_reservation.room.room_number,
+                            'room_type_name': room_reservation.room.room_type.name if room_reservation.room.room_type else None,
+                            'rate_amount': float(room_reservation.rate_amount) if hasattr(room_reservation, 'rate_amount') and room_reservation.rate_amount else 0,
+                            'guests': room_reservation.guests if hasattr(room_reservation, 'guests') else 1
+                        }
+                        rooms_data.append(room_data)
+                
+                reservation_dict['rooms'] = rooms_data
+            else:
+                reservation_dict['rooms'] = []
+            
+            # Criar objeto de resposta
+            reservation_response = ReservationResponse(**reservation_dict)
+            reservations_response.append(reservation_response)
+        
+        # Calcular páginas
+        total_pages = math.ceil(total / per_page) if total > 0 else 0
+        
+        return ReservationListResponse(
+            reservations=reservations_response,
+            total=total,
+            page=page,
+            pages=total_pages,
+            per_page=per_page
+        )
+        
+    except Exception as e:
+        logger.error(f"Erro ao listar reservas: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno do servidor: {str(e)}"
+        )
 
 
 # ===== AÇÕES DAS RESERVAS - VERSÕES EXPANDIDAS =====
