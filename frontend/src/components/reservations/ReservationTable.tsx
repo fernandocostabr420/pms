@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -186,6 +186,61 @@ const getQuickActions = (reservation: ReservationResponseWithGuestDetails) => {
   return actions;
 };
 
+// Função para comparar valores na ordenação
+const compareValues = (a: any, b: any, direction: 'asc' | 'desc') => {
+  // Converter valores vazios/nulos para string vazia para ordenação consistente
+  const valueA = a === null || a === undefined ? '' : a;
+  const valueB = b === null || b === undefined ? '' : b;
+  
+  // Se forem números
+  if (typeof valueA === 'number' && typeof valueB === 'number') {
+    return direction === 'asc' ? valueA - valueB : valueB - valueA;
+  }
+  
+  // Se forem datas
+  if (valueA instanceof Date && valueB instanceof Date) {
+    return direction === 'asc' ? valueA.getTime() - valueB.getTime() : valueB.getTime() - valueA.getTime();
+  }
+  
+  // Para strings (incluindo datas em string)
+  const stringA = String(valueA).toLowerCase();
+  const stringB = String(valueB).toLowerCase();
+  
+  if (direction === 'asc') {
+    return stringA.localeCompare(stringB);
+  } else {
+    return stringB.localeCompare(stringA);
+  }
+};
+
+// Função para extrair o valor correto para ordenação
+const getSortValue = (reservation: ReservationResponseWithGuestDetails, key: string) => {
+  switch (key) {
+    case 'id':
+      return reservation.id;
+    case 'guest_name':
+      return reservation.guest_name || '';
+    case 'check_in_date':
+      return new Date(reservation.check_in_date);
+    case 'check_out_date':
+      return new Date(reservation.check_out_date);
+    case 'total_guests':
+      return reservation.total_guests;
+    case 'property_name':
+      return reservation.property_name || '';
+    case 'status':
+      return reservation.status || '';
+    case 'created_date':
+      return new Date(reservation.created_date);
+    case 'source':
+      return reservation.source || '';
+    case 'total_amount':
+      return reservation.total_amount || 0;
+    default:
+      return '';
+  }
+};
+
 export default function ReservationTable({
   reservations,
   loading = false,
@@ -195,6 +250,17 @@ export default function ReservationTable({
   actionLoading = {},
 }: ReservationTableProps) {
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'id', direction: 'desc' });
+
+  // Ordenar reservas baseado na configuração atual
+  const sortedReservations = useMemo(() => {
+    if (!reservations || reservations.length === 0) return [];
+    
+    return [...reservations].sort((a, b) => {
+      const valueA = getSortValue(a, sortConfig.key);
+      const valueB = getSortValue(b, sortConfig.key);
+      return compareValues(valueA, valueB, sortConfig.direction);
+    });
+  }, [reservations, sortConfig]);
 
   const handleSort = (key: string) => {
     if (sortConfig.key === key) {
@@ -238,7 +304,7 @@ export default function ReservationTable({
     );
   }
 
-  if (!reservations?.length) {
+  if (!sortedReservations?.length) {
     return (
       <div className="bg-white border rounded-lg shadow-sm p-8">
         <div className="text-center text-gray-500">
@@ -303,101 +369,94 @@ export default function ReservationTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {reservations.map((reservation) => {
+            {sortedReservations.map((reservation) => {
               const nights = calculateNights(reservation.check_in_date, reservation.check_out_date);
               const rooms = formatRooms(reservation.rooms);
               const status = statusConfig[reservation.status as keyof typeof statusConfig] || 
                            { label: reservation.status, color: 'bg-gray-100 text-gray-800' };
               const source = sourceConfig[reservation.source as keyof typeof sourceConfig];
               const quickActions = getQuickActions(reservation);
-              const isActionLoading = actionLoading[reservation.id];
-
+              
               return (
-                <TableRow key={reservation.id} className="hover:bg-gray-50/50">
+                <TableRow 
+                  key={reservation.id} 
+                  className="hover:bg-gray-50/50 transition-colors"
+                >
                   {/* ID */}
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-1">
-                      <Hash className="h-3 w-3 text-gray-400" />
-                      <span>{reservation.id}</span>
+                  <TableCell className="font-mono text-sm text-gray-600">
+                    <div className="flex items-center">
+                      <Hash className="h-3 w-3 mr-1 text-gray-400" />
+                      {reservation.id}
                     </div>
                   </TableCell>
 
                   {/* Hóspede */}
                   <TableCell>
-                    <div className="flex flex-col">
-                      <span className="font-medium text-gray-900">
-                        {reservation.guest_name || 'N/A'}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        #{reservation.reservation_number}
-                      </span>
+                    <div className="font-medium text-gray-900">
+                      {reservation.guest_name || 'N/A'}
                     </div>
+                    {reservation.guest_email && (
+                      <div className="text-sm text-gray-500 truncate max-w-[200px]">
+                        {reservation.guest_email}
+                      </div>
+                    )}
                   </TableCell>
 
                   {/* Contato */}
                   <TableCell>
                     <div className="flex flex-col space-y-1">
-                      {reservation.guest_email && (
-                        <div className="flex items-center gap-1 text-sm text-gray-600">
-                          <Mail className="h-3 w-3" />
-                          <span className="truncate max-w-32">
-                            {reservation.guest_email}
-                          </span>
-                        </div>
-                      )}
                       {reservation.guest_phone && (
-                        <div className="flex items-center gap-1 text-sm text-gray-600">
-                          <Phone className="h-3 w-3" />
-                          <span>{reservation.guest_phone}</span>
+                        <div className="flex items-center text-sm text-gray-600">
+                          <Phone className="h-3 w-3 mr-1" />
+                          {reservation.guest_phone}
+                        </div>
+                      )}
+                      {reservation.guest_email && (
+                        <div className="flex items-center text-sm text-gray-600">
+                          <Mail className="h-3 w-3 mr-1" />
+                          <span className="truncate max-w-[150px]">{reservation.guest_email}</span>
                         </div>
                       )}
                     </div>
                   </TableCell>
 
-                  {/* Check In */}
+                  {/* Check-in */}
                   <TableCell>
-                    <div className="flex flex-col">
-                      <div className="flex items-center gap-1 text-sm font-medium">
-                        <CalendarCheck className="h-3 w-3 text-green-600" />
-                        <span>{formatShortDate(reservation.check_in_date)}</span>
-                      </div>
-                      <span className="text-xs text-gray-500">
-                        {format(new Date(reservation.check_in_date), 'EEEE', { locale: ptBR })}
-                      </span>
-                    </div>
-                  </TableCell>
-
-                  {/* Check Out */}
-                  <TableCell>
-                    <div className="flex flex-col">
-                      <div className="flex items-center gap-1 text-sm font-medium">
-                        <CalendarX className="h-3 w-3 text-red-600" />
-                        <span>{formatShortDate(reservation.check_out_date)}</span>
-                      </div>
-                      <div className="flex items-center gap-1 text-xs text-gray-500">
-                        <span>{nights} {nights === 1 ? 'noite' : 'noites'}</span>
+                    <div className="flex items-center text-sm">
+                      <CalendarCheck className="h-4 w-4 mr-2 text-green-600" />
+                      <div>
+                        <div className="font-medium">{formatDate(reservation.check_in_date)}</div>
+                        <div className="text-xs text-gray-500">{formatShortDate(reservation.check_in_date)}</div>
                       </div>
                     </div>
                   </TableCell>
 
-                  {/* Hóspedes */}
+                  {/* Check-out */}
+                  <TableCell>
+                    <div className="flex items-center text-sm">
+                      <CalendarX className="h-4 w-4 mr-2 text-red-600" />
+                      <div>
+                        <div className="font-medium">{formatDate(reservation.check_out_date)}</div>
+                        <div className="text-xs text-gray-500">
+                          {nights} {nights === 1 ? 'noite' : 'noites'}
+                        </div>
+                      </div>
+                    </div>
+                  </TableCell>
+
+                  {/* Número de hóspedes */}
                   <TableCell className="text-center">
-                    <div className="flex flex-col items-center">
-                      <div className="flex items-center gap-1">
-                        <Users className="h-3 w-3 text-gray-400" />
-                        <span className="font-medium">{reservation.total_guests}</span>
-                      </div>
-                      <span className="text-xs text-gray-500">
-                        {reservation.adults}A + {reservation.children}C
-                      </span>
+                    <div className="flex items-center justify-center">
+                      <Users className="h-4 w-4 mr-1 text-gray-500" />
+                      <span className="font-medium">{reservation.total_guests}</span>
                     </div>
                   </TableCell>
 
                   {/* Propriedade */}
                   <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Building className="h-3 w-3 text-gray-400" />
-                      <span className="truncate max-w-32">
+                    <div className="flex items-center">
+                      <Building className="h-4 w-4 mr-2 text-gray-500" />
+                      <span className="font-medium truncate max-w-[150px]">
                         {reservation.property_name || 'N/A'}
                       </span>
                     </div>
@@ -405,138 +464,134 @@ export default function ReservationTable({
 
                   {/* Quartos */}
                   <TableCell>
-                    <div className="flex items-center gap-1">
-                      <BedDouble className="h-3 w-3 text-gray-400" />
-                      <span className="truncate max-w-32" title={rooms.display}>
-                        {rooms.display}
-                      </span>
+                    <div className="flex items-center">
+                      <BedDouble className="h-4 w-4 mr-2 text-gray-500" />
+                      <div className="text-sm">
+                        <div className="font-medium">{rooms.display}</div>
+                        {rooms.count > 1 && (
+                          <div className="text-xs text-gray-500">{rooms.count} quartos</div>
+                        )}
+                      </div>
                     </div>
                   </TableCell>
 
                   {/* Status */}
                   <TableCell>
-                    <Badge
-                      variant="outline"
-                      className={cn('text-xs', status.color)}
+                    <Badge 
+                      variant="secondary" 
+                      className={cn("text-xs font-medium border", status.color)}
                     >
                       {status.label}
                     </Badge>
                   </TableCell>
 
-                  {/* Data Criação */}
+                  {/* Data de criação */}
                   <TableCell>
-                    <div className="text-sm">
-                      {formatShortDate(reservation.created_date)}
+                    <div className="text-sm text-gray-600">
+                      {formatDate(reservation.created_date)}
                     </div>
                   </TableCell>
 
-                  {/* Origem */}
+                  {/* Origem/Canal */}
                   <TableCell>
-                    <div className="flex items-center gap-1">
-                      {source ? (
-                        <>
-                          <source.icon className="h-3 w-3" />
-                          <Badge
-                            variant="outline"
-                            className={cn('text-xs', source.color)}
-                          >
-                            {source.label}
-                          </Badge>
-                        </>
-                      ) : (
-                        <span className="text-xs text-gray-500 capitalize">
-                          {reservation.source || 'N/A'}
-                        </span>
-                      )}
+                    {source ? (
+                      <div className="flex items-center">
+                        <source.icon className="h-4 w-4 mr-2 text-gray-500" />
+                        <Badge 
+                          variant="secondary" 
+                          className={cn("text-xs font-medium border", source.color)}
+                        >
+                          {source.label}
+                        </Badge>
+                      </div>
+                    ) : (
+                      <Badge 
+                        variant="secondary" 
+                        className="text-xs font-medium bg-gray-100 text-gray-800"
+                      >
+                        {reservation.source || 'N/A'}
+                      </Badge>
+                    )}
+                  </TableCell>
+
+                  {/* Valor total */}
+                  <TableCell>
+                    <div className="flex items-center font-medium">
+                      <DollarSign className="h-4 w-4 mr-1 text-green-600" />
+                      {formatCurrency(reservation.total_amount || 0)}
                     </div>
                   </TableCell>
 
-                  {/* Valor */}
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <DollarSign className="h-3 w-3 text-gray-400" />
-                      <span className="font-medium">
-                        {formatCurrency(reservation.total_amount)}
-                      </span>
-                    </div>
-                  </TableCell>
-
-                  {/* Pagamento */}
+                  {/* Status do pagamento */}
                   <TableCell>
                     <div className="flex flex-col space-y-1">
-                      <div className="flex items-center gap-1">
-                        <CreditCard className="h-3 w-3 text-gray-400" />
-                        <span className="text-sm font-medium text-green-600">
-                          {formatCurrency(reservation.paid_amount || 0)}
-                        </span>
-                      </div>
-                      {(reservation.total_amount - (reservation.paid_amount || 0)) > 0 && (
-                        <div className="text-xs text-red-600">
-                          Saldo: {formatCurrency(reservation.total_amount - (reservation.paid_amount || 0))}
-                        </div>
+                      {reservation.is_paid ? (
+                        <Badge className="text-xs bg-green-100 text-green-800 border-green-200">
+                          <CreditCard className="h-3 w-3 mr-1" />
+                          Pago
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="text-xs bg-yellow-100 text-yellow-800 border-yellow-200">
+                          <CreditCard className="h-3 w-3 mr-1" />
+                          Pendente
+                        </Badge>
+                      )}
+                      {reservation.requires_deposit && (
+                        <div className="text-xs text-gray-500">Requer depósito</div>
                       )}
                     </div>
                   </TableCell>
 
                   {/* Ações */}
                   <TableCell>
-                    <div className="flex items-center gap-1">
-                      {onView && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
                           className="h-8 w-8 p-0"
-                          onClick={() => onView(reservation)}
-                          title="Ver detalhes"
+                          disabled={actionLoading[reservation.id] !== undefined}
                         >
-                          <Eye className="h-4 w-4" />
+                          {actionLoading[reservation.id] ? (
+                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                          ) : (
+                            <MoreHorizontal className="h-4 w-4" />
+                          )}
                         </Button>
-                      )}
-                      
-                      {(onEdit || (onQuickAction && quickActions.length > 0)) && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              disabled={!!isActionLoading}
-                            >
-                              {isActionLoading ? (
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                              ) : (
-                                <MoreHorizontal className="h-4 w-4" />
-                              )}
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-48">
-                            {onEdit && (
-                              <DropdownMenuItem onClick={() => onEdit(reservation)}>
-                                <Edit className="mr-2 h-4 w-4" />
-                                Editar
-                              </DropdownMenuItem>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48">
+                        <DropdownMenuItem
+                          onClick={() => onView?.(reservation)}
+                          className="cursor-pointer"
+                        >
+                          <Eye className="h-4 w-4 mr-2" />
+                          Ver detalhes
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => onEdit?.(reservation)}
+                          className="cursor-pointer"
+                        >
+                          <Edit className="h-4 w-4 mr-2" />
+                          Editar
+                        </DropdownMenuItem>
+                        
+                        {/* Ações rápidas baseadas no status */}
+                        {quickActions.map((action) => (
+                          <DropdownMenuItem
+                            key={action.key}
+                            onClick={() => onQuickAction?.(reservation, action.key)}
+                            className={cn(
+                              "cursor-pointer",
+                              action.variant === 'destructive' && "text-red-600 focus:text-red-600"
                             )}
-                            
-                            {onQuickAction && quickActions.map((action) => {
-                              const IconComponent = action.icon;
-                              return (
-                                <DropdownMenuItem
-                                  key={action.key}
-                                  onClick={() => onQuickAction(reservation, action.key)}
-                                  className={cn(
-                                    action.variant === 'destructive' && 'text-red-600 focus:text-red-600'
-                                  )}
-                                  disabled={action.disabled || !!isActionLoading}
-                                >
-                                  <IconComponent className="mr-2 h-4 w-4" />
-                                  {action.label}
-                                </DropdownMenuItem>
-                              );
-                            })}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      )}
-                    </div>
+                            disabled={action.disabled}
+                          >
+                            <action.icon className="h-4 w-4 mr-2" />
+                            {action.label}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </TableCell>
                 </TableRow>
               );
