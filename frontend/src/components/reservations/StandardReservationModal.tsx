@@ -249,11 +249,11 @@ export default function StandardReservationModal({
       defaultGuestMode: 'new' as const
     },
     map: {
-      title: 'Reserva Rápida',
-      allowGuestSelection: false, // Sempre cria novo hóspede
-      allowMultipleRooms: false,  // Apenas 1 quarto
-      showAdvancedFields: false,
-      defaultGuestMode: 'new' as const
+      title: 'Nova Reserva',
+      allowGuestSelection: true,    // ✅ MODIFICAÇÃO: Permite escolher hóspede
+      allowMultipleRooms: false,   // Apenas 1 quarto
+      showAdvancedFields: false,   // Campos básicos
+      defaultGuestMode: 'existing' as const  // ✅ MODIFICAÇÃO: Padrão para hóspede existente
     }
   };
 
@@ -310,24 +310,80 @@ export default function StandardReservationModal({
     }
   }, [checkInDate, checkOutDate, selectedProperty, watchedAdults, watchedChildren]);
 
+  // ===== FUNÇÕES DE CÁLCULO DE PREÇOS =====
+  
+  const handleTotalAmountChange = (value: string) => {
+    const numValue = parseFloat(value) || 0;
+    setValue('total_amount', numValue);
+    
+    // Calcular taxa por noite automaticamente
+    if (numValue > 0) {
+      const nights = calculateNights();
+      const numRooms = watchedRooms.length;
+      
+      if (nights > 0 && numRooms > 0) {
+        const ratePerNight = numValue / (nights * numRooms);
+        setValue('room_rate_override', Math.round(ratePerNight * 100) / 100);
+      }
+    } else {
+      setValue('room_rate_override', undefined);
+    }
+  };
+
+  const handleRoomRateChange = (value: string) => {
+    const numValue = parseFloat(value) || 0;
+    setValue('room_rate_override', numValue);
+    
+    // Calcular valor total automaticamente
+    if (numValue > 0) {
+      const nights = calculateNights();
+      const numRooms = watchedRooms.length;
+      
+      if (nights > 0 && numRooms > 0) {
+        const totalAmount = numValue * nights * numRooms;
+        setValue('total_amount', Math.round(totalAmount * 100) / 100);
+      }
+    } else {
+      setValue('total_amount', undefined);
+    }
+  };
+
   // ===== FUNÇÕES =====
 
   const loadInitialData = async () => {
     try {
+      // ✅ CORREÇÃO: Sempre carregar hóspedes no modo mapa ou quando permitido
+      const shouldLoadGuests = config.allowGuestSelection || mode === 'map';
+      
       const [propertiesRes, guestsRes] = await Promise.all([
         apiClient.getProperties({ per_page: 100 }),
-        config.allowGuestSelection ? apiClient.getGuests({ per_page: 100 }) : Promise.resolve({ guests: [] }),
+        shouldLoadGuests ? apiClient.getGuests({ per_page: 100 }) : Promise.resolve({ guests: [] }),
       ]);
       
       setProperties(propertiesRes.properties || []);
       setGuests(guestsRes.guests || []);
+      
+      // Debug: Log para verificar se os dados foram carregados
+      console.log('Propriedades carregadas:', propertiesRes.properties?.length || 0);
+      console.log('Hóspedes carregados:', guestsRes.guests?.length || 0);
+      console.log('Modo atual:', mode);
+      console.log('Config allowGuestSelection:', config.allowGuestSelection);
+      
     } catch (error) {
-      console.error('Erro ao carregar dados:', error);
+      console.error('Erro ao carregar dados iniciais:', error);
       toast({
         title: "Erro",
-        description: "Erro ao carregar dados iniciais",
+        description: "Erro ao carregar dados iniciais. Tente novamente.",
         variant: "destructive",
       });
+      
+      // Em caso de erro, tentar carregar apenas os dados essenciais
+      try {
+        const propertiesRes = await apiClient.getProperties({ per_page: 100 });
+        setProperties(propertiesRes.properties || []);
+      } catch (fallbackError) {
+        console.error('Erro no fallback:', fallbackError);
+      }
     }
   };
 
@@ -406,11 +462,11 @@ export default function StandardReservationModal({
       });
       
       // ✅ SIMPLIFICADO: Backend já retorna apenas quartos sem conflitos de reserva
-      setAvailableRooms(response.rooms || []);
+      setAvailableRooms(response.available_rooms || []);
       
       // Para modo mapa: verificar se quarto pré-selecionado ainda está disponível
       if (mode === 'map' && prefilledData?.room_id) {
-        const isStillAvailable = response.rooms?.some((room: any) => room.id === prefilledData.room_id);
+        const isStillAvailable = response.available_rooms?.some((room: any) => room.id === prefilledData.room_id);
         if (!isStillAvailable) {
           setValue('selected_rooms', []);
           toast({
@@ -605,35 +661,36 @@ export default function StandardReservationModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="!w-[750px] !max-w-[750px] max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            {mode === 'map' ? <Bed className="h-5 w-5" /> : <CalendarIcon className="h-5 w-5" />}
+          <DialogTitle className="flex items-center gap-2 text-lg mb-4">
+            {mode === 'map' ? <Bed className="h-4 w-4" /> : <CalendarIcon className="h-4 w-4" />}
             {config.title}
             {isEditing && ' - Editar'}
           </DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5 p-3">
           
           {/* Seleção do Hóspede */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-medium flex items-center gap-2">
-              <User className="h-5 w-5" />
+          <div className="space-y-3">
+            <h3 className="text-sm font-medium flex items-center gap-2">
+              <User className="h-4 w-4" />
               Informações do Hóspede
             </h3>
 
-            {config.allowGuestSelection && (
-              <div className="flex gap-4">
+            {/* ✅ MODIFICAÇÃO: Sempre mostrar opções de seleção no modo mapa OU quando permitido */}
+            {(config.allowGuestSelection || mode === 'map') && (
+              <div className="flex gap-6 mb-4 px-2">
                 <div className="flex items-center space-x-2">
                   <input
                     type="radio"
                     id="existing_guest"
                     value="existing"
                     {...register('guest_mode')}
-                    className="rounded border-gray-300"
+                    className="rounded border-gray-300 focus:ring-2 focus:ring-blue-500"
                   />
-                  <Label htmlFor="existing_guest">Hóspede Existente</Label>
+                  <Label htmlFor="existing_guest" className="text-sm">Hóspede Existente</Label>
                 </div>
                 <div className="flex items-center space-x-2">
                   <input
@@ -641,399 +698,381 @@ export default function StandardReservationModal({
                     id="new_guest"
                     value="new"
                     {...register('guest_mode')}
-                    className="rounded border-gray-300"
+                    className="rounded border-gray-300 focus:ring-2 focus:ring-blue-500"
                   />
-                  <Label htmlFor="new_guest">Novo Hóspede</Label>
+                  <Label htmlFor="new_guest" className="text-sm">Novo Hóspede</Label>
                 </div>
               </div>
             )}
 
             {/* Campos baseados no modo do hóspede */}
             {watchedGuestMode === 'existing' ? (
-              <div>
-                <Label htmlFor="guest_id">Hóspede *</Label>
-                <select
-                  value={watch('guest_id')?.toString() || ''}
-                  onChange={(e) => setValue('guest_id', parseInt(e.target.value))}
-                  className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">Selecione o hóspede</option>
-                  {guests.map((guest) => (
-                    <option key={guest.id} value={guest.id.toString()}>
-                      {guest.full_name} {guest.email && `- ${guest.email}`}
-                    </option>
-                  ))}
-                </select>
+              <div className="px-2">
+                <Label htmlFor="guest_id" className="text-sm font-medium">Hóspede *</Label>
+                <div className="mt-1 p-1">
+                  <select
+                    value={watch('guest_id')?.toString() || ''}
+                    onChange={(e) => setValue('guest_id', parseInt(e.target.value))}
+                    className="w-full p-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  >
+                    <option value="">Selecione o hóspede</option>
+                    {guests.map((guest) => (
+                      <option key={guest.id} value={guest.id.toString()}>
+                        {guest.full_name} {guest.email && `- ${guest.email}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 {errors.guest_id && (
-                  <p className="text-sm text-red-600 mt-1">{errors.guest_id.message}</p>
+                  <p className="text-xs text-red-600 mt-1 px-1">{errors.guest_id.message}</p>
                 )}
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-3 gap-4 px-2">
                 <div>
-                  <Label htmlFor="guest_name">Nome do Hóspede *</Label>
-                  <Input
-                    {...register('guest_name')}
-                    placeholder="Nome completo"
-                    disabled={loading}
-                  />
+                  <Label htmlFor="guest_name" className="text-sm font-medium">Nome *</Label>
+                  <div className="mt-1 p-1">
+                    <Input
+                      {...register('guest_name')}
+                      placeholder="Nome completo"
+                      disabled={loading}
+                      className="text-sm h-9 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                    />
+                  </div>
                   {errors.guest_name && (
-                    <p className="text-sm text-red-600 mt-1">{errors.guest_name.message}</p>
+                    <p className="text-xs text-red-600 mt-1 px-1">{errors.guest_name.message}</p>
                   )}
                 </div>
 
                 <div>
-                  <Label htmlFor="guest_email">Email</Label>
-                  <Input
-                    {...register('guest_email')}
-                    type="email"
-                    placeholder="email@exemplo.com"
-                    disabled={loading}
-                  />
+                  <Label htmlFor="guest_email" className="text-sm font-medium">Email</Label>
+                  <div className="mt-1 p-1">
+                    <Input
+                      {...register('guest_email')}
+                      type="email"
+                      placeholder="email@exemplo.com"
+                      disabled={loading}
+                      className="text-sm h-9 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                    />
+                  </div>
                   {errors.guest_email && (
-                    <p className="text-sm text-red-600 mt-1">{errors.guest_email.message}</p>
+                    <p className="text-xs text-red-600 mt-1 px-1">{errors.guest_email.message}</p>
                   )}
                 </div>
 
                 <div>
-                  <Label htmlFor="guest_phone">Telefone</Label>
-                  <Input
-                    {...register('guest_phone')}
-                    placeholder="(11) 99999-9999"
-                    disabled={loading}
-                  />
+                  <Label htmlFor="guest_phone" className="text-sm font-medium">Telefone</Label>
+                  <div className="mt-1 p-1">
+                    <Input
+                      {...register('guest_phone')}
+                      placeholder="(11) 99999-9999"
+                      disabled={loading}
+                      className="text-sm h-9 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                    />
+                  </div>
                 </div>
               </div>
             )}
           </div>
 
           {/* Informações da Reserva */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-medium flex items-center gap-2">
-              <Building className="h-5 w-5" />
+          <div className="space-y-3">
+            <h3 className="text-sm font-medium flex items-center gap-2">
+              <Building className="h-4 w-4" />
               Informações da Reserva
             </h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4 px-2">
               {/* Propriedade */}
               <div>
-                <Label htmlFor="property_id">Propriedade *</Label>
-                <select
-                  value={watch('property_id')?.toString() || ''}
-                  onChange={(e) => {
-                    const value = parseInt(e.target.value);
-                    setValue('property_id', value);
-                    setSelectedProperty(value);
-                  }}
-                  disabled={loading}
-                  className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">Selecione uma propriedade</option>
-                  {properties.map((property) => (
-                    <option key={property.id} value={property.id.toString()}>
-                      {property.name}
-                    </option>
-                  ))}
-                </select>
+                <Label htmlFor="property_id" className="text-sm font-medium">Propriedade *</Label>
+                <div className="mt-1 p-1">
+                  <select
+                    value={watch('property_id')?.toString() || ''}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value);
+                      setValue('property_id', value);
+                      setSelectedProperty(value);
+                    }}
+                    disabled={loading}
+                    className="w-full p-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  >
+                    <option value="">Selecione uma propriedade</option>
+                    {properties.map((property) => (
+                      <option key={property.id} value={property.id.toString()}>
+                        {property.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 {errors.property_id && (
-                  <p className="text-sm text-red-600 mt-1">{errors.property_id.message}</p>
+                  <p className="text-xs text-red-600 mt-1 px-1">{errors.property_id.message}</p>
                 )}
               </div>
 
               {/* Canal de Origem */}
               <div>
-                <Label htmlFor="source">Canal de Origem</Label>
-                <select
-                  value={watch('source') || ''}
-                  onChange={(e) => setValue('source', e.target.value)}
-                  disabled={loading}
-                  className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">Selecione o canal</option>
-                  {sourceOptions.map((source) => (
-                    <option key={source.value} value={source.value}>
-                      {source.label}
-                    </option>
-                  ))}
-                </select>
+                <Label htmlFor="source" className="text-sm font-medium">Canal</Label>
+                <div className="mt-1 p-1">
+                  <select
+                    value={watch('source') || ''}
+                    onChange={(e) => setValue('source', e.target.value)}
+                    disabled={loading}
+                    className="w-full p-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  >
+                    <option value="">Selecione o canal</option>
+                    {sourceOptions.map((source) => (
+                      <option key={source.value} value={source.value}>
+                        {source.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 
-            {/* Datas */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Datas e Hóspedes */}
+            <div className="grid grid-cols-4 gap-4 px-2">
               <div>
-                <Label>Data de Check-in *</Label>
-                <Input
-                  type="date"
-                  value={checkInDate ? format(checkInDate, 'yyyy-MM-dd') : ''}
-                  onChange={(e) => handleDateChange('checkin', e.target.value)}
-                  min={format(new Date(), 'yyyy-MM-dd')}
-                  disabled={loading}
-                />
+                <Label className="text-sm font-medium">Check-in *</Label>
+                <div className="mt-1 p-1">
+                  <Input
+                    type="date"
+                    value={checkInDate ? format(checkInDate, 'yyyy-MM-dd') : ''}
+                    onChange={(e) => handleDateChange('checkin', e.target.value)}
+                    min={format(new Date(), 'yyyy-MM-dd')}
+                    disabled={loading}
+                    className="text-sm h-9 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  />
+                </div>
                 {errors.check_in_date && (
-                  <p className="text-sm text-red-600 mt-1">{errors.check_in_date.message}</p>
+                  <p className="text-xs text-red-600 mt-1 px-1">{errors.check_in_date.message}</p>
                 )}
               </div>
 
               <div>
-                <Label>Data de Check-out *</Label>
-                <Input
-                  type="date"
-                  value={checkOutDate ? format(checkOutDate, 'yyyy-MM-dd') : ''}
-                  onChange={(e) => handleDateChange('checkout', e.target.value)}
-                  min={checkInDate ? format(addDays(checkInDate, 1), 'yyyy-MM-dd') : format(addDays(new Date(), 1), 'yyyy-MM-dd')}
-                  disabled={loading}
-                />
+                <Label className="text-sm font-medium">Check-out *</Label>
+                <div className="mt-1 p-1">
+                  <Input
+                    type="date"
+                    value={checkOutDate ? format(checkOutDate, 'yyyy-MM-dd') : ''}
+                    onChange={(e) => handleDateChange('checkout', e.target.value)}
+                    min={checkInDate ? format(addDays(checkInDate, 1), 'yyyy-MM-dd') : format(addDays(new Date(), 1), 'yyyy-MM-dd')}
+                    disabled={loading}
+                    className="text-sm h-9 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  />
+                </div>
                 {errors.check_out_date && (
-                  <p className="text-sm text-red-600 mt-1">{errors.check_out_date.message}</p>
+                  <p className="text-xs text-red-600 mt-1 px-1">{errors.check_out_date.message}</p>
                 )}
               </div>
-            </div>
 
-            {/* Hóspedes */}
-            <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="adults">Adultos *</Label>
-                <Input
-                  {...register('adults', { valueAsNumber: true })}
-                  type="number"
-                  min="1"
-                  max="10"
-                  disabled={loading}
-                />
+                <Label htmlFor="adults" className="text-sm font-medium">Adultos *</Label>
+                <div className="mt-1 p-1">
+                  <Input
+                    {...register('adults', { valueAsNumber: true })}
+                    type="number"
+                    min="1"
+                    max="10"
+                    disabled={loading}
+                    className="text-sm h-9 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  />
+                </div>
                 {errors.adults && (
-                  <p className="text-sm text-red-600 mt-1">{errors.adults.message}</p>
+                  <p className="text-xs text-red-600 mt-1 px-1">{errors.adults.message}</p>
                 )}
               </div>
 
               <div>
-                <Label htmlFor="children">Crianças</Label>
-                <Input
-                  {...register('children', { valueAsNumber: true })}
-                  type="number"
-                  min="0"
-                  max="10"
-                  disabled={loading}
-                />
+                <Label htmlFor="children" className="text-sm font-medium">Crianças</Label>
+                <div className="mt-1 p-1">
+                  <Input
+                    {...register('children', { valueAsNumber: true })}
+                    type="number"
+                    min="0"
+                    max="10"
+                    disabled={loading}
+                    className="text-sm h-9 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  />
+                </div>
                 {errors.children && (
-                  <p className="text-sm text-red-600 mt-1">{errors.children.message}</p>
+                  <p className="text-xs text-red-600 mt-1 px-1">{errors.children.message}</p>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Seleção de Quartos */}
-          <div className="space-y-4">
+          {/* Seleção de Quarto */}
+          <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-medium flex items-center gap-2">
-                <Bed className="h-5 w-5" />
-                Quartos {config.allowMultipleRooms ? '' : '(máximo 1)'}
+              <h3 className="text-sm font-medium flex items-center gap-2">
+                <Bed className="h-4 w-4" />
+                Quarto
               </h3>
               {checkingAvailability && <Loader2 className="h-4 w-4 animate-spin" />}
             </div>
 
             {availableRooms.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {availableRooms.map((room: any) => {
-                  const isSelected = watchedRooms.includes(room.id);
-                  
-                  return (
-                    <div 
-                      key={room.id} 
-                      className={`cursor-pointer transition-colors border-2 rounded-lg p-4 ${
-                        isSelected ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-gray-300"
-                      }`}
-                      onClick={() => toggleRoomSelection(room.id)}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <Bed className="h-4 w-4" />
-                          <span className="font-medium">{room.room_number}</span>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          readOnly
-                          className="rounded border-gray-300"
-                        />
-                      </div>
-                      <div className="text-sm text-gray-600">
-                        <div>{room.room_type_name}</div>
-                        <div>Até {room.max_occupancy} pessoas</div>
-                        {room.rate_per_night && (
-                          <div className="font-medium text-green-600 mt-1">
-                            R$ {room.rate_per_night}/noite
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="px-2">
+                <Label className="text-sm font-medium">Selecione o quarto *</Label>
+                <div className="mt-1 p-1">
+                  <select
+                    value={watchedRooms[0] || ''}
+                    onChange={(e) => {
+                      const roomId = parseInt(e.target.value);
+                      if (roomId) {
+                        setValue('selected_rooms', [roomId]);
+                      } else {
+                        setValue('selected_rooms', []);
+                      }
+                    }}
+                    disabled={loading}
+                    className="w-full p-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                  >
+                    <option value="">Selecione um quarto</option>
+                    {availableRooms.map((room: any) => (
+                      <option key={room.id} value={room.id.toString()}>
+                        Quarto {room.room_number} - {room.room_type_name} (até {room.max_occupancy} pessoas)
+                        {room.rate_per_night ? ` - R$ ${room.rate_per_night}/noite` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {errors.selected_rooms && (
+                  <p className="text-xs text-red-600 mt-1 px-1">{errors.selected_rooms.message}</p>
+                )}
               </div>
             ) : checkingAvailability ? (
-              <div className="text-center py-8">
-                <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
-                <p>Verificando disponibilidade...</p>
+              <div className="text-center py-4">
+                <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
+                <p className="text-sm text-gray-600">Verificando disponibilidade...</p>
               </div>
             ) : selectedProperty && checkInDate && checkOutDate ? (
-              <div className="p-4 rounded border bg-red-50 border-red-200 text-red-800">
+              <div className="p-3 mx-2 rounded-md border bg-red-50 border-red-200 text-red-800">
                 <div className="flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4" />
-                  Nenhum quarto disponível para o período selecionado.
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  <span className="text-sm">Nenhum quarto disponível para o período selecionado.</span>
                 </div>
-                <p className="text-sm mt-1">
-                  Todos os quartos estão ocupados nas datas escolhidas. 
-                  Tente alterar as datas ou verificar outras propriedades.
-                </p>
               </div>
             ) : null}
-
-            {errors.selected_rooms && (
-              <p className="text-sm text-red-600">{errors.selected_rooms.message}</p>
-            )}
           </div>
 
-          {/* Valores e Configurações */}
-          {(showAdvancedFields || watchedRooms.length > 0) && (
+          {/* Valores e Observações */}
+          {watchedRooms.length > 0 && (
             <div className="space-y-4">
-              <h3 className="text-lg font-medium flex items-center gap-2">
-                <DollarSign className="h-5 w-5" />
-                Valores e Configurações
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Resumo */}
-                <div className="border rounded-lg p-4">
-                  <h4 className="font-medium mb-3">Resumo</h4>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span>Quartos selecionados:</span>
-                      <span>{watchedRooms.length}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Noites:</span>
-                      <span>{nights}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Total de hóspedes:</span>
-                      <span>{(watchedValues.adults || 0) + (watchedValues.children || 0)}</span>
-                    </div>
-                    <div className="flex justify-between font-medium text-lg border-t pt-2 mt-2">
-                      <span>Total estimado:</span>
-                      <span>R$ {estimatedTotal.toFixed(2)}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Configurações de Valor */}
-                <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="total_amount">Valor Total (R$)</Label>
-                    <Input
-                      {...register('total_amount', { valueAsNumber: true })}
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder={estimatedTotal.toFixed(2)}
-                      disabled={loading}
-                    />
-                    <p className="text-xs text-gray-600 mt-1">
-                      Deixe em branco para usar o valor calculado automaticamente
-                    </p>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="room_rate_override">Taxa por Noite (R$)</Label>
-                    <Input
-                      {...register('room_rate_override', { valueAsNumber: true })}
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="Sobrescrever tarifa padrão"
-                      disabled={loading}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Observações */}
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="guest_requests">Pedidos do Hóspede</Label>
-                <Textarea
-                  {...register('guest_requests')}
-                  placeholder="Pedidos especiais, preferências..."
-                  disabled={loading}
-                  rows={3}
-                />
-              </div>
-
-              {showAdvancedFields && (
+              <div className="grid grid-cols-2 gap-6 px-2">
+                {/* Resumo Compacto */}
                 <div>
-                  <Label htmlFor="internal_notes">Notas Internas</Label>
-                  <Textarea
-                    {...register('internal_notes')}
-                    placeholder="Observações para uso interno..."
-                    disabled={loading}
-                    rows={3}
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Configurações Avançadas */}
-          {showAdvancedFields && (
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium">Configurações Avançadas</h3>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="requires_deposit"
-                    checked={watch('requires_deposit')}
-                    onChange={(e) => setValue('requires_deposit', e.target.checked)}
-                    disabled={loading}
-                    className="rounded border-gray-300"
-                  />
-                  <Label htmlFor="requires_deposit">Requer Depósito</Label>
+                  <Label className="text-sm font-medium mb-2 block">Resumo</Label>
+                  <div className="border rounded-md p-3 bg-gray-50">
+                    <div className="text-xs space-y-2">
+                      <div className="flex justify-between">
+                        <span>Quartos:</span>
+                        <span className="font-medium">{watchedRooms.length}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Noites:</span>
+                        <span className="font-medium">{nights}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Hóspedes:</span>
+                        <span className="font-medium">{(watchedValues.adults || 0) + (watchedValues.children || 0)}</span>
+                      </div>
+                      <div className="flex justify-between font-medium text-sm border-t pt-2 mt-2">
+                        <span>Total:</span>
+                        <span className="text-green-600">R$ {estimatedTotal.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="is_group_reservation"
-                    checked={watch('is_group_reservation')}
-                    onChange={(e) => setValue('is_group_reservation', e.target.checked)}
-                    disabled={loading}
-                    className="rounded border-gray-300"
-                  />
-                  <Label htmlFor="is_group_reservation">Reserva em Grupo</Label>
+                {/* Campos de Valor */}
+                <div className="space-y-3">
+                  <div>
+                    <Label htmlFor="total_amount" className="text-sm font-medium">Valor Total (R$)</Label>
+                    <div className="mt-1 p-1">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder={estimatedTotal.toFixed(2)}
+                        disabled={loading}
+                        value={watch('total_amount') || ''}
+                        onChange={(e) => handleTotalAmountChange(e.target.value)}
+                        className="text-sm h-9 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="room_rate_override" className="text-sm font-medium">Taxa/Noite (R$)</Label>
+                    <div className="mt-1 p-1">
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="Personalizar"
+                        disabled={loading}
+                        value={watch('room_rate_override') || ''}
+                        onChange={(e) => handleRoomRateChange(e.target.value)}
+                        className="text-sm h-9 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      />
+                    </div>
+                  </div>
                 </div>
+              </div>
+
+              {/* Observações */}
+              <div className="grid grid-cols-2 gap-4 px-2">
+                <div>
+                  <Label htmlFor="guest_requests" className="text-sm font-medium">Pedidos do Hóspede</Label>
+                  <div className="mt-1 p-1">
+                    <Textarea
+                      {...register('guest_requests')}
+                      placeholder="Pedidos especiais..."
+                      disabled={loading}
+                      rows={3}
+                      className="text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                    />
+                  </div>
+                </div>
+
+                {showAdvancedFields && (
+                  <div>
+                    <Label htmlFor="internal_notes" className="text-sm font-medium">Notas Internas</Label>
+                    <div className="mt-1 p-1">
+                      <Textarea
+                        {...register('internal_notes')}
+                        placeholder="Observações internas..."
+                        disabled={loading}
+                        rows={3}
+                        className="text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
 
           {/* Footer */}
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-3 pt-4 border-t">
             <Button 
               type="button" 
               variant="outline" 
               onClick={handleClose}
               disabled={loading}
+              className="h-9 px-4 text-sm focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
               Cancelar
             </Button>
             <Button 
               type="submit" 
               disabled={loading || watchedRooms.length === 0}
-              className="min-w-[120px]"
+              className="min-w-[120px] h-9 px-4 text-sm focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
-              {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {loading && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
               {isEditing ? 'Atualizar' : 'Criar'} Reserva
             </Button>
           </DialogFooter>

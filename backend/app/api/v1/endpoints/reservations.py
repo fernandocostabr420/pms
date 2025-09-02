@@ -1389,43 +1389,51 @@ def get_todays_reservations(
     reservation_service = ReservationService(db)
     today = date.today()
     
-    # Chegadas hoje
-    arrivals = reservation_service.get_reservations(
-        current_user.tenant_id,
-        ReservationFilters(
-            check_in_from=today,
-            check_in_to=today,
-            property_id=property_id,
-            status="confirmed"
+    try:
+        # Chegadas hoje
+        arrivals = reservation_service.get_reservations(
+            current_user.tenant_id,
+            ReservationFilters(
+                check_in_from=today,
+                check_in_to=today,
+                property_id=property_id,
+                status="confirmed"
+            )
         )
-    )
-    
-    # Saídas hoje
-    departures = reservation_service.get_reservations(
-        current_user.tenant_id,
-        ReservationFilters(
-            check_out_from=today,
-            check_out_to=today,
-            property_id=property_id,
-            status="checked_in"
+        
+        # Saídas hoje
+        departures = reservation_service.get_reservations(
+            current_user.tenant_id,
+            ReservationFilters(
+                check_out_from=today,
+                check_out_to=today,
+                property_id=property_id,
+                status="checked_in"
+            )
         )
-    )
-    
-    # Hóspedes atuais (checked_in)
-    current_guests = reservation_service.get_reservations(
-        current_user.tenant_id,
-        ReservationFilters(status="checked_in", property_id=property_id)
-    )
-    
-    return {
-        "date": today,
-        "arrivals": [ReservationResponse.model_validate(r) for r in arrivals],
-        "departures": [ReservationResponse.model_validate(r) for r in departures],
-        "current_guests": [ReservationResponse.model_validate(r) for r in current_guests],
-        "arrivals_count": len(arrivals),
-        "departures_count": len(departures),
-        "current_guests_count": len(current_guests)
-    }
+        
+        # Hóspedes atuais (checked_in)
+        current_guests = reservation_service.get_reservations(
+            current_user.tenant_id,
+            ReservationFilters(status="checked_in", property_id=property_id)
+        )
+        
+        return {
+            "date": today,
+            "arrivals": [ReservationResponse.model_validate(r) for r in arrivals],
+            "departures": [ReservationResponse.model_validate(r) for r in departures],
+            "current_guests": [ReservationResponse.model_validate(r) for r in current_guests],
+            "arrivals_count": len(arrivals),
+            "departures_count": len(departures), 
+            "current_guests_count": len(current_guests)
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro ao buscar reservas de hoje: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao buscar reservas: {str(e)}"
+        )
 
 
 # ===== ESTATÍSTICAS =====

@@ -35,7 +35,10 @@ import { useToast } from '@/hooks/use-toast';
 
 // Componentes
 import RoomMapGrid from '@/components/room-map/RoomMapGrid';
-import RoomMapQuickBooking from '@/components/room-map/RoomMapQuickBooking';
+
+// 🔄 NOVOS IMPORTS - Componente Padronizado
+import StandardReservationModal from '@/components/reservations/StandardReservationModal';
+import { RESERVATION_MODAL_CONFIGS } from '@/components/reservations/configs/reservationModalConfigs';
 
 export default function RoomMapPage() {
   // Estados principais
@@ -44,6 +47,8 @@ export default function RoomMapPage() {
   );
   const [properties, setProperties] = useState<PropertyResponse[]>([]);
   const [loadingProperties, setLoadingProperties] = useState(true);
+  
+  // 🔄 ESTADOS ATUALIZADOS - Substituindo RoomMapQuickBooking
   const [isQuickBookingOpen, setIsQuickBookingOpen] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<MapRoomData | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -119,10 +124,9 @@ export default function RoomMapPage() {
     console.log('Room clicked:', room);
   };
 
-  // ✅ ATUALIZADO: Handler de reserva agora é opcional (o modal é gerenciado internamente pelo RoomMapGrid)
+  // Handler de reserva (mantido para compatibilidade)
   const handleReservationClick = (reservation: MapReservationResponse, room: MapRoomData) => {
     console.log('Reservation clicked (fallback):', reservation, room);
-    // Este handler agora é apenas um fallback, pois o modal é gerenciado pelo RoomMapGrid
   };
 
   const handleCellClick = (room: MapRoomData, date: string) => {
@@ -152,7 +156,7 @@ export default function RoomMapPage() {
       return;
     }
 
-    // Abrir modal de reserva rápida
+    // 🔄 ATUALIZADO - Abrir modal padronizado com dados pré-selecionados
     setSelectedRoom(room);
     setSelectedDate(date);
     setIsQuickBookingOpen(true);
@@ -167,28 +171,25 @@ export default function RoomMapPage() {
     }
   };
 
+  // 🔄 HANDLERS ATUALIZADOS - Para o StandardReservationModal
   const handleQuickBookingClose = () => {
     setIsQuickBookingOpen(false);
     setSelectedRoom(null);
     setSelectedDate(null);
   };
 
-  const handleQuickBookingSubmit = async (booking: MapQuickBooking) => {
-    try {
-      await createQuickBooking(booking);
-      toast({
-        title: "Sucesso",
-        description: "Reserva criada com sucesso",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Erro",
-        description: error.response?.data?.detail || "Erro ao criar reserva",
-        variant: "destructive",
-      });
-    }
+  const handleQuickBookingSuccess = () => {
+    setIsQuickBookingOpen(false);
+    setSelectedRoom(null);
+    setSelectedDate(null);
+    loadMapData(); // Recarregar dados do mapa
+    toast({
+      title: "Sucesso",
+      description: "Reserva criada com sucesso"
+    });
   };
 
+  // Handler para Nova Reserva genérica (sem quarto específico)
   const handleQuickBooking = () => {
     setSelectedRoom(null);
     setSelectedDate(null);
@@ -233,7 +234,7 @@ export default function RoomMapPage() {
               </div>
             </div>
             
-            {/* Botão Nova Reserva */}
+            {/* 🔄 BOTÃO ATUALIZADO - Conectado ao handler do modal padronizado */}
             <Button onClick={handleQuickBooking} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 font-medium text-sm">
               <Plus className="h-4 w-4 mr-2" />
               Nova Reserva
@@ -417,17 +418,20 @@ export default function RoomMapPage() {
         </CardContent>
       </Card>
 
-      {/* Modal de reserva rápida */}
-      {isQuickBookingOpen && (
-        <RoomMapQuickBooking
-          isOpen={isQuickBookingOpen}
-          onClose={handleQuickBookingClose}
-          onSubmit={handleQuickBookingSubmit}
-          selectedRoom={selectedRoom}
-          selectedDate={selectedDate}
-          availableRooms={availableRooms}
-        />
-      )}
+      {/* 🔄 MODAL PADRONIZADO - Substitui RoomMapQuickBooking */}
+      <StandardReservationModal
+        isOpen={isQuickBookingOpen}
+        onClose={handleQuickBookingClose}
+        onSuccess={handleQuickBookingSuccess}
+        prefilledData={selectedRoom && selectedDate ? {
+          // DADOS PRÉ-SELECIONADOS DO MAPA
+          room_id: selectedRoom.id,
+          selected_date: selectedDate,
+          property_id: selectedRoom.property_id,
+          source: 'room_map',
+        } : undefined}
+        {...RESERVATION_MODAL_CONFIGS.ROOM_MAP_BOOKING}
+      />
     </div>
   );
 }
