@@ -1,4 +1,4 @@
-// src/app/dashboard/layout.tsx
+// frontend/src/app/dashboard/layout.tsx
 'use client';
 
 import { useEffect } from 'react';
@@ -27,7 +27,7 @@ import {
   User,
   Menu,
   Map,
-  DollarSign  // ← NOVO IMPORT
+  DollarSign
 } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -37,7 +37,7 @@ const navigation = [
   { name: 'Calendário', href: '/dashboard/calendar', icon: Calendar },
   { name: 'Mapa de Quartos', href: '/dashboard/room-map', icon: Map },
   { name: 'Reservas', href: '/dashboard/reservations', icon: Calendar },
-  { name: 'Pagamentos', href: '/dashboard/payments', icon: DollarSign }, // ← NOVA LINHA
+  { name: 'Pagamentos', href: '/dashboard/payments', icon: DollarSign },
   { name: 'Hóspedes', href: '/dashboard/guests', icon: Users },
   { name: 'Propriedades', href: '/dashboard/properties', icon: Building },
   { name: 'Tipos de Quartos', href: '/dashboard/room-types', icon: Tag },
@@ -53,6 +53,11 @@ export default function DashboardLayout({
   const { user, tenant, isAuthenticated, isLoading, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const router = useRouter();
+
+  // Debug: Verificar se os dados estão chegando
+  useEffect(() => {
+    console.log('Layout Debug:', { user, tenant, isAuthenticated, isLoading });
+  }, [user, tenant, isAuthenticated, isLoading]);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -105,6 +110,7 @@ export default function DashboardLayout({
       <div className="md:pl-64 flex flex-col flex-1 min-h-screen">
         {/* Top header */}
         <div className="sticky top-0 z-10 flex-shrink-0 flex h-16 bg-white shadow">
+          {/* Mobile menu button */}
           <button
             type="button"
             className="px-4 border-r border-gray-200 text-gray-500 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500 md:hidden"
@@ -120,14 +126,23 @@ export default function DashboardLayout({
               </h1>
             </div>
 
+            {/* User menu - ZONA CRÍTICA */}
             <div className="ml-4 flex items-center md:ml-6">
+              {/* Debug visual - remover depois */}
+              <div className="mr-2 text-xs text-gray-500">
+                {user?.full_name ? `Logado: ${user.full_name}` : 'Sem usuário'}
+              </div>
+              
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                  <Button 
+                    variant="ghost" 
+                    className="relative h-8 w-8 rounded-full border-2 border-blue-200"
+                  >
                     <Avatar className="h-8 w-8">
-                      <AvatarImage src="" alt={user?.full_name || ''} />
-                      <AvatarFallback>
-                        {user?.full_name?.charAt(0) || 'U'}
+                      <AvatarImage src="" alt={user?.full_name || 'User'} />
+                      <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
+                        {user?.full_name?.charAt(0)?.toUpperCase() || 'U'}
                       </AvatarFallback>
                     </Avatar>
                   </Button>
@@ -136,24 +151,33 @@ export default function DashboardLayout({
                   <DropdownMenuLabel className="font-normal">
                     <div className="flex flex-col space-y-1">
                       <p className="text-sm font-medium leading-none">
-                        {user?.full_name}
+                        {user?.full_name || 'Nome não disponível'}
                       </p>
                       <p className="text-xs leading-none text-muted-foreground">
-                        {user?.email}
+                        {user?.email || 'Email não disponível'}
+                      </p>
+                      <p className="text-xs leading-none text-muted-foreground">
+                        {tenant?.name || 'Tenant não disponível'}
                       </p>
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => alert('Funcionalidade em desenvolvimento')}>
                     <User className="mr-2 h-4 w-4" />
                     Perfil
                   </DropdownMenuItem>
-                  <DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => alert('Funcionalidade em desenvolvimento')}>
                     <Settings className="mr-2 h-4 w-4" />
                     Configurações
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={logout}>
+                  <DropdownMenuItem 
+                    onClick={() => {
+                      console.log('Logout clicado');
+                      logout();
+                    }}
+                    className="text-red-600 focus:text-red-600"
+                  >
                     <LogOut className="mr-2 h-4 w-4" />
                     Sair
                   </DropdownMenuItem>
