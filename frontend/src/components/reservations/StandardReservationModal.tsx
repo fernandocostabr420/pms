@@ -282,7 +282,7 @@ export default function StandardReservationModal({
     resolver: zodResolver(standardReservationSchema),
     defaultValues: {
       guest_mode: config.defaultGuestMode,
-      adults: 1,
+      adults: 2, // ✅ CORRIGIDO: Alterado de 1 para 2
       children: 0,
       selected_rooms: [],
       source: mode === 'map' ? 'room_map' : 'direct',
@@ -385,6 +385,7 @@ export default function StandardReservationModal({
     }
   };
 
+  // ✅ FUNÇÃO CORRIGIDA: populateInitialForm
   const populateInitialForm = () => {
     // Preencher com dados da reserva existente (edição)
     if (isEditing && reservation) {
@@ -413,8 +414,11 @@ export default function StandardReservationModal({
 
     // Preencher com dados pré-definidos
     if (prefilledData) {
+      // ✅ CORRIGIDO: Definir valores padrão corretos
       const formData: Partial<StandardReservationFormData> = {
         guest_mode: config.defaultGuestMode,
+        adults: prefilledData.adults || 2, // Garantir padrão de 2 adultos
+        children: prefilledData.children || 0,
         ...prefilledData,
       };
 
@@ -423,20 +427,55 @@ export default function StandardReservationModal({
         formData.selected_rooms = [prefilledData.room_id];
       }
 
-      reset(formData as StandardReservationFormData);
+      // ✅ CORRIGIDO: Definir datas corretamente nos estados e no formulário
+      let checkInDateStr = '';
+      let checkOutDateStr = '';
       
       if (prefilledData.check_in_date) {
+        checkInDateStr = prefilledData.check_in_date;
         setCheckInDate(new Date(prefilledData.check_in_date + 'T00:00:00'));
       } else if (prefilledData.selected_date) {
+        checkInDateStr = prefilledData.selected_date;
         setCheckInDate(new Date(prefilledData.selected_date + 'T00:00:00'));
       }
       
       if (prefilledData.check_out_date) {
+        checkOutDateStr = prefilledData.check_out_date;
         setCheckOutDate(new Date(prefilledData.check_out_date + 'T00:00:00'));
       } else if (prefilledData.selected_date) {
         // Para modo mapa: check-out = check-in + 1 dia por padrão
-        setCheckOutDate(addDays(new Date(prefilledData.selected_date + 'T00:00:00'), 1));
+        const nextDay = addDays(new Date(prefilledData.selected_date + 'T00:00:00'), 1);
+        checkOutDateStr = format(nextDay, 'yyyy-MM-dd');
+        setCheckOutDate(nextDay);
       }
+
+      // ✅ IMPORTANTE: Definir as datas no formulário também
+      formData.check_in_date = checkInDateStr;
+      formData.check_out_date = checkOutDateStr;
+
+      reset(formData as StandardReservationFormData);
+      return;
+    }
+
+    // ✅ CORRIGIDO: Valores padrão quando não há prefilledData
+    if (!isEditing && !prefilledData) {
+      const today = new Date();
+      const tomorrow = addDays(today, 1);
+      
+      reset({
+        guest_mode: config.defaultGuestMode,
+        adults: 2, // Padrão de 2 adultos
+        children: 0,
+        selected_rooms: [],
+        source: mode === 'map' ? 'room_map' : 'direct',
+        requires_deposit: false,
+        is_group_reservation: false,
+        check_in_date: format(today, 'yyyy-MM-dd'),
+        check_out_date: format(tomorrow, 'yyyy-MM-dd'),
+      });
+      
+      setCheckInDate(today);
+      setCheckOutDate(tomorrow);
     }
   };
 
