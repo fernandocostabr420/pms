@@ -25,11 +25,14 @@ import {
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, AlertCircle, CheckCircle } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle, Building } from 'lucide-react';
 import { RoomResponse, RoomCreate, RoomUpdate } from '@/types/rooms';
-import { PropertyResponse, RoomTypeResponse } from '@/types/api';
+import { RoomTypeResponse } from '@/types/api';
 import apiClient from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+
+// Hook personalizado para propriedade única
+import { useProperty } from '@/hooks/useProperty';
 
 const roomSchema = z.object({
   name: z.string().min(2, 'Nome deve ter pelo menos 2 caracteres'),
@@ -61,7 +64,9 @@ export default function RoomModal({
   room, 
   onSuccess 
 }: RoomModalProps) {
-  const [properties, setProperties] = useState<PropertyResponse[]>([]);
+  // Hook personalizado para propriedade única
+  const { property: tenantProperty, loading: loadingProperty, error: propertyError } = useProperty();
+  
   const [roomTypes, setRoomTypes] = useState<RoomTypeResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
@@ -106,6 +111,13 @@ export default function RoomModal({
     }
   }, [isOpen]);
 
+  // Definir property_id automaticamente quando propriedade carregar
+  useEffect(() => {
+    if (tenantProperty && !watch('property_id')) {
+      setValue('property_id', tenantProperty.id);
+    }
+  }, [tenantProperty, setValue, watch]);
+
   // Preencher formulário ao editar
   useEffect(() => {
     if (room && isOpen) {
@@ -138,12 +150,8 @@ export default function RoomModal({
   const loadInitialData = async () => {
     try {
       setLoadingData(true);
-      const [propertiesRes, roomTypesRes] = await Promise.all([
-        apiClient.getProperties({ page: 1, per_page: 100 }),
-        apiClient.getRoomTypes({ page: 1, per_page: 100 })
-      ]);
-      
-      setProperties(propertiesRes.properties);
+      // Carregar apenas tipos de quarto (propriedade vem do hook)
+      const roomTypesRes = await apiClient.getRoomTypes({ page: 1, per_page: 100 });
       setRoomTypes(roomTypesRes.room_types.filter(rt => rt.is_bookable));
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
@@ -248,6 +256,38 @@ export default function RoomModal({
     onClose();
   };
 
+  // Se erro ao carregar propriedade
+  if (propertyError && isOpen) {
+    return (
+      <Dialog open={isOpen} onOpenChange={handleClose}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg text-red-600">
+              <AlertCircle className="h-5 w-5" />
+              Erro - Propriedade Necessária
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                {propertyError}
+              </AlertDescription>
+            </Alert>
+            <p className="text-sm text-gray-600">
+              Para criar quartos, você precisa ter pelo menos uma propriedade cadastrada no sistema.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button onClick={handleClose}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -257,13 +297,28 @@ export default function RoomModal({
           </DialogTitle>
         </DialogHeader>
 
-        {loadingData ? (
+        {loadingProperty || loadingData ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin" />
-            <span className="ml-2">Carregando dados...</span>
+            <span className="ml-2">
+              {loadingProperty ? 'Carregando propriedade...' : 'Carregando dados...'}
+            </span>
           </div>
         ) : (
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+            
+            {/* Banner da propriedade selecionada automaticamente */}
+            {tenantProperty && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <Building className="h-4 w-4 text-blue-600" />
+                  <span className="text-sm text-blue-800 font-medium">
+                    Propriedade: <strong>{tenantProperty.name}</strong>
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Informações Básicas */}
             <div className="space-y-4">
               <h3 className="text-lg font-medium">Informações Básicas</h3>
@@ -314,30 +369,7 @@ export default function RoomModal({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="property_id">Propriedade *</Label>
-                  <Select
-                    value={watch('property_id')?.toString() || ''}
-                    onValueChange={(value) => setValue('property_id', parseInt(value))}
-                    disabled={loading}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione a propriedade" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {properties.map((property) => (
-                        <SelectItem key={property.id} value={property.id.toString()}>
-                          {property.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {errors.property_id && (
-                    <p className="text-sm text-red-600 mt-1">{errors.property_id.message}</p>
-                  )}
-                </div>
-
+              <div className="grid grid-cols-1 gap-4">
                 <div>
                   <Label htmlFor="room_type_id">Tipo de Quarto *</Label>
                   <Select
@@ -487,7 +519,7 @@ export default function RoomModal({
               </Button>
               <Button 
                 type="submit" 
-                disabled={loading || (!isEdit && roomNumberAvailable === false)}
+                disabled={loading || (!isEdit && roomNumberAvailable === false) || loadingProperty}
               >
                 {loading ? (
                   <>
