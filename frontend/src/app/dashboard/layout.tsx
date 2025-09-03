@@ -39,8 +39,6 @@ const navigation = [
   { name: 'Reservas', href: '/dashboard/reservations', icon: Calendar },
   { name: 'Pagamentos', href: '/dashboard/payments', icon: DollarSign },
   { name: 'Hóspedes', href: '/dashboard/guests', icon: Users },
-  { name: 'Tipos de Quartos', href: '/dashboard/room-types', icon: Tag },
-  { name: 'Quartos', href: '/dashboard/rooms', icon: Bed },
   { name: 'Disponibilidade', href: '/dashboard/room-availability', icon: Calendar },
 ];
 
@@ -105,9 +103,9 @@ export default function DashboardLayout({
         <SidebarContent />
       </div>
 
-      {/* Main content - ALTURA COMPLETA COM ESPAÇAMENTO MÍNIMO */}
+      {/* Main content */}
       <div className="md:pl-64 flex flex-col flex-1 min-h-screen">
-        {/* Top header */}
+        {/* Top header - LIMPO */}
         <div className="sticky top-0 z-10 flex-shrink-0 flex h-16 bg-white shadow">
           {/* Mobile menu button */}
           <button
@@ -125,7 +123,7 @@ export default function DashboardLayout({
               </h1>
             </div>
 
-            {/* User menu - ZONA CRÍTICA */}
+            {/* User menu - APENAS DROPDOWN SIMPLES */}
             <div className="ml-4 flex items-center md:ml-6">
               {/* Debug visual - remover depois */}
               <div className="mr-2 text-xs text-gray-500">
@@ -175,6 +173,23 @@ export default function DashboardLayout({
                       Propriedades
                     </Link>
                   </DropdownMenuItem>
+                  
+                  <DropdownMenuSeparator />
+                  
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/room-types" className="flex items-center">
+                      <Tag className="mr-2 h-4 w-4" />
+                      Tipos de Quartos
+                    </Link>
+                  </DropdownMenuItem>
+                  
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/rooms" className="flex items-center">
+                      <Bed className="mr-2 h-4 w-4" />
+                      Unidades Habitacionais
+                    </Link>
+                  </DropdownMenuItem>
+                  
                   <DropdownMenuSeparator />
                   <DropdownMenuItem 
                     onClick={() => {
@@ -192,7 +207,7 @@ export default function DashboardLayout({
           </div>
         </div>
 
-        {/* Page content - ALTURA COMPLETA COM PADDING MÍNIMO */}
+        {/* Page content */}
         <main className="flex-1 overflow-hidden p-4">
           <div className="h-full">
             {children}
