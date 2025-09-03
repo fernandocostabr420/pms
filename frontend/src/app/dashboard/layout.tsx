@@ -39,7 +39,6 @@ const navigation = [
   { name: 'Reservas', href: '/dashboard/reservations', icon: Calendar },
   { name: 'Pagamentos', href: '/dashboard/payments', icon: DollarSign },
   { name: 'Hóspedes', href: '/dashboard/guests', icon: Users },
-  { name: 'Propriedades', href: '/dashboard/properties', icon: Building },
   { name: 'Tipos de Quartos', href: '/dashboard/room-types', icon: Tag },
   { name: 'Quartos', href: '/dashboard/rooms', icon: Bed },
   { name: 'Disponibilidade', href: '/dashboard/room-availability', icon: Calendar },
@@ -169,6 +168,12 @@ export default function DashboardLayout({
                   <DropdownMenuItem onClick={() => alert('Funcionalidade em desenvolvimento')}>
                     <Settings className="mr-2 h-4 w-4" />
                     Configurações
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/properties" className="flex items-center">
+                      <Building className="mr-2 h-4 w-4" />
+                      Propriedades
+                    </Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem 
