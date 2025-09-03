@@ -117,7 +117,16 @@ class PropertyService:
         request: Optional[Request] = None
     ) -> Property:
         """Cria nova propriedade com auditoria automática"""
+
+        # NOVA VERIFICAÇÃO: Limitar a uma propriedade por tenant
+        existing_count = self.db.query(Property).filter(
+            Property.tenant_id == tenant_id,
+            Property.is_active == True
+        ).count()
         
+        if existing_count >= 1:
+            raise ValueError("Este tenant já possui uma propriedade ativa. Apenas uma propriedade é permitida por conta.")
+
         # Verificar se slug já existe no tenant
         existing_property = self.get_property_by_slug(property_data.slug, tenant_id)
         if existing_property:

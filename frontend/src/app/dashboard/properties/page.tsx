@@ -155,10 +155,27 @@ export default function PropertiesPage() {
           <p className="text-gray-600">Gerencie suas propriedades hoteleiras</p>
         </div>
         
-        <Button onClick={handleCreateProperty} className="flex items-center gap-2">
-          <Plus className="h-4 w-4" />
-          Nova Propriedade
-        </Button>
+        {/* LÓGICA CONDICIONAL - Mostrar botão apenas se não há propriedades */}
+        {properties.length === 0 ? (
+          <Button onClick={handleCreateProperty} className="flex items-center gap-2">
+            <Plus className="h-4 w-4" />
+            Nova Propriedade
+          </Button>
+        ) : (
+          <div className="text-right">
+            <Button 
+              disabled 
+              className="flex items-center gap-2 opacity-50 cursor-not-allowed"
+              title="Apenas uma propriedade é permitida por conta"
+            >
+              <Building className="h-4 w-4" />
+              Propriedade Cadastrada
+            </Button>
+            <p className="text-xs text-gray-500 mt-1">
+              Apenas uma propriedade permitida
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Filtros */}
@@ -212,101 +229,117 @@ export default function PropertiesPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {properties.map((property) => (
-            <Card key={property.id} className="hover:shadow-lg transition-shadow duration-200">
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <CardTitle className="text-lg font-semibold text-gray-900 mb-1">
-                      {property.name}
-                    </CardTitle>
-                    <Badge variant="secondary" className="text-xs">
-                      {PROPERTY_TYPES[property.property_type as keyof typeof PROPERTY_TYPES] || property.property_type}
-                    </Badge>
-                  </div>
-                  
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => handleEditProperty(property)}>
-                        <Edit className="h-4 w-4 mr-2" />
-                        Editar
-                      </DropdownMenuItem>
-                      <DropdownMenuItem 
-                        onClick={() => handleDeleteProperty(property)}
-                        className="text-red-600 focus:text-red-600"
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Excluir
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </CardHeader>
+        <>
+          {/* NOVO: Banner informativo quando há propriedade cadastrada */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <div className="flex items-center gap-2">
+              <Building className="h-5 w-5 text-blue-600" />
+              <p className="text-sm text-blue-800 font-medium">
+                Propriedade cadastrada: <strong>{properties[0]?.name}</strong>
+              </p>
+            </div>
+            <p className="text-xs text-blue-600 mt-1">
+              Apenas uma propriedade é permitida por conta. Para alterar, edite a propriedade existente.
+            </p>
+          </div>
 
-              <CardContent className="pt-0">
-                {/* Endereço */}
-                {property.address && (
-                  <div className="flex items-start gap-2 mb-3">
-                    <MapPin className="h-4 w-4 text-gray-400 mt-0.5 flex-shrink-0" />
-                    <span className="text-sm text-gray-600 line-clamp-2">
-                      {[
-                        property.address,
-                        property.city,
-                        property.state
-                      ].filter(Boolean).join(', ')}
-                      {property.zip_code && ` - ${property.zip_code}`}
-                    </span>
+          {/* Grid das propriedades */}
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            {properties.map((property) => (
+              <Card key={property.id} className="hover:shadow-lg transition-shadow duration-200">
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <CardTitle className="text-lg font-semibold text-gray-900 mb-1">
+                        {property.name}
+                      </CardTitle>
+                      <Badge variant="secondary" className="text-xs">
+                        {PROPERTY_TYPES[property.property_type as keyof typeof PROPERTY_TYPES] || property.property_type}
+                      </Badge>
+                    </div>
+                    
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleEditProperty(property)}>
+                          <Edit className="h-4 w-4 mr-2" />
+                          Editar
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={() => handleDeleteProperty(property)}
+                          className="text-red-600 focus:text-red-600"
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Excluir
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
-                )}
+                </CardHeader>
 
-                {/* Contato */}
-                <div className="space-y-1 mb-3">
-                  {property.phone && (
-                    <div className="flex items-center gap-2">
-                      <Phone className="h-4 w-4 text-gray-400" />
-                      <span className="text-sm text-gray-600">{property.phone}</span>
+                <CardContent className="pt-0">
+                  {/* Endereço */}
+                  {property.address && (
+                    <div className="flex items-start gap-2 mb-3">
+                      <MapPin className="h-4 w-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                      <span className="text-sm text-gray-600 line-clamp-2">
+                        {[
+                          property.address,
+                          property.city,
+                          property.state
+                        ].filter(Boolean).join(', ')}
+                        {property.zip_code && ` - ${property.zip_code}`}
+                      </span>
                     </div>
                   )}
-                  
-                  {property.email && (
-                    <div className="flex items-center gap-2">
-                      <Mail className="h-4 w-4 text-gray-400" />
-                      <span className="text-sm text-gray-600">{property.email}</span>
-                    </div>
-                  )}
-                  
-                  {property.website && (
-                    <div className="flex items-center gap-2">
-                      <Globe className="h-4 w-4 text-gray-400" />
-                      <a 
-                        href={property.website} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="text-sm text-blue-600 hover:text-blue-800"
-                      >
-                        Site
-                      </a>
-                    </div>
-                  )}
-                </div>
 
-                {/* Check-in/out */}
-                <div className="pt-2 border-t border-gray-100">
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>Check-in: {property.check_in_time || '14:00'}</span>
-                    <span>Check-out: {property.check_out_time || '12:00'}</span>
+                  {/* Contato */}
+                  <div className="space-y-1 mb-3">
+                    {property.phone && (
+                      <div className="flex items-center gap-2">
+                        <Phone className="h-4 w-4 text-gray-400" />
+                        <span className="text-sm text-gray-600">{property.phone}</span>
+                      </div>
+                    )}
+                    
+                    {property.email && (
+                      <div className="flex items-center gap-2">
+                        <Mail className="h-4 w-4 text-gray-400" />
+                        <span className="text-sm text-gray-600">{property.email}</span>
+                      </div>
+                    )}
+                    
+                    {property.website && (
+                      <div className="flex items-center gap-2">
+                        <Globe className="h-4 w-4 text-gray-400" />
+                        <a 
+                          href={property.website} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-sm text-blue-600 hover:text-blue-800"
+                        >
+                          Site
+                        </a>
+                      </div>
+                    )}
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+
+                  {/* Check-in/out */}
+                  <div className="pt-2 border-t border-gray-100">
+                    <div className="flex justify-between text-xs text-gray-500">
+                      <span>Check-in: {property.check_in_time || '14:00'}</span>
+                      <span>Check-out: {property.check_out_time || '12:00'}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </>
       )}
 
       {/* Modal de Propriedade */}
