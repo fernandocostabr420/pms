@@ -223,6 +223,12 @@ class AvailabilityRequest(BaseModel):
     children: Optional[int] = Field(default=0, ge=0, le=10)
     room_type_id: Optional[int] = None
     
+    # ✅ NOVO CAMPO - Excluir reserva específica da verificação (para edições)
+    exclude_reservation_id: Optional[int] = Field(
+        None, 
+        description="ID da reserva a ser excluída da verificação de conflitos (usado em edições)"
+    )
+    
     @field_validator('check_out_date')
     @classmethod
     def validate_checkout_date(cls, v, info):
@@ -242,6 +248,12 @@ class AvailableRoom(BaseModel):
     max_occupancy: int
     floor: Optional[int] = None
     building: Optional[str] = None
+    
+    # ✅ NOVO CAMPO - Taxa base do quarto
+    rate_per_night: Optional[float] = Field(
+        None, 
+        description="Taxa base por noite do quarto"
+    )
 
 
 class AvailabilityResponse(BaseModel):

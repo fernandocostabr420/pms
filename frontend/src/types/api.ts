@@ -175,6 +175,18 @@ export interface AvailabilityCheckRequest {
   room_type_id?: number;
 }
 
+export interface AvailabilityRequest {
+  property_id: number;
+  check_in_date: string;
+  check_out_date: string;
+  adults?: number;
+  children?: number;
+  room_type_id?: number;
+  
+  // ✅ NOVO CAMPO - Para excluir reserva específica em edições
+  exclude_reservation_id?: number;
+}
+
 export interface AvailableRoom {
   id: number;
   room_number: string;
@@ -184,13 +196,12 @@ export interface AvailableRoom {
   max_occupancy: number;
   floor?: number;
   building?: string;
-}
-
-export interface AvailabilityCheckResponse {
-  available: boolean;
-  available_rooms: AvailableRoom[];
-  total_available_rooms: number;
-  conflicting_reservations?: string[];
+  
+  // ✅ NOVO CAMPO - Taxa base do quarto
+  rate_per_night?: number;
+  
+  // ✅ CAMPO ADICIONAL - Para marcar quarto atual da reserva (frontend only)
+  isCurrentReservation?: boolean;
 }
 
 export interface CalendarStatsResponse {

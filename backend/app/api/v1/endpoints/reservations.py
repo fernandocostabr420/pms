@@ -1,10 +1,8 @@
-# backend/app/api/v1/endpoints/reservations.py - ARQUIVO COMPLETO CORRIGIDO
-
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import and_, or_, func, text, desc, asc
+from sqlalchemy import and_, or_, func, text, desc, asc, not_  # ✅ ADICIONADO not_
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 import math
@@ -1071,7 +1069,7 @@ def get_reservation(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Busca reserva específica do tenant"""
+    """Busca reserva específica do tenant - VERSÃO CORRIGIDA COM QUARTOS"""
     reservation_service = ReservationService(db)
     reservation_obj = reservation_service.get_reservation_by_id(reservation_id, current_user.tenant_id)
     
@@ -1081,7 +1079,72 @@ def get_reservation(
             detail="Reserva não encontrada"
         )
     
-    return ReservationResponse.model_validate(reservation_obj)
+    # ✅ CONVERSÃO MANUAL PARA INCLUIR QUARTOS (mesmo padrão de outros endpoints)
+    try:
+        # Usar model_validate para os campos básicos
+        base_response = ReservationResponse.model_validate(reservation_obj)
+        base_dict = base_response.model_dump()
+        
+        # ✅ ADICIONAR QUARTOS MANUALMENTE
+        if reservation_obj.reservation_rooms:
+            rooms_data = []
+            for room_reservation in reservation_obj.reservation_rooms:
+                if room_reservation.room:  # Verificar se o quarto existe
+                    room_data = {
+                        'id': room_reservation.id,
+                        'reservation_id': room_reservation.reservation_id,
+                        'room_id': room_reservation.room_id,
+                        'check_in_date': room_reservation.check_in_date.isoformat() if room_reservation.check_in_date else reservation_obj.check_in_date.isoformat(),
+                        'check_out_date': room_reservation.check_out_date.isoformat() if room_reservation.check_out_date else reservation_obj.check_out_date.isoformat(),
+                        'rate_per_night': float(room_reservation.rate_per_night) if room_reservation.rate_per_night else None,
+                        'total_amount': float(room_reservation.total_amount) if room_reservation.total_amount else None,
+                        'status': getattr(room_reservation, 'status', 'confirmed'),
+                        'notes': getattr(room_reservation, 'notes', None),
+                        'room_number': room_reservation.room.room_number,
+                        'room_name': getattr(room_reservation.room, 'name', None),
+                        'room_type_name': room_reservation.room.room_type.name if room_reservation.room.room_type else None,
+                        'guests': getattr(room_reservation, 'guests', 1),
+                        'rate_plan_name': None  # Pode ser implementado depois
+                    }
+                    rooms_data.append(room_data)
+            
+            base_dict['rooms'] = rooms_data
+        else:
+            base_dict['rooms'] = []
+        
+        # ✅ ADICIONAR CAMPOS COMPUTADOS BÁSICOS
+        if reservation_obj.guest:
+            base_dict['guest_name'] = f"{reservation_obj.guest.first_name} {reservation_obj.guest.last_name}".strip()
+            base_dict['guest_email'] = reservation_obj.guest.email
+        else:
+            base_dict['guest_name'] = "Hóspede não encontrado"
+            base_dict['guest_email'] = None
+        
+        if reservation_obj.property_obj:
+            base_dict['property_name'] = reservation_obj.property_obj.name
+        else:
+            base_dict['property_name'] = "Propriedade não encontrada"
+        
+        # Campos computados - noites
+        if reservation_obj.check_in_date and reservation_obj.check_out_date:
+            base_dict['nights'] = (reservation_obj.check_out_date - reservation_obj.check_in_date).days
+        else:
+            base_dict['nights'] = 0
+        
+        # Campos computados - pagamento
+        total_amount = float(reservation_obj.total_amount) if reservation_obj.total_amount else 0
+        paid_amount = float(reservation_obj.paid_amount) if reservation_obj.paid_amount else 0
+        
+        base_dict['is_paid'] = paid_amount >= total_amount if total_amount > 0 else True
+        base_dict['balance_due'] = max(0, total_amount - paid_amount)
+        
+        # ✅ RETORNAR RESERVA COM QUARTOS INCLUÍDOS
+        return ReservationResponse(**base_dict)
+        
+    except Exception as e:
+        logger.error(f"Erro ao processar reserva {reservation_id}: {str(e)}")
+        # Fallback para versão básica sem quartos
+        return ReservationResponse.model_validate(reservation_obj)
 
 
 @router.get("/{reservation_id}/details", response_model=ReservationWithDetails)
@@ -1525,6 +1588,13 @@ def cancel_reservation_expanded(
 
 # ===== DISPONIBILIDADE E BUSCA =====
 
+# backend/app/api/v1/endpoints/reservations.py - ENDPOINT CORRIGIDO
+
+# ===== IMPORTS CORRIGIDOS =====
+from sqlalchemy import and_, or_, func, text, desc, asc, not_  # ✅ ADICIONAR not_
+
+# ===== ENDPOINT FUNCIONAL CORRIGIDO =====
+
 @router.post("/check-availability", response_model=AvailabilityResponse)
 def check_availability(
     availability_request: AvailabilityRequest,
@@ -1535,12 +1605,75 @@ def check_availability(
     reservation_service = ReservationService(db)
     
     try:
-        availability = reservation_service.check_availability(availability_request, current_user.tenant_id)
-        return availability
+        # ✅ USAR O MÉTODO DO SERVICE QUE JÁ FUNCIONA
+        available_rooms = reservation_service.get_available_rooms(
+            property_id=availability_request.property_id,
+            check_in_date=availability_request.check_in_date,
+            check_out_date=availability_request.check_out_date,
+            tenant_id=current_user.tenant_id,
+            room_type_id=availability_request.room_type_id,
+            exclude_reservation_id=availability_request.exclude_reservation_id  # ✅ NOVO PARÂMETRO
+        )
+        
+        # ✅ BUSCAR CONFLITOS COM SINTAXE CORRIGIDA
+        conflicts_query = db.query(Reservation.reservation_number).join(ReservationRoom).filter(
+            Reservation.property_id == availability_request.property_id,
+            Reservation.tenant_id == current_user.tenant_id,
+            Reservation.is_active == True,
+            Reservation.status.in_(['pending', 'confirmed', 'checked_in']),
+            # ✅ USAR not_ IMPORTADO CORRETAMENTE
+            not_(
+                or_(
+                    ReservationRoom.check_out_date <= availability_request.check_in_date,
+                    ReservationRoom.check_in_date >= availability_request.check_out_date
+                )
+            )
+        )
+        
+        # ✅ EXCLUIR RESERVA ESPECÍFICA DOS CONFLITOS
+        if availability_request.exclude_reservation_id:
+            conflicts_query = conflicts_query.filter(
+                Reservation.id != availability_request.exclude_reservation_id
+            )
+        
+        conflicting_reservations = [r[0] for r in conflicts_query.distinct().all()]
+        
+        # ✅ PREPARAR DADOS DOS QUARTOS SEM ACESSAR CAMPOS INEXISTENTES
+        rooms_data = []
+        for room in available_rooms:
+            room_data = {
+                'id': room.id,
+                'room_number': room.room_number,
+                'name': getattr(room, 'name', None),  # Uso seguro
+                'room_type_id': room.room_type_id,
+                'room_type_name': room.room_type.name if room.room_type else None,
+                'max_occupancy': getattr(room, 'max_occupancy', 2),  # Padrão seguro
+                'floor': getattr(room, 'floor', None),
+                'building': getattr(room, 'building', None),
+                # ✅ REMOVER REFERÊNCIA A base_rate QUE NÃO EXISTE
+                'rate_per_night': 0.0  # Valor padrão - será sobrescrito pelo frontend se necessário
+            }
+            rooms_data.append(room_data)
+        
+        return AvailabilityResponse(
+            available=len(available_rooms) > 0,
+            available_rooms=rooms_data,
+            total_available_rooms=len(available_rooms),
+            conflicting_reservations=conflicting_reservations if conflicting_reservations else None
+        )
+        
     except ValueError as e:
+        logger.error(f"ValueError em check_availability: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
             detail=str(e)
+        )
+    except Exception as e:
+        # ✅ LOG DETALHADO PARA DEBUG
+        logger.error(f"Erro em check_availability: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro interno do servidor"
         )
 
 
