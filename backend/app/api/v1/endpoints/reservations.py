@@ -1344,7 +1344,7 @@ def confirm_reservation_expanded(
         )
 
 
-@router.post("/{reservation_id}/check-in", response_model=ReservationResponseWithGuestDetails)
+@router.post("/{reservation_id}/check-in", response_model=ReservationResponse)  # ✅ MUDANÇA
 def check_in_reservation_expanded(
     reservation_id: int,
     check_in_data: CheckInRequest,
@@ -1352,13 +1352,9 @@ def check_in_reservation_expanded(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Realiza check-in e retorna dados expandidos"""
+    """Realiza check-in - VERSÃO CORRIGIDA"""
     try:
-        # Buscar reserva com relacionamentos carregados
-        reservation = db.query(Reservation).options(
-            joinedload(Reservation.guest),
-            joinedload(Reservation.property_obj)
-        ).filter(
+        reservation = db.query(Reservation).filter(
             Reservation.id == reservation_id,
             Reservation.tenant_id == current_user.tenant_id
         ).first()
@@ -1369,36 +1365,30 @@ def check_in_reservation_expanded(
                 detail="Reserva não encontrada"
             )
         
-        # Verificar se pode fazer check-in
-        if reservation.status not in ['confirmed', 'pending']:
+        if not reservation.can_check_in:
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail="Reserva não pode fazer check-in no status atual"
+                detail="Check-in não permitido para esta reserva"
             )
         
-        # Realizar check-in
-        reservation.status = 'checked_in'
-        reservation.checked_in_date = check_in_data.actual_check_in_time or datetime.utcnow()
+        # Usar o serviço
+        reservation_service = ReservationService(db)
         
-        if check_in_data.notes:
-            current_notes = reservation.internal_notes or ""
-            reservation.internal_notes = f"{current_notes}\n[Check-in] {check_in_data.notes}".strip()
-        
-        db.commit()
-        
-        # Retornar response expandido
-        base_data = ReservationResponse.model_validate(reservation)
-        
-        return ReservationResponseWithGuestDetails(
-            **base_data.model_dump(),
-            guest_phone=reservation.guest.phone if reservation.guest else None,
-            guest_document_type=reservation.guest.document_type if reservation.guest else None,
-            property_address=reservation.property_obj.address_line1 if reservation.property_obj else None,
-            property_phone=reservation.property_obj.phone if reservation.property_obj else None,
-            deposit_paid=reservation.deposit_paid,
-            is_group_reservation=reservation.is_group_reservation,
-            requires_deposit=reservation.requires_deposit,
+        checked_in_reservation = reservation_service.check_in_reservation(
+            reservation_id=reservation_id,
+            tenant_id=current_user.tenant_id,
+            check_in_request=check_in_data,
+            current_user=current_user,
+            request=request
         )
+        
+        if not checked_in_reservation:
+            raise HTTPException(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                detail="Não foi possível realizar o check-in"
+            )
+        
+        return ReservationResponse.model_validate(checked_in_reservation)
         
     except HTTPException:
         raise
@@ -1406,11 +1396,11 @@ def check_in_reservation_expanded(
         logger.error(f"Erro ao fazer check-in da reserva {reservation_id}: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro ao fazer check-in: {str(e)}"
+            detail="Erro interno do servidor"
         )
 
 
-@router.post("/{reservation_id}/check-out", response_model=ReservationResponseWithGuestDetails)
+@router.post("/{reservation_id}/check-out", response_model=ReservationResponse)  # ✅ MUDANÇA
 def check_out_reservation_expanded(
     reservation_id: int,
     check_out_data: CheckOutRequest,
@@ -1418,13 +1408,9 @@ def check_out_reservation_expanded(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Realiza check-out e retorna dados expandidos"""
+    """Realiza check-out - VERSÃO CORRIGIDA"""
     try:
-        # Buscar reserva com relacionamentos carregados
-        reservation = db.query(Reservation).options(
-            joinedload(Reservation.guest),
-            joinedload(Reservation.property_obj)
-        ).filter(
+        reservation = db.query(Reservation).filter(
             Reservation.id == reservation_id,
             Reservation.tenant_id == current_user.tenant_id
         ).first()
@@ -1435,40 +1421,30 @@ def check_out_reservation_expanded(
                 detail="Reserva não encontrada"
             )
         
-        # Verificar se pode fazer check-out
-        if reservation.status != 'checked_in':
+        if not reservation.can_check_out:
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
-                detail="Reserva não pode fazer check-out no status atual"
+                detail="Check-out não permitido para esta reserva"
             )
         
-        # Realizar check-out
-        reservation.status = 'checked_out'
-        reservation.checked_out_date = check_out_data.actual_check_out_time or datetime.utcnow()
+        # Usar o serviço
+        reservation_service = ReservationService(db)
         
-        if check_out_data.notes:
-            current_notes = reservation.internal_notes or ""
-            reservation.internal_notes = f"{current_notes}\n[Check-out] {check_out_data.notes}".strip()
-        
-        if check_out_data.final_charges:
-            # TODO: Integrar com sistema de cobrança
-            pass
-        
-        db.commit()
-        
-        # Retornar response expandido
-        base_data = ReservationResponse.model_validate(reservation)
-        
-        return ReservationResponseWithGuestDetails(
-            **base_data.model_dump(),
-            guest_phone=reservation.guest.phone if reservation.guest else None,
-            guest_document_type=reservation.guest.document_type if reservation.guest else None,
-            property_address=reservation.property_obj.address_line1 if reservation.property_obj else None,
-            property_phone=reservation.property_obj.phone if reservation.property_obj else None,
-            deposit_paid=reservation.deposit_paid,
-            is_group_reservation=reservation.is_group_reservation,
-            requires_deposit=reservation.requires_deposit,
+        checked_out_reservation = reservation_service.check_out_reservation(
+            reservation_id=reservation_id,
+            tenant_id=current_user.tenant_id,
+            check_out_request=check_out_data,
+            current_user=current_user,
+            request=request
         )
+        
+        if not checked_out_reservation:
+            raise HTTPException(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                detail="Não foi possível realizar o check-out"
+            )
+        
+        return ReservationResponse.model_validate(checked_out_reservation)
         
     except HTTPException:
         raise
@@ -1476,11 +1452,11 @@ def check_out_reservation_expanded(
         logger.error(f"Erro ao fazer check-out da reserva {reservation_id}: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro ao fazer check-out: {str(e)}"
+            detail="Erro interno do servidor"
         )
 
 
-@router.post("/{reservation_id}/cancel", response_model=ReservationResponseWithGuestDetails)
+@router.post("/{reservation_id}/cancel", response_model=ReservationResponse)  # ✅ MUDANÇA: ReservationResponse em vez de ReservationResponseWithGuestDetails
 def cancel_reservation_expanded(
     reservation_id: int,
     cancel_data: CancelReservationRequest,
@@ -1488,13 +1464,10 @@ def cancel_reservation_expanded(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Cancela uma reserva e retorna dados expandidos"""
+    """Cancela uma reserva - VERSÃO CORRIGIDA"""
     try:
-        # Buscar reserva com relacionamentos carregados
-        reservation = db.query(Reservation).options(
-            joinedload(Reservation.guest),
-            joinedload(Reservation.property_obj)
-        ).filter(
+        # ✅ CORREÇÃO: Query mais simples sem relacionamentos complexos
+        reservation = db.query(Reservation).filter(
             Reservation.id == reservation_id,
             Reservation.tenant_id == current_user.tenant_id
         ).first()
@@ -1505,41 +1478,40 @@ def cancel_reservation_expanded(
                 detail="Reserva não encontrada"
             )
         
-        # Verificar se pode cancelar
-        if reservation.status in ['cancelled', 'checked_out']:
+        # Verificar se pode cancelar usando a propriedade do modelo
+        if not reservation.can_cancel:  # ✅ CORREÇÃO: Usar a propriedade do modelo
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Reserva não pode ser cancelada no status atual"
             )
         
-        # Cancelar reserva
-        reservation.status = 'cancelled'
-        reservation.cancelled_date = datetime.utcnow()
-        reservation.cancellation_reason = cancel_data.cancellation_reason
+        # ✅ CORREÇÃO: Usar o serviço em vez de manipular diretamente
+        reservation_service = ReservationService(db)
         
-        if cancel_data.notes:
-            current_notes = reservation.internal_notes or ""
-            reservation.internal_notes = f"{current_notes}\n[Cancelamento] {cancel_data.notes}".strip()
-        
-        if cancel_data.refund_amount:
-            # TODO: Integrar com sistema de reembolso
-            pass
-        
-        db.commit()
-        
-        # Retornar response expandido
-        base_data = ReservationResponse.model_validate(reservation)
-        
-        return ReservationResponseWithGuestDetails(
-            **base_data.model_dump(),
-            guest_phone=reservation.guest.phone if reservation.guest else None,
-            guest_document_type=reservation.guest.document_type if reservation.guest else None,
-            property_address=reservation.property_obj.address_line1 if reservation.property_obj else None,
-            property_phone=reservation.property_obj.phone if reservation.property_obj else None,
-            deposit_paid=reservation.deposit_paid,
-            is_group_reservation=reservation.is_group_reservation,
-            requires_deposit=reservation.requires_deposit,
-        )
+        try:
+            # Cancelar usando o serviço que já tem toda a lógica
+            cancelled_reservation = reservation_service.cancel_reservation(
+                reservation_id=reservation_id,
+                tenant_id=current_user.tenant_id,
+                cancel_request=cancel_data,
+                current_user=current_user,
+                request=request
+            )
+            
+            if not cancelled_reservation:
+                raise HTTPException(
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
+                    detail="Não foi possível cancelar a reserva"
+                )
+            
+            # ✅ CORREÇÃO: Retorno simples que sempre funciona
+            return ReservationResponse.model_validate(cancelled_reservation)
+            
+        except ValueError as e:
+            raise HTTPException(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
         
     except HTTPException:
         raise
@@ -1547,7 +1519,7 @@ def cancel_reservation_expanded(
         logger.error(f"Erro ao cancelar reserva {reservation_id}: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro ao cancelar reserva: {str(e)}"
+            detail="Erro interno do servidor"
         )
 
 
