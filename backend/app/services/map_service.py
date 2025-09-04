@@ -253,16 +253,24 @@ class MapService:
         
         rooms = rooms_query.all()
         
-        # Buscar reservas do período
+        # Buscar reservas do período - USANDO A LÓGICA CORRIGIDA
         reservations_query = self.db.query(Reservation).options(
             joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room)
         ).filter(
             Reservation.tenant_id == tenant_id,
             Reservation.is_active == True,
+            # ✅ CORREÇÃO: Lógica corrigida de sobreposição
             or_(
-                and_(Reservation.check_in_date >= start_date, Reservation.check_in_date < end_date),
-                and_(Reservation.check_out_date > start_date, Reservation.check_out_date <= end_date),
-                and_(Reservation.check_in_date < start_date, Reservation.check_out_date > end_date)
+                # Reservas que se sobrepõem ao período (lógica simplificada e correta)
+                and_(
+                    Reservation.check_out_date > start_date,  # Termina depois do início do período
+                    Reservation.check_in_date < end_date      # Começa antes do fim do período
+                ),
+                # Reservas checked-in que ainda não fizeram checkout (sempre visíveis)
+                and_(
+                    Reservation.status == 'checked_in',
+                    Reservation.check_out_date >= start_date  # Ainda não passou da data de checkout
+                )
             )
         )
         
@@ -434,7 +442,11 @@ class MapService:
         include_cancelled: bool = False
     ) -> List[Reservation]:
         """
-        Busca reservas que se sobrepõem ao período
+        ✅ CORRIGIDO: Busca reservas que se sobrepõem ao período
+        
+        A lógica anterior era muito restritiva e não capturava todas as reservas
+        que deveriam aparecer no mapa. A nova lógica usa uma abordagem mais simples
+        e correta para determinar sobreposição de intervalos.
         """
         query = self.db.query(Reservation).options(
             joinedload(Reservation.guest),
@@ -442,11 +454,26 @@ class MapService:
         ).filter(
             Reservation.tenant_id == tenant_id,
             Reservation.is_active == True,
-            # Reservas que se sobrepõem ao período
+            # ✅ CORREÇÃO PRINCIPAL: Nova lógica de sobreposição
             or_(
-                and_(Reservation.check_in_date >= start_date, Reservation.check_in_date < end_date),
-                and_(Reservation.check_out_date > start_date, Reservation.check_out_date <= end_date),
-                and_(Reservation.check_in_date < start_date, Reservation.check_out_date > end_date)
+                # Caso 1: Reservas que se sobrepõem ao período (lógica matemática correta)
+                # Uma reserva se sobrepõe ao período SE:
+                # - Termina DEPOIS do início do período E
+                # - Começa ANTES do fim do período
+                and_(
+                    Reservation.check_out_date > start_date,  # Termina depois do início
+                    Reservation.check_in_date < end_date      # Começa antes do fim
+                ),
+                # Caso 2: Reservas checked-in sempre visíveis (independente do período)
+                # Reservas que já fizeram check-in devem continuar aparecendo 
+                # no mapa até que façam check-out
+                and_(
+                    Reservation.status == 'checked_in',
+                    or_(
+                        Reservation.check_out_date >= start_date,  # Checkout futuro
+                        Reservation.check_out_date.is_(None)       # Checkout indefinido
+                    )
+                )
             )
         )
         

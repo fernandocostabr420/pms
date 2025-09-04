@@ -267,7 +267,7 @@ export default function RoomMapGrid({
             })}
           </div>
           
-          {/* Blocos contínuos de reservas - NOME COMPLETO DO HÓSPEDE */}
+          {/* ✅ CORREÇÃO PRINCIPAL: Blocos contínuos de reservas com lógica corrigida */}
           {room.reservations.map(reservation => {
             const checkIn = new Date(reservation.check_in_date + 'T00:00:00');
             const checkOut = new Date(reservation.check_out_date + 'T00:00:00');
@@ -275,27 +275,87 @@ export default function RoomMapGrid({
             const startIndex = dateHeaders.findIndex(h => h.date === format(checkIn, 'yyyy-MM-dd'));
             const endIndex = dateHeaders.findIndex(h => h.date === format(checkOut, 'yyyy-MM-dd'));
             
-            if (startIndex === -1) return null;
+            // ✅ CORREÇÃO: Nova lógica para calcular índices considerando reservas que atravessam o período
+            let actualStartIndex = startIndex;
+            let actualEndIndex = endIndex;
+            
+            // Se check-in é anterior ao período visível, começar do primeiro dia visível
+            if (startIndex === -1) {
+              const firstVisibleDate = new Date(dateHeaders[0].date + 'T00:00:00');
+              if (checkOut <= firstVisibleDate) {
+                return null; // Reserva já terminou antes do período visível
+              }
+              actualStartIndex = 0; // Começar do primeiro dia visível
+            }
+            
+            // Se check-out é posterior ao período visível, terminar no último dia visível  
+            if (endIndex === -1) {
+              const lastVisibleDate = new Date(dateHeaders[dateHeaders.length - 1].date + 'T00:00:00');
+              if (checkIn >= lastVisibleDate) {
+                return null; // Reserva ainda não começou no período visível
+              }
+              actualEndIndex = dateHeaders.length - 1; // Terminar no último dia visível
+            }
+            
+            // Se ainda assim os índices são inválidos, não renderizar
+            if (actualStartIndex < 0 || actualEndIndex < 0 || actualStartIndex > actualEndIndex) {
+              return null;
+            }
+            
+            // ✅ CORREÇÃO: Determinar tipo de corte baseado na posição da reserva
+            const reservationStartsInPeriod = startIndex !== -1;
+            const reservationEndsInPeriod = endIndex !== -1;
             
             const cellWidth = gridDimensions.cellWidth;
             
-            let actualEndIndex = endIndex;
-            if (endIndex === -1 || endIndex < startIndex) {
-              actualEndIndex = dateHeaders.length - 1;
-            }
-            
             let blockLeft, blockWidth;
             
-            if (startIndex === actualEndIndex) {
-              blockLeft = startIndex * cellWidth + cellWidth / 2;
-              blockWidth = cellWidth / 2;
+            if (actualStartIndex === actualEndIndex) {
+              // Reserva em uma única célula
+              if (reservationStartsInPeriod) {
+                // Reserva começa na célula visível: do meio até o fim da célula
+                blockLeft = actualStartIndex * cellWidth + cellWidth / 2;
+                blockWidth = cellWidth / 2;
+              } else {
+                // Reserva já estava em andamento: ocupar a célula inteira
+                blockLeft = actualStartIndex * cellWidth;
+                blockWidth = cellWidth;
+              }
             } else {
-              blockLeft = startIndex * cellWidth + cellWidth / 2;
-              const blockEnd = actualEndIndex * cellWidth + cellWidth / 2;
-              blockWidth = blockEnd - blockLeft;
+              // Reserva em múltiplas células
+              if (reservationStartsInPeriod) {
+                // Reserva começa no período visível: do meio da primeira célula
+                blockLeft = actualStartIndex * cellWidth + cellWidth / 2;
+              } else {
+                // Reserva já estava em andamento: do início da primeira célula
+                blockLeft = actualStartIndex * cellWidth;
+              }
+              
+              if (reservationEndsInPeriod) {
+                // Reserva termina no período visível: até o meio da última célula
+                const blockEnd = actualEndIndex * cellWidth + cellWidth / 2;
+                blockWidth = blockEnd - blockLeft;
+              } else {
+                // Reserva continua após o período: até o final da última célula
+                const blockEnd = (actualEndIndex + 1) * cellWidth;
+                blockWidth = blockEnd - blockLeft;
+              }
             }
             
-            const clipPath = `polygon(6px 0%, 100% 0%, calc(100% - 6px) 100%, 0% 100%)`;
+            let clipPath;
+            if (reservationStartsInPeriod && reservationEndsInPeriod) {
+              // Reserva começa e termina no período visível: corte dos dois lados
+              clipPath = `polygon(6px 0%, 100% 0%, calc(100% - 6px) 100%, 0% 100%)`;
+            } else if (reservationStartsInPeriod && !reservationEndsInPeriod) {
+              // Reserva começa no período mas termina depois: corte só à esquerda
+              clipPath = `polygon(6px 0%, 100% 0%, 100% 100%, 0% 100%)`;
+            } else if (!reservationStartsInPeriod && reservationEndsInPeriod) {
+              // Reserva começou antes mas termina no período: corte só à direita
+              clipPath = `polygon(0% 0%, 100% 0%, calc(100% - 6px) 100%, 0% 100%)`;
+            } else {
+              // Reserva atravessa todo o período: sem corte (retângulo)
+              clipPath = `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)`;
+            }
             
             const getReservationColor = (status: string) => {
               switch (status) {
@@ -315,7 +375,7 @@ export default function RoomMapGrid({
             return (
               <div
                 key={reservation.id}
-                onClick={() => handleReservationClick(reservation, room)} // ✅ ATUALIZADO: Novo handler
+                onClick={() => handleReservationClick(reservation, room)}
                 className={cn(
                   "absolute cursor-pointer text-[9px] sm:text-[10px] font-medium flex items-center justify-center",
                   getReservationColor(reservation.status)
@@ -330,7 +390,7 @@ export default function RoomMapGrid({
                   clipPath: clipPath,
                   borderRadius: '0px'
                 }}
-                title={`${reservation.guest_name} - ${reservation.reservation_number} - Clique para detalhes`} // ✅ ATUALIZADO: Texto do tooltip
+                title={`${reservation.guest_name} - ${reservation.reservation_number} - Clique para detalhes`}
               >
                 {/* NOME COMPLETO DO HÓSPEDE */}
                 <span className="font-medium truncate leading-tight px-2">
