@@ -1,4 +1,4 @@
-// frontend/src/components/reservations/EditReservationModal.tsx - VERSÃO LIMPA E DEFINITIVA
+// frontend/src/components/reservations/EditReservationModal.tsx - VERSÃO CORRIGIDA
 
 'use client';
 
@@ -121,7 +121,7 @@ export default function EditReservationModal({
   const [availableRooms, setAvailableRooms] = useState<any[]>([]);
   const [checkingAvailability, setCheckingAvailability] = useState(false);
   const [initialized, setInitialized] = useState(false);
-  const [fullReservation, setFullReservation] = useState<any>(null); // ✅ NOVO: Reserva completa
+  const [fullReservation, setFullReservation] = useState<any>(null);
 
   // ===== FORM =====
   const {
@@ -131,6 +131,7 @@ export default function EditReservationModal({
     reset,
     watch,
     setValue,
+    getValues,
   } = useForm<EditReservationFormData>({
     resolver: zodResolver(editReservationSchema),
     defaultValues: {
@@ -147,12 +148,11 @@ export default function EditReservationModal({
 
   // ===== EFEITOS =====
   
-  // Inicializar quando modal abre
+  // Carregar reserva completa ao abrir modal
   useEffect(() => {
     if (isOpen && reservation && !initialized) {
-      console.log('🔄 Inicializando modal de edição...', reservation);
-      initializeForm();
-      setInitialized(true);
+      console.log('🔄 Iniciando carregamento da reserva completa...', reservation);
+      loadFullReservation();
     }
     
     // Reset quando modal fecha
@@ -161,13 +161,15 @@ export default function EditReservationModal({
       reset();
       setAvailableRooms([]);
       setInitialized(false);
+      setFullReservation(null);
     }
-  }, [isOpen, reservation, initialized]);
+  }, [isOpen, reservation]);
 
-  // Carregar quartos quando datas mudarem
+  // Carregar quartos quando dados mudarem
   useEffect(() => {
     if (
       initialized && 
+      fullReservation &&
       tenantProperty && 
       watchedValues.check_in_date && 
       watchedValues.check_out_date &&
@@ -178,6 +180,7 @@ export default function EditReservationModal({
     }
   }, [
     initialized,
+    fullReservation,
     tenantProperty,
     watchedValues.check_in_date,
     watchedValues.check_out_date,
@@ -187,33 +190,95 @@ export default function EditReservationModal({
 
   // ===== FUNÇÕES =====
 
-  const initializeForm = () => {
-    if (!reservation) return;
+  // 🆕 NOVA FUNÇÃO: Carregar reserva completa
+  const loadFullReservation = async () => {
+    try {
+      setLoading(true);
+      console.log('📋 Carregando reserva completa para ID:', reservation.id);
+      
+      // Carregar reserva completa com todos os detalhes
+      const response = await apiClient.getReservation(reservation.id);
+      console.log('📊 Reserva completa carregada:', response);
+      
+      setFullReservation(response);
+      initializeForm(response);
+      setInitialized(true);
+      
+    } catch (error: any) {
+      console.error('❌ Erro ao carregar reserva completa:', error);
+      toast({
+        title: "Erro",
+        description: "Erro ao carregar dados da reserva",
+        variant: "destructive",
+      });
+      
+      // Fallback para dados básicos
+      setFullReservation(reservation);
+      initializeForm(reservation);
+      setInitialized(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const initializeForm = (reservationData: any) => {
+    if (!reservationData) return;
     
-    console.log('📝 Inicializando formulário com dados da reserva:', reservation);
+    console.log('📝 Inicializando formulário com dados da reserva:', reservationData);
     
-    // Obter quartos da reserva
-    const roomIds = reservation.rooms?.map((room: any) => room.room_id) || [];
-    const currentRatePerNight = reservation.rooms?.[0]?.rate_per_night || 0;
+    // 🔧 CORREÇÃO: Múltiplas estratégias para obter room_id
+    let roomIds: number[] = [];
+    
+    // Estratégia 1: Campo rooms direto
+    if (reservationData.rooms && Array.isArray(reservationData.rooms)) {
+      roomIds = reservationData.rooms
+        .map((room: any) => {
+          // Tentar diferentes propriedades
+          return room.room_id || room.id || room.roomId || null;
+        })
+        .filter((id: any) => id !== null && id !== undefined);
+      
+      console.log('🔍 Room IDs encontrados (estratégia 1 - rooms):', roomIds);
+    }
+    
+    // Estratégia 2: Campo reservation_rooms (backend pode usar esse nome)
+    if (roomIds.length === 0 && reservationData.reservation_rooms && Array.isArray(reservationData.reservation_rooms)) {
+      roomIds = reservationData.reservation_rooms
+        .map((room: any) => room.room_id || room.id || null)
+        .filter((id: any) => id !== null && id !== undefined);
+      
+      console.log('🔍 Room IDs encontrados (estratégia 2 - reservation_rooms):', roomIds);
+    }
+    
+    // Estratégia 3: Fallback - tentar propriedades alternativas
+    if (roomIds.length === 0) {
+      console.log('⚠️ Nenhum room_id encontrado nas estratégias anteriores');
+      console.log('📋 Estrutura completa da reserva:', JSON.stringify(reservationData, null, 2));
+    }
+    
+    // Obter taxa atual
+    const currentRatePerNight = reservationData.rooms?.[0]?.rate_per_night || 
+                               reservationData.reservation_rooms?.[0]?.rate_per_night || 
+                               0;
     
     // Preencher formulário
     const formData: EditReservationFormData = {
-      property_id: reservation.property_id || tenantProperty?.id || 0,
-      check_in_date: reservation.check_in_date,
-      check_out_date: reservation.check_out_date,
-      adults: reservation.adults || 2,
-      children: reservation.children || 0,
+      property_id: reservationData.property_id || tenantProperty?.id || 0,
+      check_in_date: reservationData.check_in_date,
+      check_out_date: reservationData.check_out_date,
+      adults: reservationData.adults || 2,
+      children: reservationData.children || 0,
       selected_rooms: roomIds,
-      total_amount: parseFloat(reservation.total_amount) || 0,
+      total_amount: parseFloat(reservationData.total_amount) || 0,
       room_rate_override: currentRatePerNight,
-      source: reservation.source || 'direct',
-      guest_requests: reservation.guest_requests || '',
-      internal_notes: reservation.internal_notes || '',
-      requires_deposit: reservation.requires_deposit || false,
-      is_group_reservation: reservation.is_group_reservation || false,
+      source: reservationData.source || 'direct',
+      guest_requests: reservationData.guest_requests || '',
+      internal_notes: reservationData.internal_notes || '',
+      requires_deposit: reservationData.requires_deposit || false,
+      is_group_reservation: reservationData.is_group_reservation || false,
     };
     
-    console.log('📋 Dados do formulário:', formData);
+    console.log('📋 Dados do formulário inicializado:', formData);
     reset(formData);
   };
 
@@ -224,64 +289,126 @@ export default function EditReservationModal({
     
     try {
       console.log('🔍 Buscando quartos disponíveis...');
+      console.log('📊 Parâmetros de busca:', {
+        property_id: tenantProperty.id,
+        check_in_date: watchedValues.check_in_date,
+        check_out_date: watchedValues.check_out_date,
+        adults: watchedValues.adults,
+        children: watchedValues.children,
+        exclude_reservation_id: fullReservation?.id
+      });
       
-      // ✅ NOVA CHAMADA - Com exclude_reservation_id
+      // 🆕 NOVA CHAMADA - Com exclude_reservation_id
       const response = await apiClient.checkAvailability({
         property_id: tenantProperty.id,
         check_in_date: watchedValues.check_in_date,
         check_out_date: watchedValues.check_out_date,
         adults: watchedValues.adults,
         children: watchedValues.children,
-        exclude_reservation_id: reservation.id  // ✅ EXCLUIR RESERVA ATUAL
+        exclude_reservation_id: fullReservation?.id
       });
       
       console.log('📊 Resposta da API:', response);
       
       const roomsAvailable = response.available_rooms || [];
       
-      // ✅ OBTER QUARTOS ATUAIS DA RESERVA
-      const currentRoomIds = reservation.rooms?.map((room: any) => room.room_id) || [];
-      console.log('🔍 Quartos atuais da reserva:', currentRoomIds);
-      console.log('🔍 Quartos no watch antes da seleção:', watchedValues.selected_rooms);
+      // 🔧 OBTER QUARTOS ATUAIS DA RESERVA (com fallback robusto)
+      const currentRoomIds = getValues('selected_rooms') || [];
+      console.log('🔍 Quartos selecionados no formulário:', currentRoomIds);
       
-      // ✅ MARCAR QUARTOS ATUAIS
-      roomsAvailable.forEach((room: any) => {
-        if (currentRoomIds.includes(room.id)) {
-          room.isCurrentReservation = true;
-        }
-      });
+      // 🆕 MARCAR QUARTOS ATUAIS COMO DISPONÍVEIS (forçar inclusão)
+      const enhancedRooms = [...roomsAvailable];
       
-      console.log('🏠 Quartos disponíveis (incluindo atual):', roomsAvailable);
-      setAvailableRooms(roomsAvailable);
-      
-      // ✅ AUTO-SELECIONAR FORÇADAMENTE - Sempre selecionar o quarto atual
-      if (currentRoomIds.length > 0) {
-        const availableRoomIds = roomsAvailable.map((room: any) => room.id);
-        const validRoomIds = currentRoomIds.filter(id => availableRoomIds.includes(id));
+      // Se temos quartos selecionados que não estão na lista, incluí-los
+      for (const roomId of currentRoomIds) {
+        const roomExists = enhancedRooms.find(room => room.id === roomId);
         
-        if (validRoomIds.length > 0) {
-          console.log('🎯 Auto-selecionando quarto atual (forçado):', validRoomIds);
-          setValue('selected_rooms', validRoomIds);
+        if (!roomExists) {
+          console.log(`🔧 Adicionando quarto atual ${roomId} na lista (não estava disponível)`);
           
-          // ✅ VERIFICAR SE A SELEÇÃO FUNCIONOU
-          setTimeout(() => {
-            const currentSelected = getValues('selected_rooms');
-            console.log('✅ Quartos selecionados após setValue:', currentSelected);
-          }, 100);
+          // Buscar dados do quarto atual
+          try {
+            const roomData = await apiClient.getRoom(roomId);
+            enhancedRooms.push({
+              id: roomData.id,
+              room_number: roomData.room_number,
+              name: roomData.name,
+              room_type_id: roomData.room_type_id,
+              room_type_name: roomData.room_type?.name || 'N/A',
+              max_occupancy: roomData.max_occupancy || 2,
+              rate_per_night: roomData.base_rate || 0,
+              isCurrentReservation: true
+            });
+          } catch (error) {
+            console.warn(`⚠️ Erro ao buscar dados do quarto ${roomId}:`, error);
+            
+            // Fallback - adicionar com dados básicos
+            enhancedRooms.push({
+              id: roomId,
+              room_number: `Quarto ${roomId}`,
+              name: `Quarto ${roomId}`,
+              room_type_id: 0,
+              room_type_name: 'Quarto Atual',
+              max_occupancy: 2,
+              rate_per_night: 0,
+              isCurrentReservation: true
+            });
+          }
         } else {
-          console.warn('⚠️ Nenhum quarto atual encontrado na lista de disponíveis');
+          // Marcar como quarto atual
+          roomExists.isCurrentReservation = true;
         }
-      } else {
-        console.warn('⚠️ Reserva não tem quartos definidos');
+      }
+      
+      console.log('🏠 Quartos disponíveis (incluindo atuais):', enhancedRooms);
+      setAvailableRooms(enhancedRooms);
+      
+      // 🆕 GARANTIR SELEÇÃO DOS QUARTOS ATUAIS
+      if (currentRoomIds.length > 0) {
+        console.log('🎯 Garantindo seleção dos quartos atuais:', currentRoomIds);
+        setValue('selected_rooms', currentRoomIds);
+        
+        // Verificar se funcionou
+        setTimeout(() => {
+          const finalSelection = getValues('selected_rooms');
+          console.log('✅ Seleção final confirmada:', finalSelection);
+        }, 100);
       }
       
     } catch (error: any) {
       console.error('❌ Erro ao verificar disponibilidade:', error);
-      toast({
-        title: "Erro",
-        description: "Erro ao carregar quartos disponíveis",
-        variant: "destructive",
-      });
+      
+      // 🆕 FALLBACK: Carregar quartos da propriedade sem verificação de disponibilidade
+      try {
+        console.log('🔄 Tentando fallback - carregando todos os quartos da propriedade...');
+        const roomsResponse = await apiClient.getRooms({ 
+          property_id: tenantProperty.id,
+          per_page: 100 
+        });
+        
+        const allRooms = roomsResponse.rooms.map(room => ({
+          id: room.id,
+          room_number: room.room_number,
+          name: room.name,
+          room_type_id: room.room_type_id,
+          room_type_name: room.room_type?.name || 'N/A',
+          max_occupancy: room.max_occupancy || 2,
+          rate_per_night: room.base_rate || 0,
+          isCurrentReservation: currentRoomIds.includes(room.id)
+        }));
+        
+        setAvailableRooms(allRooms);
+        console.log('🏠 Fallback: Carregados todos os quartos da propriedade:', allRooms);
+        
+      } catch (fallbackError) {
+        console.error('❌ Erro no fallback:', fallbackError);
+        toast({
+          title: "Erro",
+          description: "Erro ao carregar quartos. Tente novamente.",
+          variant: "destructive",
+        });
+      }
+      
     } finally {
       setCheckingAvailability(false);
     }
@@ -366,7 +493,7 @@ export default function EditReservationModal({
     }
     
     // Reset seleção de quartos para recarregar
-    setValue('selected_rooms', []);
+    // setValue('selected_rooms', []); // Comentado para manter seleção
   };
 
   const onSubmit = async (data: EditReservationFormData) => {
@@ -396,7 +523,7 @@ export default function EditReservationModal({
       };
 
       console.log('📤 Enviando para API:', reservationData);
-      await apiClient.updateReservation(reservation.id, reservationData);
+      await apiClient.updateReservation(fullReservation.id, reservationData);
       
       toast({
         title: "Sucesso",
@@ -472,10 +599,10 @@ export default function EditReservationModal({
           </DialogTitle>
         </DialogHeader>
 
-        {loadingProperty ? (
+        {(loadingProperty || loading) ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin mr-2" />
-            <span>Carregando propriedade...</span>
+            <span>Carregando dados...</span>
           </div>
         ) : (
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5 p-3">
@@ -504,18 +631,18 @@ export default function EditReservationModal({
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="flex items-center gap-2">
                     <User className="h-4 w-4 text-gray-500" />
-                    <span className="text-sm">{reservation.guest?.full_name || 'N/A'}</span>
+                    <span className="text-sm">{reservation.guest?.full_name || fullReservation?.guest?.full_name || 'N/A'}</span>
                   </div>
-                  {reservation.guest?.email && (
+                  {(reservation.guest?.email || fullReservation?.guest?.email) && (
                     <div className="flex items-center gap-2">
                       <Mail className="h-4 w-4 text-gray-500" />
-                      <span className="text-sm">{reservation.guest.email}</span>
+                      <span className="text-sm">{reservation.guest?.email || fullReservation?.guest?.email}</span>
                     </div>
                   )}
-                  {reservation.guest?.phone && (
+                  {(reservation.guest?.phone || fullReservation?.guest?.phone) && (
                     <div className="flex items-center gap-2">
                       <Phone className="h-4 w-4 text-gray-500" />
-                      <span className="text-sm">{reservation.guest.phone}</span>
+                      <span className="text-sm">{reservation.guest?.phone || fullReservation?.guest?.phone}</span>
                     </div>
                   )}
                 </div>
