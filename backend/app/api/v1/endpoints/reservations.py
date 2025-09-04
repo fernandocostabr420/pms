@@ -864,7 +864,7 @@ def get_todays_reservations_improved(
             detail=f"Erro ao buscar reservas de hoje: {str(e)}"
         )
 
-@router.get("/recent", response_model=List[ReservationResponseWithGuestDetails])
+@router.get("/recent", response_model=List[Dict[str, Any]])
 def get_recent_reservations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -889,10 +889,28 @@ def get_recent_reservations(
             desc(Reservation.created_at)
         ).limit(limit).all()
         
-        return [
-            ReservationResponseWithGuestDetails.model_validate(reservation)
-            for reservation in recent_reservations
-        ]
+        # ✅ CONSTRUIR DICT MANUAL (mesmo padrão do checked-in-pending-payment)
+        reservations_list = []
+        for reservation in recent_reservations:
+            nights = (reservation.check_out_date - reservation.check_in_date).days
+            
+            reservations_list.append({
+                "id": reservation.id,
+                "reservation_number": reservation.reservation_number,
+                "guest_name": reservation.guest.full_name if reservation.guest else "Sem nome",  # ✅ ACESSO DIRETO
+                "guest_email": reservation.guest.email if reservation.guest else None,
+                "property_name": reservation.property_obj.name if reservation.property_obj else None,
+                "check_in_date": reservation.check_in_date.isoformat(),
+                "check_out_date": reservation.check_out_date.isoformat(),
+                "status": reservation.status,
+                "total_amount": float(reservation.total_amount),
+                "paid_amount": float(reservation.paid_amount),
+                "balance_due": float(reservation.total_amount - reservation.paid_amount),
+                "nights": nights,
+                "created_at": reservation.created_at.isoformat() if reservation.created_at else None
+            })
+        
+        return reservations_list
         
     except Exception as e:
         logger.error(f"Erro ao buscar reservas recentes: {str(e)}")
