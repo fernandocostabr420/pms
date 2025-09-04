@@ -7,6 +7,7 @@ import { ptBR } from 'date-fns/locale';
 import { useReservationDetails } from '@/hooks/useReservationDetails';
 import { ReservationHeader } from '@/components/reservations/ReservationHeader';
 import CancelReservationModal from '@/components/reservations/CancelReservationModal';
+import EditReservationModal from '@/components/reservations/EditReservationModal'; // ✅ NOVO IMPORT
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Loader2 } from 'lucide-react';
@@ -20,6 +21,7 @@ export default function ReservationDetailsPage() {
   
   const { data, loading, error, refresh } = useReservationDetails(reservationId);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false); // ✅ NOVO ESTADO
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const handleAction = async (action: string) => {
@@ -31,7 +33,8 @@ export default function ReservationDetailsPage() {
         break;
         
       case 'edit':
-        router.push(`/dashboard/reservations/${reservationId}/edit`);
+        // ✅ MODIFICADO: Abre modal em vez de navegar
+        setEditModalOpen(true);
         break;
         
       case 'checkin':
@@ -64,6 +67,20 @@ export default function ReservationDetailsPage() {
       default:
         console.log('Ação não implementada:', action);
     }
+  };
+
+  // ✅ NOVO HANDLER PARA SUCESSO DA EDIÇÃO
+  const handleEditSuccess = async () => {
+    setEditModalOpen(false);
+    
+    // Recarregar dados da reserva
+    await refresh();
+    
+    toast({
+      title: 'Sucesso',
+      description: 'Reserva atualizada com sucesso',
+      variant: 'default',
+    });
   };
 
   const handleCancelConfirm = async (cancelData: {
@@ -443,13 +460,23 @@ export default function ReservationDetailsPage() {
         )}
       </div>
 
-      {/* ✅ MODAL DE CANCELAMENTO */}
+      {/* ===== MODAIS ===== */}
+      
+      {/* Modal de Cancelamento */}
       <CancelReservationModal
         isOpen={cancelModalOpen}
         onClose={() => setCancelModalOpen(false)}
         onConfirm={handleCancelConfirm}
         reservationNumber={data.reservation_number}
         loading={actionLoading === 'cancel'}
+      />
+
+      {/* ✅ NOVO MODAL DE EDIÇÃO */}
+      <EditReservationModal
+        isOpen={editModalOpen}
+        onClose={() => setEditModalOpen(false)}
+        onSuccess={handleEditSuccess}
+        reservation={data}
       />
     </div>
   );
