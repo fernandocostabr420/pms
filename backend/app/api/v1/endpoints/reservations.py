@@ -133,7 +133,7 @@ def list_reservations(
 ):
     """
     Lista reservas do tenant com filtros avançados e paginação
-    Versão corrigida - busca por nome funcional
+    Versão corrigida - busca por nome funcional e quartos com schema correto
     """
     
     try:
@@ -425,17 +425,27 @@ def list_reservations(
             else:
                 reservation_dict['nights'] = 0
             
-            # Campos computados - quartos
+            # ===== CORREÇÃO: Campos computados - quartos =====
             if include_room_details and reservation.reservation_rooms:
                 rooms_data = []
                 for room_reservation in reservation.reservation_rooms:
                     if room_reservation.room:  # Verificar se o quarto existe
+                        # Corrigir para atender ao schema ReservationRoomResponse
                         room_data = {
-                            'id': room_reservation.room_id,
+                            'id': room_reservation.id,  # ✅ ID da reservation_room, não do room
+                            'reservation_id': room_reservation.reservation_id,  # ✅ Campo obrigatório
+                            'room_id': room_reservation.room_id,  # ✅ Campo obrigatório
+                            'check_in_date': room_reservation.check_in_date.isoformat() if room_reservation.check_in_date else reservation.check_in_date.isoformat(),  # ✅ Campo obrigatório
+                            'check_out_date': room_reservation.check_out_date.isoformat() if room_reservation.check_out_date else reservation.check_out_date.isoformat(),  # ✅ Campo obrigatório
+                            'rate_per_night': room_reservation.rate_per_night if hasattr(room_reservation, 'rate_per_night') else None,
+                            'total_amount': room_reservation.total_amount if hasattr(room_reservation, 'total_amount') else None,  # ✅ Campo obrigatório
+                            'status': room_reservation.status if hasattr(room_reservation, 'status') else 'confirmed',  # ✅ Campo obrigatório
+                            'notes': room_reservation.notes if hasattr(room_reservation, 'notes') else None,
                             'room_number': room_reservation.room.room_number,
+                            'room_name': room_reservation.room.name if hasattr(room_reservation.room, 'name') else None,
                             'room_type_name': room_reservation.room.room_type.name if room_reservation.room.room_type else None,
-                            'rate_amount': float(room_reservation.rate_amount) if hasattr(room_reservation, 'rate_amount') and room_reservation.rate_amount else 0,
-                            'guests': room_reservation.guests if hasattr(room_reservation, 'guests') else 1
+                            'guests': room_reservation.guests if hasattr(room_reservation, 'guests') else 1,
+                            'rate_plan_name': None  # Pode ser implementado depois
                         }
                         rooms_data.append(room_data)
                 

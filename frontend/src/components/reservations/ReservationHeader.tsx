@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { ReservationDetailedResponse } from '@/types/reservation-details';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { XCircle } from 'lucide-react';
 
 interface ReservationHeaderProps {
   data: ReservationDetailedResponse;
@@ -39,26 +40,39 @@ export function ReservationHeader({ data, onAction }: ReservationHeaderProps) {
           </Badge>
           
           {/* Botões de ação baseados em permissions */}
-          {data.actions.can_check_in && (
-            <Button onClick={() => onAction('checkin')}>
-              Check-in
-            </Button>
-          )}
-          {data.actions.can_check_out && (
-            <Button onClick={() => onAction('checkout')}>
-              Check-out
-            </Button>
-          )}
-          {data.actions.can_edit && (
-            <Button variant="outline" onClick={() => onAction('edit')}>
-              Editar
-            </Button>
-          )}
-          {data.actions.can_add_payment && (
-            <Button variant="outline" onClick={() => onAction('payment')}>
-              Pagamento
-            </Button>
-          )}
+          <div className="flex gap-2 flex-wrap">
+            {data.actions.can_check_in && (
+              <Button onClick={() => onAction('checkin')}>
+                Check-in
+              </Button>
+            )}
+            {data.actions.can_check_out && (
+              <Button onClick={() => onAction('checkout')}>
+                Check-out
+              </Button>
+            )}
+            {data.actions.can_edit && (
+              <Button variant="outline" onClick={() => onAction('edit')}>
+                Editar
+              </Button>
+            )}
+            {data.actions.can_add_payment && (
+              <Button variant="outline" onClick={() => onAction('payment')}>
+                Pagamento
+              </Button>
+            )}
+            {/* ✅ BOTÃO DE CANCELAMENTO */}
+            {data.actions.can_cancel && (
+              <Button 
+                variant="destructive" 
+                onClick={() => onAction('cancel')}
+                className="flex items-center gap-2"
+              >
+                <XCircle className="h-4 w-4" />
+                Cancelar
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 

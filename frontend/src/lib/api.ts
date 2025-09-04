@@ -151,6 +151,14 @@ export interface TodaysReservationsImproved {
   current_guests: any[];
 }
 
+import {
+  PaymentResponse,
+  PaymentListResponse, 
+  PaymentCreate,
+  PaymentUpdate,
+  PaymentStatusUpdate
+} from '@/types/payment';
+
 class PMSApiClient {
   private client: AxiosInstance;
   private baseURL: string;
@@ -1447,6 +1455,60 @@ async getTodaysReservationsImproved(propertyId?: number, includeDetails: boolean
     });
     return response.data;
   }
+
+  // ===== PAYMENT METHODS =====
+
+async getPayments(params?: {
+  page?: number;
+  per_page?: number;
+  reservation_id?: number;
+  status?: string;
+  payment_method?: string;
+  payment_date_from?: string;
+  payment_date_to?: string;
+  min_amount?: number;
+  max_amount?: number;
+  is_partial?: boolean;
+  is_refund?: boolean;
+  search?: string;
+}): Promise<PaymentListResponse> {
+  const response = await this.get<PaymentListResponse>('/payments/', params);
+  return response.data;
+}
+
+async createPayment(data: PaymentCreate): Promise<PaymentResponse> {
+  const response = await this.post<PaymentResponse>('/payments/', data);
+  return response.data;
+}
+
+async getPayment(id: number): Promise<PaymentResponse> {
+  const response = await this.get<PaymentResponse>(`/payments/${id}`);
+  return response.data;
+}
+
+async updatePayment(id: number, data: PaymentUpdate): Promise<PaymentResponse> {
+  const response = await this.put<PaymentResponse>(`/payments/${id}`, data);
+  return response.data;
+}
+
+async deletePayment(id: number): Promise<void> {
+  await this.delete(`/payments/${id}`);
+}
+
+async updatePaymentStatus(id: number, data: PaymentStatusUpdate): Promise<PaymentResponse> {
+  const response = await this.put<PaymentResponse>(`/payments/${id}/status`, data);
+  return response.data;
+}
+
+async getPaymentByNumber(paymentNumber: string): Promise<PaymentResponse> {
+  const response = await this.get<PaymentResponse>(`/payments/by-number/${paymentNumber}`);
+  return response.data;
+}
+
+async getPaymentsByReservation(reservationId: number): Promise<PaymentResponse[]> {
+  const response = await this.get<PaymentResponse[]>(`/payments/by-reservation/${reservationId}`);
+  return response.data;
+}
 
   // ===== CRIAR RESERVA RÁPIDA (MÉTODO ORIGINAL MANTIDO) =====
 

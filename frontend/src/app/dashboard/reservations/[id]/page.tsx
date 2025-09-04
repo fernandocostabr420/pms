@@ -1,13 +1,17 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useReservationDetails } from '@/hooks/useReservationDetails';
 import { ReservationHeader } from '@/components/reservations/ReservationHeader';
+import CancelReservationModal from '@/components/reservations/CancelReservationModal';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Loader2 } from 'lucide-react';
+import { toast } from '@/hooks/use-toast';
+import apiClient from '@/lib/api';
 
 export default function ReservationDetailsPage() {
   const params = useParams();
@@ -15,11 +19,85 @@ export default function ReservationDetailsPage() {
   const reservationId = parseInt(params.id as string);
   
   const { data, loading, error, refresh } = useReservationDetails(reservationId);
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const handleAction = async (action: string) => {
     console.log('Ação:', action);
-    // TODO: Implementar modais/ações específicas
-    // Por exemplo: abrir modal de check-in, pagamento, etc.
+    
+    switch (action) {
+      case 'cancel':
+        setCancelModalOpen(true);
+        break;
+        
+      case 'edit':
+        router.push(`/dashboard/reservations/${reservationId}/edit`);
+        break;
+        
+      case 'checkin':
+        // TODO: Implementar modal de check-in
+        toast({
+          title: 'Em desenvolvimento',
+          description: 'Funcionalidade de check-in será implementada em breve.',
+          variant: 'default',
+        });
+        break;
+        
+      case 'checkout':
+        // TODO: Implementar modal de check-out
+        toast({
+          title: 'Em desenvolvimento',
+          description: 'Funcionalidade de check-out será implementada em breve.',
+          variant: 'default',
+        });
+        break;
+        
+      case 'payment':
+        // TODO: Implementar modal de pagamento
+        toast({
+          title: 'Em desenvolvimento',
+          description: 'Funcionalidade de pagamento será implementada em breve.',
+          variant: 'default',
+        });
+        break;
+        
+      default:
+        console.log('Ação não implementada:', action);
+    }
+  };
+
+  const handleCancelConfirm = async (cancelData: {
+    cancellation_reason: string;
+    refund_amount?: number;
+    notes?: string;
+  }) => {
+    if (!data) return;
+
+    try {
+      setActionLoading('cancel');
+      
+      await apiClient.cancelReservation(data.id, cancelData);
+      
+      toast({
+        title: 'Reserva Cancelada',
+        description: `A reserva ${data.reservation_number} foi cancelada com sucesso.`,
+        variant: 'default',
+      });
+      
+      // Atualizar dados da página
+      await refresh();
+      
+    } catch (error: any) {
+      console.error('Erro ao cancelar reserva:', error);
+      toast({
+        title: 'Erro ao Cancelar',
+        description: error.response?.data?.detail || 'Erro interno do servidor',
+        variant: 'destructive',
+      });
+      throw error; // Re-throw para o modal tratar
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   if (loading) {
@@ -44,7 +122,20 @@ export default function ReservationDetailsPage() {
   }
 
   if (!data) {
-    return <div>Reserva não encontrada</div>;
+    return (
+      <div className="p-6">
+        <div className="text-center">
+          <p className="text-gray-500">Reserva não encontrada</p>
+          <Button 
+            onClick={() => router.push('/dashboard/reservations')} 
+            className="mt-2" 
+            variant="outline"
+          >
+            Voltar para Reservas
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -351,6 +442,15 @@ export default function ReservationDetailsPage() {
           <p className="text-gray-500 text-center py-8">Nenhum histórico de alterações disponível</p>
         )}
       </div>
+
+      {/* ✅ MODAL DE CANCELAMENTO */}
+      <CancelReservationModal
+        isOpen={cancelModalOpen}
+        onClose={() => setCancelModalOpen(false)}
+        onConfirm={handleCancelConfirm}
+        reservationNumber={data.reservation_number}
+        loading={actionLoading === 'cancel'}
+      />
     </div>
   );
 }
