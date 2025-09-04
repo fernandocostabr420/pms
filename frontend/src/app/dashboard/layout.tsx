@@ -51,7 +51,6 @@ export default function DashboardLayout({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const router = useRouter();
 
-  // Debug: Verificar se os dados estão chegando
   useEffect(() => {
     console.log('Layout Debug:', { user, tenant, isAuthenticated, isLoading });
   }, [user, tenant, isAuthenticated, isLoading]);
@@ -103,8 +102,8 @@ export default function DashboardLayout({
         <SidebarContent />
       </div>
 
-      {/* Main content */}
-      <div className="md:pl-64 flex flex-col flex-1 min-h-screen">
+      {/* ✅ MUDANÇA PRINCIPAL: Adicionar classe dashboard-main-content */}
+      <div className="md:pl-64 flex flex-col flex-1 min-h-screen dashboard-main-content">
         {/* Top header - LIMPO */}
         <div className="sticky top-0 z-10 flex-shrink-0 flex h-16 bg-white shadow">
           {/* Mobile menu button */}
@@ -207,9 +206,9 @@ export default function DashboardLayout({
           </div>
         </div>
 
-        {/* Page content */}
-        <main className="flex-1 overflow-hidden p-4">
-          <div className="h-full">
+        {/* ✅ MUDANÇA PRINCIPAL: Page content com contenção melhorada */}
+        <main className="flex-1 overflow-x-auto p-4 max-w-full">
+          <div className="h-full max-w-full card-container">
             {children}
           </div>
         </main>

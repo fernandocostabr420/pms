@@ -60,7 +60,7 @@ interface ReservationTableProps {
   onView?: (reservation: ReservationResponseWithGuestDetails) => void;
   onEdit?: (reservation: ReservationResponseWithGuestDetails) => void;
   onQuickAction?: (reservation: ReservationResponseWithGuestDetails, action: string) => void;
-  onReservationClick?: (reservation: ReservationResponseWithGuestDetails) => void; // ✅ Nova prop
+  onReservationClick?: (reservation: ReservationResponseWithGuestDetails) => void;
   actionLoading?: { [key: number]: string | null };
 }
 
@@ -187,23 +187,18 @@ const getQuickActions = (reservation: ReservationResponseWithGuestDetails) => {
   return actions;
 };
 
-// Função para comparar valores na ordenação
 const compareValues = (a: any, b: any, direction: 'asc' | 'desc') => {
-  // Converter valores vazios/nulos para string vazia para ordenação consistente
   const valueA = a === null || a === undefined ? '' : a;
   const valueB = b === null || b === undefined ? '' : b;
   
-  // Se forem números
   if (typeof valueA === 'number' && typeof valueB === 'number') {
     return direction === 'asc' ? valueA - valueB : valueB - valueA;
   }
   
-  // Se forem datas
   if (valueA instanceof Date && valueB instanceof Date) {
     return direction === 'asc' ? valueA.getTime() - valueB.getTime() : valueB.getTime() - valueA.getTime();
   }
   
-  // Para strings (incluindo datas em string)
   const stringA = String(valueA).toLowerCase();
   const stringB = String(valueB).toLowerCase();
   
@@ -214,7 +209,6 @@ const compareValues = (a: any, b: any, direction: 'asc' | 'desc') => {
   }
 };
 
-// Função para extrair o valor correto para ordenação
 const getSortValue = (reservation: ReservationResponseWithGuestDetails, key: string) => {
   switch (key) {
     case 'id':
@@ -248,12 +242,11 @@ export default function ReservationTable({
   onView,
   onEdit,
   onQuickAction,
-  onReservationClick, // ✅ Nova prop
+  onReservationClick,
   actionLoading = {},
 }: ReservationTableProps) {
   const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'id', direction: 'desc' });
 
-  // Ordenar reservas baseado na configuração atual
   const sortedReservations = useMemo(() => {
     if (!reservations || reservations.length === 0) return [];
     
@@ -275,15 +268,12 @@ export default function ReservationTable({
     }
   };
 
-  // ✅ Handler do clique na linha
   const handleRowClick = (reservation: ReservationResponseWithGuestDetails, event: React.MouseEvent) => {
-    // Ignorar clique se foi em um botão/dropdown (para não interferir com ações)
     const target = event.target as HTMLElement;
     if (target.closest('button') || target.closest('[role="menuitem"]')) {
       return;
     }
     
-    // Chamar callback se disponível
     onReservationClick?.(reservation);
   };
 
@@ -323,7 +313,9 @@ export default function ReservationTable({
       <div className="bg-white border rounded-lg shadow-sm p-8">
         <div className="text-center text-gray-500">
           <Calendar className="mx-auto h-12 w-12 mb-4 opacity-50" />
-          <h3 className="text-lg font-medium mb-2">Nenhuma reserva encontrada</h3>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">
+            Nenhuma reserva encontrada
+          </h3>
           <p className="text-sm">
             Não há reservas que correspondam aos filtros selecionados.
           </p>
@@ -333,8 +325,9 @@ export default function ReservationTable({
   }
 
   return (
-    <div className="bg-white border rounded-lg shadow-sm">
-      <div className="overflow-x-auto">
+    <div className="bg-white border rounded-lg shadow-sm card-container">
+      {/* ✅ MUDANÇA PRINCIPAL: Adicionar classe table-container */}
+      <div className="table-container">
         <Table>
           <TableHeader>
             <TableRow className="bg-gray-50/50">
@@ -394,10 +387,9 @@ export default function ReservationTable({
               return (
                 <TableRow 
                   key={reservation.id} 
-                  className="hover:bg-gray-50/50 transition-colors cursor-pointer" // ✅ Adicionar cursor pointer
-                  onClick={(e) => handleRowClick(reservation, e)} // ✅ Handler do clique
+                  className="hover:bg-gray-50/50 transition-colors cursor-pointer"
+                  onClick={(e) => handleRowClick(reservation, e)}
                 >
-                  {/* ID */}
                   <TableCell className="font-mono text-sm text-gray-600">
                     <div className="flex items-center">
                       <Hash className="h-3 w-3 mr-1 text-gray-400" />
@@ -405,7 +397,6 @@ export default function ReservationTable({
                     </div>
                   </TableCell>
 
-                  {/* Hóspede */}
                   <TableCell>
                     <div className="font-medium text-gray-900">
                       {reservation.guest_name || 'N/A'}
@@ -417,7 +408,6 @@ export default function ReservationTable({
                     )}
                   </TableCell>
 
-                  {/* Contato */}
                   <TableCell>
                     <div className="flex flex-col space-y-1">
                       {reservation.guest_phone && (
@@ -435,7 +425,6 @@ export default function ReservationTable({
                     </div>
                   </TableCell>
 
-                  {/* Check-in */}
                   <TableCell>
                     <div className="flex items-center text-sm">
                       <CalendarCheck className="h-4 w-4 mr-2 text-green-600" />
@@ -446,7 +435,6 @@ export default function ReservationTable({
                     </div>
                   </TableCell>
 
-                  {/* Check-out */}
                   <TableCell>
                     <div className="flex items-center text-sm">
                       <CalendarX className="h-4 w-4 mr-2 text-red-600" />
@@ -459,7 +447,6 @@ export default function ReservationTable({
                     </div>
                   </TableCell>
 
-                  {/* Número de hóspedes */}
                   <TableCell className="text-center">
                     <div className="flex items-center justify-center">
                       <Users className="h-4 w-4 mr-1 text-gray-500" />
@@ -467,7 +454,6 @@ export default function ReservationTable({
                     </div>
                   </TableCell>
 
-                  {/* Propriedade */}
                   <TableCell>
                     <div className="flex items-center">
                       <Building className="h-4 w-4 mr-2 text-gray-500" />
@@ -477,7 +463,6 @@ export default function ReservationTable({
                     </div>
                   </TableCell>
 
-                  {/* Quartos */}
                   <TableCell>
                     <div className="flex items-center">
                       <BedDouble className="h-4 w-4 mr-2 text-gray-500" />
@@ -490,7 +475,6 @@ export default function ReservationTable({
                     </div>
                   </TableCell>
 
-                  {/* Status */}
                   <TableCell>
                     <Badge 
                       variant="secondary" 
@@ -500,14 +484,12 @@ export default function ReservationTable({
                     </Badge>
                   </TableCell>
 
-                  {/* Data de criação */}
                   <TableCell>
                     <div className="text-sm text-gray-600">
                       {formatDate(reservation.created_date)}
                     </div>
                   </TableCell>
 
-                  {/* Origem/Canal */}
                   <TableCell>
                     {source ? (
                       <div className="flex items-center">
@@ -529,7 +511,6 @@ export default function ReservationTable({
                     )}
                   </TableCell>
 
-                  {/* Valor total */}
                   <TableCell>
                     <div className="flex items-center font-medium">
                       <DollarSign className="h-4 w-4 mr-1 text-green-600" />
@@ -537,7 +518,6 @@ export default function ReservationTable({
                     </div>
                   </TableCell>
 
-                  {/* Status do pagamento */}
                   <TableCell>
                     <div className="flex flex-col space-y-1">
                       {reservation.is_paid ? (
@@ -557,7 +537,6 @@ export default function ReservationTable({
                     </div>
                   </TableCell>
 
-                  {/* Ações */}
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -590,7 +569,6 @@ export default function ReservationTable({
                           Editar
                         </DropdownMenuItem>
                         
-                        {/* Ações rápidas baseadas no status */}
                         {quickActions.map((action) => (
                           <DropdownMenuItem
                             key={action.key}

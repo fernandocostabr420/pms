@@ -356,8 +356,8 @@ export default function RoomMapPage() {
               </p>
             </div>
           ) : mapData ? (
-            <div className="w-full room-map-container">
-              <div className="w-full overflow-x-auto room-map-scroll">
+            <div className="w-full room-map-container max-w-full">
+              <div className="w-full overflow-x-auto room-map-scroll" style={{ maxWidth: '100vw' }}>
                 <RoomMapGrid
                   mapData={mapData}
                   onRoomClick={handleRoomClick}
