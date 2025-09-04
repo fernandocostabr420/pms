@@ -98,6 +98,59 @@ interface ReservationStatsExtended {
   }>;
 }
 
+// ===== NOVOS TIPOS PARA DASHBOARD =====
+export interface RecentReservationResponse {
+  id: number;
+  reservation_number: string;
+  guest_name: string | null;
+  guest_email: string | null;
+  property_name: string | null;
+  check_in_date: string;
+  check_out_date: string;
+  status: string;
+  total_amount: number;
+  paid_amount: number;
+  balance_due: string;
+  nights: number;
+  created_at: string;
+  // Todos os outros campos de ReservationResponseWithGuestDetails
+}
+
+export interface CheckedInPendingPayment {
+  reservation_id: number;
+  guest_name: string;
+  room_number: string;
+  check_in_date: string;
+  pending_amount: number;
+  days_since_checkin: number;
+  total_amount: number;
+  paid_amount: number;
+  payment_status: 'pending' | 'overdue';
+}
+
+export interface DashboardSummary {
+  total_reservations: number;
+  todays_checkins: number;
+  todays_checkouts: number;
+  current_guests: number;
+  total_revenue: number;
+  paid_revenue: number;
+  pending_revenue: number;
+  checked_in_with_pending_payment: number;
+  summary_date: string;
+  property_id: number | null;
+}
+
+export interface TodaysReservationsImproved {
+  date: string;
+  arrivals_count: number;
+  departures_count: number;
+  current_guests_count: number;
+  arrivals: any[];
+  departures: any[];
+  current_guests: any[];
+}
+
 class PMSApiClient {
   private client: AxiosInstance;
   private baseURL: string;
@@ -1345,6 +1398,45 @@ async getCategorySummary(
       };
     }
   }
+
+// ===== NOVOS MÉTODOS PARA DASHBOARD (INSERIR APÓS getDashboardStatsSimple) =====
+
+async getRecentReservations(limit: number = 5, propertyId?: number): Promise<RecentReservationResponse[]> {
+  const params: any = { limit };
+  if (propertyId) {
+    params.property_id = propertyId;
+  }
+  
+  const response = await this.get<RecentReservationResponse[]>('/reservations/recent', params);
+  return response.data;
+}
+
+async getCheckedInPendingPayments(limit: number = 10, propertyId?: number): Promise<CheckedInPendingPayment[]> {
+  const params: any = { limit };
+  if (propertyId) {
+    params.property_id = propertyId;
+  }
+  
+  const response = await this.get<CheckedInPendingPayment[]>('/reservations/checked-in-pending-payment', params);
+  return response.data;
+}
+
+async getDashboardSummary(propertyId?: number): Promise<DashboardSummary> {
+  const params = propertyId ? { property_id: propertyId } : undefined;
+  
+  const response = await this.get<DashboardSummary>('/reservations/dashboard-summary', params);
+  return response.data;
+}
+
+async getTodaysReservationsImproved(propertyId?: number, includeDetails: boolean = false): Promise<TodaysReservationsImproved> {
+  const params: any = { include_details: includeDetails };
+  if (propertyId) {
+    params.property_id = propertyId;
+  }
+  
+  const response = await this.get<TodaysReservationsImproved>('/reservations/today', params);
+  return response.data;
+}
 
   // ===== GENERIC REQUEST METHOD (MÉTODO ORIGINAL MANTIDO) =====
 

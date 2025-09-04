@@ -39,6 +39,8 @@ from app.models.guest import Guest
 from app.models.property import Property
 from app.models.room import Room
 from app.models.room_type import RoomType
+from sqlalchemy import case, distinct
+from datetime import timezone
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -774,8 +776,266 @@ def get_reservations_detailed(
             detail=f"Erro interno do servidor: {str(e)}"
         )
 
+# ===== RESERVAS DE HOJE ===== (DEVE VIR PRIMEIRO)
 
-# ===== CRUD BÁSICO =====
+@router.get("/today", response_model=Dict[str, Any])
+def get_todays_reservations_improved(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    property_id: Optional[int] = Query(None, description="Filtrar por propriedade"),
+    include_details: bool = Query(True, description="Incluir detalhes dos hóspedes")
+):
+    """Obtém reservas do dia atual (melhorado)"""
+    try:
+        today = date.today()
+        
+        # Query base com joins
+        base_query = db.query(Reservation)
+        
+        if include_details:
+            base_query = base_query.options(
+                joinedload(Reservation.guest),
+                selectinload(Reservation.reservation_rooms).joinedload(ReservationRoom.room)
+            )
+        
+        base_query = base_query.filter(
+            Reservation.tenant_id == current_user.tenant_id,
+            Reservation.is_active == True
+        )
+        
+        if property_id:
+            base_query = base_query.filter(Reservation.property_id == property_id)
+        
+        # Chegadas hoje (sem order_by por campos inexistentes)
+        arrivals = base_query.filter(
+            Reservation.check_in_date == today,
+            Reservation.status.in_(['confirmed', 'pending'])
+        ).order_by(asc(Reservation.id)).all()  # ✅ Ordenar por ID
+        
+        # Saídas hoje
+        departures = base_query.filter(
+            Reservation.check_out_date == today,
+            Reservation.status == 'checked_in'
+        ).order_by(asc(Reservation.id)).all()  # ✅ Ordenar por ID
+        
+        # Hóspedes atuais
+        current_guests = base_query.filter(
+            Reservation.status == 'checked_in',
+            Reservation.check_in_date <= today,
+            Reservation.check_out_date > today
+        ).all()
+        
+        # Formatação da resposta
+        response_data = {
+            "date": today.isoformat(),
+            "arrivals_count": len(arrivals),
+            "departures_count": len(departures),
+            "current_guests_count": len(current_guests),
+        }
+        
+        if include_details:
+            response_data.update({
+                "arrivals": [
+                    ReservationResponseWithGuestDetails.model_validate(r).model_dump()
+                    for r in arrivals
+                ],
+                "departures": [
+                    ReservationResponseWithGuestDetails.model_validate(r).model_dump()
+                    for r in departures
+                ],
+                "current_guests": [
+                    ReservationResponseWithGuestDetails.model_validate(r).model_dump()
+                    for r in current_guests
+                ]
+            })
+        else:
+            response_data.update({
+                "arrivals": [{"id": r.id, "guest_name": r.guest.full_name if r.guest else "N/A"} for r in arrivals],
+                "departures": [{"id": r.id, "guest_name": r.guest.full_name if r.guest else "N/A"} for r in departures],
+                "current_guests": [{"id": r.id, "guest_name": r.guest.full_name if r.guest else "N/A"} for r in current_guests]
+            })
+        
+        return response_data
+        
+    except Exception as e:
+        logger.error(f"Erro ao buscar reservas de hoje: {str(e)}")
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao buscar reservas de hoje: {str(e)}"
+        )
+
+@router.get("/recent", response_model=List[ReservationResponseWithGuestDetails])
+def get_recent_reservations(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    limit: int = Query(5, ge=1, le=20, description="Número de reservas recentes"),
+    property_id: Optional[int] = Query(None, description="Filtrar por propriedade")
+):
+    """Obtém as reservas mais recentes"""
+    try:
+        base_query = db.query(Reservation).options(
+            joinedload(Reservation.guest),
+            joinedload(Reservation.property_obj),
+            selectinload(Reservation.reservation_rooms).joinedload(ReservationRoom.room)
+        ).filter(
+            Reservation.tenant_id == current_user.tenant_id,
+            Reservation.is_active == True
+        )
+        
+        if property_id:
+            base_query = base_query.filter(Reservation.property_id == property_id)
+        
+        recent_reservations = base_query.order_by(
+            desc(Reservation.created_at)
+        ).limit(limit).all()
+        
+        return [
+            ReservationResponseWithGuestDetails.model_validate(reservation)
+            for reservation in recent_reservations
+        ]
+        
+    except Exception as e:
+        logger.error(f"Erro ao buscar reservas recentes: {str(e)}")
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao buscar reservas recentes: {str(e)}"
+        )
+        
+@router.get("/checked-in-pending-payment", response_model=List[Dict[str, Any]])
+def get_checked_in_pending_payment(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    property_id: Optional[int] = Query(None, description="Filtrar por propriedade"),
+    limit: int = Query(10, ge=1, le=50, description="Número máximo de resultados")
+):
+    """Obtém reservas com check-in feito e saldo pendente"""
+    try:
+        # Query mais simples para isolar o problema
+        base_query = db.query(Reservation).options(
+            joinedload(Reservation.guest),
+            selectinload(Reservation.reservation_rooms).joinedload(ReservationRoom.room)
+        ).filter(
+            Reservation.tenant_id == current_user.tenant_id,
+            Reservation.is_active == True,
+            Reservation.status == 'checked_in',
+            Reservation.total_amount > Reservation.paid_amount  # Tem saldo pendente
+        )
+        
+        if property_id:
+            base_query = base_query.filter(Reservation.property_id == property_id)
+        
+        reservations = base_query.order_by(
+            asc(Reservation.check_in_date)  # Mais antigos primeiro (mais urgente)
+        ).limit(limit).all()
+        
+        pending_payments = []
+        for reservation in reservations:
+            days_since_checkin = (date.today() - reservation.check_in_date).days
+            
+            # Pegar número do quarto da primeira reservation_room
+            room_number = None
+            if reservation.reservation_rooms and reservation.reservation_rooms[0].room:
+                room_number = reservation.reservation_rooms[0].room.room_number
+            
+            pending_amount = float(reservation.total_amount - reservation.paid_amount)
+            
+            pending_payments.append({
+                "reservation_id": reservation.id,
+                "guest_name": reservation.guest.full_name if reservation.guest else "N/A",
+                "room_number": room_number or "N/A",
+                "check_in_date": reservation.check_in_date.isoformat(),
+                "pending_amount": pending_amount,
+                "days_since_checkin": days_since_checkin,
+                "total_amount": float(reservation.total_amount),
+                "paid_amount": float(reservation.paid_amount),
+                "payment_status": "overdue" if days_since_checkin > 3 else "pending"
+            })
+        
+        return pending_payments
+        
+    except Exception as e:
+        logger.error(f"Erro ao buscar check-ins com saldo pendente: {str(e)}")
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao buscar check-ins com saldo pendente: {str(e)}"
+        )
+        
+@router.get("/dashboard-summary", response_model=Dict[str, Any])
+def get_dashboard_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    property_id: Optional[int] = Query(None, description="Filtrar por propriedade")
+):
+    """Obtém resumo consolidado para o dashboard"""
+    try:
+        today = date.today()
+        
+        # Query base
+        base_query = db.query(Reservation).filter(
+            Reservation.tenant_id == current_user.tenant_id,
+            Reservation.is_active == True
+        )
+        
+        if property_id:
+            base_query = base_query.filter(Reservation.property_id == property_id)
+        
+        # Estatísticas básicas
+        total_reservations = base_query.count()
+        
+        # Check-ins de hoje
+        todays_checkins = base_query.filter(
+            Reservation.check_in_date == today,
+            Reservation.status.in_(['confirmed', 'pending'])
+        ).count()
+        
+        # Check-outs de hoje  
+        todays_checkouts = base_query.filter(
+            Reservation.check_out_date == today,
+            Reservation.status == 'checked_in'
+        ).count()
+        
+        # Hóspedes atuais (checked-in)
+        current_guests = base_query.filter(
+            Reservation.status == 'checked_in'
+        ).count()
+        
+        # Receita total e pendente
+        revenue_data = base_query.with_entities(
+            func.sum(Reservation.total_amount).label('total_revenue'),
+            func.sum(Reservation.paid_amount).label('paid_revenue')
+        ).first()
+        
+        total_revenue = float(revenue_data.total_revenue or 0)
+        paid_revenue = float(revenue_data.paid_revenue or 0)
+        pending_revenue = total_revenue - paid_revenue
+        
+        # Saldo pendente de check-ins
+        checked_in_pending = base_query.filter(
+            Reservation.status == 'checked_in',
+            Reservation.total_amount > Reservation.paid_amount
+        ).count()
+        
+        return {
+            "total_reservations": total_reservations,
+            "todays_checkins": todays_checkins,
+            "todays_checkouts": todays_checkouts,
+            "current_guests": current_guests,
+            "total_revenue": total_revenue,
+            "paid_revenue": paid_revenue,
+            "pending_revenue": pending_revenue,
+            "checked_in_with_pending_payment": checked_in_pending,
+            "summary_date": today.isoformat(),
+            "property_id": property_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro ao buscar resumo do dashboard: {str(e)}")
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao buscar resumo do dashboard: {str(e)}"
+        )
+
+# ===== CRUD BÁSICO ===== (ENDPOINT GENÉRICO POR ÚLTIMO)
 
 @router.get("/{reservation_id}", response_model=ReservationResponse)
 def get_reservation(
@@ -1375,66 +1635,6 @@ def get_calendar_range(
     )
     
     return [ReservationResponse.model_validate(reservation) for reservation in reservations]
-
-
-# ===== RESERVAS DE HOJE =====
-
-@router.get("/today", response_model=Dict[str, Any])
-def get_todays_reservations(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-    property_id: Optional[int] = Query(None, description="Filtrar por propriedade")
-):
-    """Busca reservas de hoje (chegadas e saídas)"""
-    reservation_service = ReservationService(db)
-    today = date.today()
-    
-    try:
-        # Chegadas hoje
-        arrivals = reservation_service.get_reservations(
-            current_user.tenant_id,
-            ReservationFilters(
-                check_in_from=today,
-                check_in_to=today,
-                property_id=property_id,
-                status="confirmed"
-            )
-        )
-        
-        # Saídas hoje
-        departures = reservation_service.get_reservations(
-            current_user.tenant_id,
-            ReservationFilters(
-                check_out_from=today,
-                check_out_to=today,
-                property_id=property_id,
-                status="checked_in"
-            )
-        )
-        
-        # Hóspedes atuais (checked_in)
-        current_guests = reservation_service.get_reservations(
-            current_user.tenant_id,
-            ReservationFilters(status="checked_in", property_id=property_id)
-        )
-        
-        return {
-            "date": today,
-            "arrivals": [ReservationResponse.model_validate(r) for r in arrivals],
-            "departures": [ReservationResponse.model_validate(r) for r in departures],
-            "current_guests": [ReservationResponse.model_validate(r) for r in current_guests],
-            "arrivals_count": len(arrivals),
-            "departures_count": len(departures), 
-            "current_guests_count": len(current_guests)
-        }
-        
-    except Exception as e:
-        logger.error(f"Erro ao buscar reservas de hoje: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro ao buscar reservas: {str(e)}"
-        )
-
 
 # ===== ESTATÍSTICAS =====
 
