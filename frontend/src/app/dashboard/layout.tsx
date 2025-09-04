@@ -1,7 +1,7 @@
 // frontend/src/app/dashboard/layout.tsx
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
@@ -27,10 +27,10 @@ import {
   User,
   Menu,
   Map,
-  DollarSign
+  DollarSign,
+  X
 } from 'lucide-react';
 import Link from 'next/link';
-import { useState } from 'react';
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -63,7 +63,7 @@ export default function DashboardLayout({
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <img 
             src="/tucapms-logo.png" 
@@ -81,63 +81,57 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* Sidebar Mobile Overlay */}
+    <div className="dashboard-container bg-gray-50">
+      {/* ===== SIDEBAR MOBILE OVERLAY ===== */}
       {sidebarOpen && (
-        <div 
-          className="fixed inset-0 flex z-40 md:hidden"
-          role="dialog" 
-          aria-modal="true"
-        >
+        <div className="fixed inset-0 z-50 md:hidden">
           <div 
             className="fixed inset-0 bg-gray-600 bg-opacity-75"
             onClick={() => setSidebarOpen(false)}
           />
-          <SidebarContent />
+          <div className={`dashboard-sidebar mobile-open bg-white shadow-xl`}>
+            <SidebarContent onClose={() => setSidebarOpen(false)} />
+          </div>
         </div>
       )}
 
-      {/* Static sidebar for desktop */}
-      <div className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0">
+      {/* ===== SIDEBAR DESKTOP ===== */}
+      <div className="hidden md:block dashboard-sidebar bg-white shadow-lg border-r border-gray-200">
         <SidebarContent />
       </div>
 
-      {/* ✅ MUDANÇA PRINCIPAL: Adicionar classe dashboard-main-content */}
-      <div className="md:pl-64 flex flex-col flex-1 min-h-screen dashboard-main-content">
-        {/* Top header - LIMPO */}
-        <div className="sticky top-0 z-10 flex-shrink-0 flex h-16 bg-white shadow">
-          {/* Mobile menu button */}
-          <button
-            type="button"
-            className="px-4 border-r border-gray-200 text-gray-500 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500 md:hidden"
-            onClick={() => setSidebarOpen(true)}
-          >
-            <Menu className="h-6 w-6" />
-          </button>
+      {/* ===== MAIN CONTENT WRAPPER ===== */}
+      <div className="dashboard-main-wrapper">
+        {/* ===== HEADER ===== */}
+        <header className="dashboard-header bg-white shadow-sm border-b border-gray-200">
+          <div className="flex items-center justify-between h-full px-4">
+            {/* Mobile menu button */}
+            <button
+              type="button"
+              className="md:hidden p-2 rounded-md text-gray-500 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Menu className="h-6 w-6" />
+            </button>
 
-          <div className="flex-1 px-4 flex justify-between items-center">
+            {/* Title */}
             <div className="flex-1 flex items-center">
-              <h1 className="text-lg font-semibold text-gray-900">
+              <h1 className="text-lg font-semibold text-gray-900 ml-2 md:ml-0">
                 {tenant?.name || 'PMS Dashboard'}
               </h1>
             </div>
 
-            {/* User menu - APENAS DROPDOWN SIMPLES */}
-            <div className="ml-4 flex items-center md:ml-6">
-              {/* Debug visual - remover depois */}
-              <div className="mr-2 text-xs text-gray-500">
-                {user?.full_name ? `Logado: ${user.full_name}` : 'Sem usuário'}
-              </div>
-              
+            {/* User menu */}
+            <div className="flex items-center space-x-4">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button 
                     variant="ghost" 
-                    className="relative h-8 w-8 rounded-full border-2 border-blue-200"
+                    className="relative h-8 w-8 rounded-full border-2 border-blue-200 hover:border-blue-300"
                   >
                     <Avatar className="h-8 w-8">
                       <AvatarImage src="" alt={user?.full_name || 'User'} />
-                      <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold">
+                      <AvatarFallback className="bg-blue-100 text-blue-700 font-semibold text-sm">
                         {user?.full_name?.charAt(0)?.toUpperCase() || 'U'}
                       </AvatarFallback>
                     </Avatar>
@@ -158,22 +152,25 @@ export default function DashboardLayout({
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
+                  
                   <DropdownMenuItem onClick={() => alert('Funcionalidade em desenvolvimento')}>
                     <User className="mr-2 h-4 w-4" />
                     Perfil
                   </DropdownMenuItem>
+                  
                   <DropdownMenuItem onClick={() => alert('Funcionalidade em desenvolvimento')}>
                     <Settings className="mr-2 h-4 w-4" />
                     Configurações
                   </DropdownMenuItem>
+                  
+                  <DropdownMenuSeparator />
+                  
                   <DropdownMenuItem asChild>
                     <Link href="/dashboard/properties" className="flex items-center">
                       <Building className="mr-2 h-4 w-4" />
                       Propriedades
                     </Link>
                   </DropdownMenuItem>
-                  
-                  <DropdownMenuSeparator />
                   
                   <DropdownMenuItem asChild>
                     <Link href="/dashboard/room-types" className="flex items-center">
@@ -190,6 +187,7 @@ export default function DashboardLayout({
                   </DropdownMenuItem>
                   
                   <DropdownMenuSeparator />
+                  
                   <DropdownMenuItem 
                     onClick={() => {
                       console.log('Logout clicado');
@@ -204,11 +202,11 @@ export default function DashboardLayout({
               </DropdownMenu>
             </div>
           </div>
-        </div>
+        </header>
 
-        {/* ✅ MUDANÇA PRINCIPAL: Page content com contenção melhorada */}
-        <main className="flex-1 overflow-x-auto p-4 max-w-full">
-          <div className="h-full max-w-full card-container">
+        {/* ===== MAIN CONTENT ===== */}
+        <main className="dashboard-content">
+          <div className="card-container">
             {children}
           </div>
         </main>
@@ -217,31 +215,51 @@ export default function DashboardLayout({
   );
 }
 
-function SidebarContent() {
+function SidebarContent({ onClose }: { onClose?: () => void }) {
   return (
-    <div className="flex flex-col h-full bg-white shadow-md">
-      <div className="flex items-center flex-shrink-0 px-4 py-4">
-        <img 
-          src="/tucapms-logo.png" 
-          alt="TucaPMS" 
-          className="h-10 w-10 object-contain"
-        />
-        <span className="ml-2 text-xl font-bold text-gray-900">TucaPMS</span>
+    <div className="flex flex-col h-full">
+      {/* Logo */}
+      <div className="flex items-center justify-between flex-shrink-0 px-4 py-4 border-b border-gray-200">
+        <div className="flex items-center">
+          <img 
+            src="/tucapms-logo.png" 
+            alt="TucaPMS" 
+            className="h-10 w-10 object-contain"
+          />
+          <span className="ml-2 text-xl font-bold text-gray-900">TucaPMS</span>
+        </div>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="md:hidden p-2 rounded-md text-gray-500 hover:text-gray-900 hover:bg-gray-100"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        )}
       </div>
       
-      <div className="mt-8 flex-grow flex flex-col">
+      {/* Navigation */}
+      <div className="flex-grow flex flex-col mt-4">
         <nav className="flex-1 px-2 space-y-1">
           {navigation.map((item) => (
             <Link
               key={item.name}
               href={item.href}
-              className="group flex items-center px-2 py-2 text-sm font-medium rounded-md text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
+              onClick={onClose}
+              className="group flex items-center px-3 py-2 text-sm font-medium rounded-md text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors duration-150"
             >
-              <item.icon className="mr-3 h-5 w-5 flex-shrink-0" />
+              <item.icon className="mr-3 h-5 w-5 flex-shrink-0 text-gray-400 group-hover:text-gray-500" />
               {item.name}
             </Link>
           ))}
         </nav>
+
+        {/* Bottom section */}
+        <div className="px-2 py-4 border-t border-gray-200 mt-auto">
+          <div className="text-xs text-gray-500 text-center">
+            TucaPMS v1.0
+          </div>
+        </div>
       </div>
     </div>
   );
