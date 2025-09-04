@@ -9,6 +9,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -24,6 +31,13 @@ interface CancelReservationModalProps {
   loading?: boolean;
 }
 
+// Opções fixas de motivo de cancelamento
+const CANCELLATION_REASONS = [
+  { value: 'no_show', label: 'Não comparecimento (No-show)' },
+  { value: 'cancellation_in_time', label: 'Cancelamento dentro do prazo' },
+  { value: 'cancellation_late', label: 'Cancelamento fora do prazo' },
+];
+
 export default function CancelReservationModal({
   isOpen,
   onClose,
@@ -37,7 +51,7 @@ export default function CancelReservationModal({
   const [showConfirmation, setShowConfirmation] = useState(false);
 
   const handleSubmit = () => {
-    if (cancellationReason.trim().length < 10) {
+    if (!cancellationReason) {
       return; // Validação já mostra erro
     }
     setShowConfirmation(true);
@@ -46,7 +60,7 @@ export default function CancelReservationModal({
   const handleConfirm = async () => {
     try {
       await onConfirm({
-        cancellation_reason: cancellationReason.trim(),
+        cancellation_reason: cancellationReason,
         refund_amount: refundAmount ? parseFloat(refundAmount) : undefined,
         notes: notes.trim() || undefined,
       });
@@ -67,7 +81,8 @@ export default function CancelReservationModal({
     }
   };
 
-  const isValid = cancellationReason.trim().length >= 10;
+  const isValid = !!cancellationReason;
+  const selectedReasonLabel = CANCELLATION_REASONS.find(r => r.value === cancellationReason)?.label;
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
@@ -93,30 +108,26 @@ export default function CancelReservationModal({
                 <Label htmlFor="cancellation-reason">
                   Motivo do Cancelamento *
                 </Label>
-                <Textarea
-                  id="cancellation-reason"
-                  placeholder="Descreva o motivo do cancelamento (mínimo 10 caracteres)..."
-                  value={cancellationReason}
-                  onChange={(e) => setCancellationReason(e.target.value)}
-                  rows={3}
-                  className={`resize-none ${
-                    cancellationReason && cancellationReason.trim().length < 10
-                      ? 'border-red-300 focus:border-red-500'
-                      : ''
-                  }`}
-                />
-                <div className="flex justify-between text-xs text-gray-500">
-                  <span>
-                    {cancellationReason.trim().length < 10 && cancellationReason.length > 0 && (
-                      <span className="text-red-500">
-                        Mínimo 10 caracteres necessários
-                      </span>
-                    )}
-                  </span>
-                  <span>
-                    {cancellationReason.length}/500
-                  </span>
-                </div>
+                <Select 
+                  value={cancellationReason} 
+                  onValueChange={setCancellationReason}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecione o motivo do cancelamento" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CANCELLATION_REASONS.map((reason) => (
+                      <SelectItem key={reason.value} value={reason.value}>
+                        {reason.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!cancellationReason && (
+                  <p className="text-xs text-red-500">
+                    Por favor, selecione um motivo para o cancelamento
+                  </p>
+                )}
               </div>
 
               {/* Valor do reembolso - OPCIONAL */}
@@ -147,9 +158,12 @@ export default function CancelReservationModal({
                   placeholder="Observações internas sobre o cancelamento..."
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  rows={2}
+                  rows={3}
                   className="resize-none"
                 />
+                <div className="text-xs text-gray-500 text-right">
+                  {notes.length}/500
+                </div>
               </div>
             </div>
 
@@ -190,7 +204,7 @@ export default function CancelReservationModal({
             <div className="bg-gray-50 p-4 rounded-lg text-sm">
               <div className="space-y-2">
                 <div>
-                  <span className="font-medium">Motivo:</span> {cancellationReason}
+                  <span className="font-medium">Motivo:</span> {CANCELLATION_REASONS.find(r => r.value === cancellationReason)?.label}
                 </div>
                 {refundAmount && (
                   <div>

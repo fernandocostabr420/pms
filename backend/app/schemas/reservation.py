@@ -209,7 +209,7 @@ class CheckOutRequest(BaseModel):
 
 class CancelReservationRequest(BaseModel):
     """Schema para cancelamento"""
-    cancellation_reason: str = Field(..., min_length=10, max_length=500, description="Motivo do cancelamento")
+    cancellation_reason: str = Field(..., max_length=500, description="Motivo do cancelamento")
     refund_amount: Optional[Decimal] = Field(None, ge=0, description="Valor a ser reembolsado")
     notes: Optional[str] = Field(None, max_length=500, description="Observações do cancelamento")
 
