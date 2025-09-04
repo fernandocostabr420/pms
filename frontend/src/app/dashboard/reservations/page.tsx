@@ -33,6 +33,7 @@ import ReservationTable from '@/components/reservations/ReservationTable';
 import ReservationCard from '@/components/reservations/ReservationCard';
 import ReservationDetails from '@/components/reservations/ReservationDetails';
 import LoadingSpinner from '@/components/ui/loading-spinner';
+import CancelReservationModal from '@/components/reservations/CancelReservationModal'; // ✅ NOVO IMPORT
 
 // ✅ NOVOS IMPORTS - Componente Padronizado
 import StandardReservationModal from '@/components/reservations/StandardReservationModal';
@@ -115,6 +116,10 @@ export default function ReservationsPage() {
   const [showNewReservationModal, setShowNewReservationModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [reservationToEdit, setReservationToEdit] = useState<ReservationResponseWithGuestDetails | null>(null);
+
+  // ✅ NOVOS ESTADOS - Modal de Cancelamento
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [reservationToCancel, setReservationToCancel] = useState<ReservationResponseWithGuestDetails | null>(null);
 
   // ✅ NOVA FUNÇÃO: Handler para clique na reserva (navegar para página de detalhes)
   const handleReservationClick = useCallback((reservation: ReservationResponseWithGuestDetails) => {
@@ -247,6 +252,42 @@ export default function ReservationsPage() {
     });
   };
 
+  // ✅ NOVA FUNÇÃO - Handler do cancelamento
+  const handleCancelConfirm = async (cancelData: {
+    cancellation_reason: string;
+    refund_amount?: number;
+    notes?: string;
+  }) => {
+    if (!reservationToCancel) return;
+
+    try {
+      setActionLoading(prev => ({ ...prev, [reservationToCancel.id]: 'cancel' }));
+      
+      await apiClient.cancelReservation(reservationToCancel.id, cancelData);
+      
+      toast({
+        title: 'Reserva Cancelada',
+        description: `A reserva ${reservationToCancel.reservation_number} foi cancelada com sucesso.`,
+        variant: 'default',
+      });
+      
+      // Recarregar dados da página
+      await loadReservations();
+      await loadQuickStats();
+      
+    } catch (error: any) {
+      console.error('Erro ao cancelar reserva:', error);
+      toast({
+        title: 'Erro ao Cancelar',
+        description: error.response?.data?.detail || 'Erro interno do servidor',
+        variant: 'destructive',
+      });
+      throw error; // Re-throw para o modal tratar
+    } finally {
+      setActionLoading(prev => ({ ...prev, [reservationToCancel.id]: null }));
+    }
+  };
+
   const handleQuickAction = async (reservation: ReservationResponseWithGuestDetails, action: string) => {
     setActionLoading(prev => ({ ...prev, [reservation.id]: action }));
     
@@ -279,12 +320,10 @@ export default function ReservationsPage() {
           break;
           
         case 'cancel':
-          // Para cancelamento, implementar modal de confirmação no futuro
-          toast({
-            title: "Funcionalidade em desenvolvimento",
-            description: "O cancelamento será implementado em breve."
-          });
-          break;
+          // ✅ MODIFICAÇÃO - Abrir modal de cancelamento
+          setReservationToCancel(reservation);
+          setCancelModalOpen(true);
+          return; // Sair sem fazer o resto do processamento
           
         default:
           break;
@@ -705,6 +744,18 @@ export default function ReservationsPage() {
         onSuccess={handleEditReservationSuccess}
         reservation={reservationToEdit}
         {...RESERVATION_MODAL_CONFIGS.EDIT_RESERVATION}
+      />
+
+      {/* ✅ NOVO MODAL - Cancelamento de Reserva */}
+      <CancelReservationModal
+        isOpen={cancelModalOpen}
+        onClose={() => {
+          setCancelModalOpen(false);
+          setReservationToCancel(null);
+        }}
+        onConfirm={handleCancelConfirm}
+        reservationNumber={reservationToCancel?.reservation_number}
+        loading={reservationToCancel ? actionLoading[reservationToCancel.id] === 'cancel' : false}
       />
     </div>
   );
