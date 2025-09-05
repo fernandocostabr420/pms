@@ -1542,8 +1542,10 @@ async deletePayment(
   }
 }
 
+// ✅ MÉTODO CORRIGIDO: updatePaymentStatus - usar PATCH ao invés de PUT
 async updatePaymentStatus(id: number, data: PaymentStatusUpdate): Promise<PaymentResponse> {
-  const response = await this.put<PaymentResponse>(`/payments/${id}/status`, data);
+  // ✅ CORREÇÃO: Mudar de PUT para PATCH
+  const response = await this.client.patch<PaymentResponse>(`/payments/${id}/status`, data);
   return response.data;
 }
 

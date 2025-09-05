@@ -198,7 +198,7 @@ export default function PaymentEditModal({
 
       if (response) {
         const successMessage = requiresAdminReason 
-          ? 'Pagamento confirmado atualizado administrativamente'
+          ? 'Pagamento confirmado atualizado'
           : 'Pagamento atualizado';
           
         toast({

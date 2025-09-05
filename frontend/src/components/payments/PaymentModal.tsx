@@ -242,7 +242,7 @@ export default function PaymentModal({
 
       if (response) {
         const successMessage = isEdit 
-          ? (isAdminMode ? 'Pagamento confirmado atualizado administrativamente' : 'Pagamento atualizado')
+          ? (isAdminMode ? 'Pagamento confirmado atualizado' : 'Pagamento atualizado')
           : 'Pagamento criado';
           
         toast({
