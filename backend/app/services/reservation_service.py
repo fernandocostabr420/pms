@@ -940,7 +940,8 @@ class ReservationService:
         reservation = self.db.query(Reservation).options(
             joinedload(Reservation.guest),
             joinedload(Reservation.property_obj),
-            selectinload(Reservation.reservation_rooms).joinedload(ReservationRoom.room)
+            selectinload(Reservation.reservation_rooms).joinedload(ReservationRoom.room),
+            selectinload(Reservation.payments)  # ✅ ADICIONADO: carregar pagamentos
         ).filter(
             Reservation.id == reservation_id,
             Reservation.tenant_id == tenant_id,
@@ -1145,13 +1146,17 @@ class ReservationService:
         }
         
         # === 6. HISTÓRICO DE AUDITORIA ===
+        # ✅ CORRIGIDO: Buscar IDs dos pagamentos da reserva
+        payment_ids = [p.id for p in reservation.payments] if reservation.payments else []
+        
         audit_logs = self.db.query(AuditLog).options(
             joinedload(AuditLog.user)
         ).filter(
-            AuditLog.table_name.in_(['reservations', 'reservation_rooms']),
+            AuditLog.table_name.in_(['reservations', 'reservation_rooms', 'payments']),  # ✅ ADICIONADO: payments
             or_(
                 and_(AuditLog.table_name == 'reservations', AuditLog.record_id == reservation.id),
-                and_(AuditLog.table_name == 'reservation_rooms', AuditLog.record_id.in_([rr.id for rr in reservation.reservation_rooms]))
+                and_(AuditLog.table_name == 'reservation_rooms', AuditLog.record_id.in_([rr.id for rr in reservation.reservation_rooms])),
+                and_(AuditLog.table_name == 'payments', AuditLog.record_id.in_(payment_ids))  # ✅ ADICIONADO: condição para payments
             ),
             AuditLog.tenant_id == tenant_id
         ).order_by(desc(AuditLog.created_at)).limit(50).all()
@@ -1183,6 +1188,25 @@ class ReservationService:
                     description = 'Pagamento adicionado'
                 elif any(field in log.changed_fields for field in ['check_in_date', 'check_out_date']):
                     description = 'Datas alteradas'
+            
+            # ✅ ADICIONADO: Lógica específica para tabela payments
+            if log.table_name == 'payments':
+                if log.action == 'CREATE':
+                    description = 'Pagamento registrado'
+                elif log.action == 'UPDATE' and log.changed_fields:
+                    if 'status' in log.changed_fields:
+                        if log.new_values and log.new_values.get('status') == 'confirmed':
+                            description = 'Pagamento confirmado'
+                        elif log.new_values and log.new_values.get('status') == 'cancelled':
+                            description = 'Pagamento cancelado'
+                        else:
+                            description = 'Status do pagamento alterado'
+                    elif 'amount' in log.changed_fields:
+                        description = 'Valor do pagamento alterado'
+                    else:
+                        description = 'Pagamento atualizado'
+                elif log.action == 'DELETE':
+                    description = 'Pagamento removido'
             
             user_data = None
             if log.user:
