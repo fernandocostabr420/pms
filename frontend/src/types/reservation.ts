@@ -23,6 +23,7 @@ export interface ReservationResponse extends BaseResponse {
   room_rate?: number;
   total_amount?: number;
   paid_amount: number;
+  total_paid?: number;
   discount: number;
   taxes: number;
   

@@ -114,7 +114,44 @@ export function ReservationQuickView({
     router.push(`/dashboard/reservations/${reservation.id}?edit=true`);
   };
 
-  const balanceColor = reservation.balance_due > 0 ? 'text-red-600' : 'text-green-600';
+  // ✅ DEBUG: Adicionar logs para entender os dados
+  console.log('=== RESERVATION QUICK VIEW DEBUG ===');
+  console.log('Dados brutos da reserva:', reservation);
+  console.log('Propriedades financeiras disponíveis:', {
+    total_amount: reservation.total_amount,
+    paid_amount: reservation.paid_amount,
+    balance_due: reservation.balance_due,
+    // Verificar se existem outras propriedades
+    total_paid: (reservation as any).total_paid,
+    // Tentar acessar como objeto aninhado (igual à página de detalhes)
+    payment: (reservation as any).payment
+  });
+
+  // ✅ CORREÇÃO: Usar a mesma lógica da página de detalhes
+  // Garantir que temos valores numéricos válidos
+  const totalAmount = Number(reservation.total_amount) || 0;
+  const paidAmount = Number(reservation.paid_amount) || 0;
+  const balanceDue = Number(reservation.balance_due) || 0;
+  
+  console.log('Valores convertidos:', {
+    totalAmount,
+    paidAmount,
+    balanceDue
+  });
+  
+  // Se balance_due não estiver disponível, calcular manualmente
+  const calculatedBalance = totalAmount - paidAmount;
+  const finalBalanceDue = balanceDue !== 0 ? balanceDue : calculatedBalance;
+  
+  console.log('Cálculos finais:', {
+    calculatedBalance,
+    finalBalanceDue,
+    usingCalculated: balanceDue === 0
+  });
+  
+  const balanceColor = finalBalanceDue > 0 ? 'text-red-600' : 'text-green-600';
+  
+  console.log('=== FIM DEBUG ===');
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -199,7 +236,7 @@ export function ReservationQuickView({
             </div>
           </div>
 
-          {/* Valores */}
+          {/* ✅ VALORES CORRIGIDOS - Seguindo mesma lógica da página de detalhes */}
           <div className="bg-gray-50 rounded-lg p-3">
             <div className="flex items-center gap-2 mb-2">
               <CreditCard className="h-4 w-4 text-gray-600" />
@@ -209,19 +246,19 @@ export function ReservationQuickView({
               <div className="flex justify-between">
                 <span className="text-gray-600">Total:</span>
                 <span className="font-medium">
-                  {formatCurrency(Number(reservation.total_amount))}
+                  {formatCurrency(totalAmount)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Pago:</span>
-                <span className="font-medium">
-                  {formatCurrency(Number(reservation.paid_amount))}
+                <span className="font-medium text-green-600">
+                  {formatCurrency(paidAmount)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Saldo:</span>
                 <span className={cn("font-medium", balanceColor)}>
-                  {formatCurrency(Number(reservation.balance_due))}
+                  {formatCurrency(finalBalanceDue)}
                 </span>
               </div>
             </div>
@@ -298,7 +335,7 @@ export function ReservationQuickView({
               variant="default"
             >
               <Eye className="h-4 w-4" />
-              Ver Detalhes
+              Ver 
             </Button>
             <Button
               onClick={handleEdit}

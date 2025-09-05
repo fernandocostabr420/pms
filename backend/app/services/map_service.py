@@ -116,7 +116,7 @@ class MapService:
                         check_out_date=reservation.check_out_date,
                         nights=reservation.nights,
                         total_amount=reservation.total_amount,
-                        paid_amount=reservation.paid_amount,
+                        paid_amount=reservation.total_paid,
                         balance_due=reservation.balance_due,
                         total_guests=reservation.total_guests,
                         source=reservation.source,

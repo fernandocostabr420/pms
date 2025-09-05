@@ -17,7 +17,8 @@ class MapReservationResponse(BaseModel):
     check_out_date: date
     nights: int
     total_amount: Decimal
-    paid_amount: Decimal
+    paid_amount: Decimal                    # ❌ Campo antigo - manter para compatibilidade
+    total_paid: Optional[Decimal] = None    # ✅ CORRIGIR: tornar opcional
     balance_due: Decimal
     total_guests: int
     source: Optional[str] = None

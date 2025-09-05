@@ -13,6 +13,7 @@ export interface MapReservationResponse {
   nights: number;
   total_amount: number;
   paid_amount: number;
+  total_paid?: number;
   balance_due: number;
   total_guests: number;
   source?: string;

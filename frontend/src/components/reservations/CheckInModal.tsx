@@ -1,3 +1,5 @@
+//frontend/src/components/reservations/CheckInModal.tsx
+
 import React, { useState, useEffect } from 'react';
 import { X, MapPin, User, Phone, Mail, Calendar, Globe } from 'lucide-react';
 import apiClient from '@/lib/api';

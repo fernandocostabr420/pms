@@ -365,7 +365,7 @@ export default function ReservationDetails({
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-gray-600">Valor Pago:</span>
                       <span className="font-medium text-green-600">
-                        {formatCurrency(reservation.paid_amount)}
+                        {formatCurrency(reservation.total_paid || 0)}
                       </span>
                     </div>
                     

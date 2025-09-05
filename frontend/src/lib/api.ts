@@ -110,6 +110,7 @@ export interface RecentReservationResponse {
   status: string;
   total_amount: number;
   paid_amount: number;
+  total_paid?: number;
   balance_due: string;
   nights: number;
   created_at: string;
@@ -125,6 +126,7 @@ export interface CheckedInPendingPayment {
   days_since_checkin: number;
   total_amount: number;
   paid_amount: number;
+  total_paid?: number;
   payment_status: 'pending' | 'overdue';
 }
 
