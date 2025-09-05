@@ -26,10 +26,13 @@ class Guest(BaseModel, TenantMixin):
     # Dados pessoais complementares
     date_of_birth = Column(Date, nullable=True)
     nationality = Column(String(100), nullable=True, default="Brasil")
+    gender = Column(String(20), nullable=True)  # M, F, Outro
     
     # Endereço
-    address_line1 = Column(String(200), nullable=True)
-    address_line2 = Column(String(200), nullable=True)
+    address_line1 = Column(String(200), nullable=True)  # Rua/Avenida
+    address_number = Column(String(20), nullable=True)  # Número da casa/apartamento
+    address_line2 = Column(String(200), nullable=True)  # Complemento
+    neighborhood = Column(String(100), nullable=True)  # Bairro
     city = Column(String(100), nullable=True)
     state = Column(String(100), nullable=True)
     postal_code = Column(String(20), nullable=True)
@@ -67,13 +70,40 @@ class Guest(BaseModel, TenantMixin):
             return None
         
         address = self.address_line1
+        
+        # Adicionar número se disponível
+        if self.address_number:
+            address += f", {self.address_number}"
+        
+        # Adicionar complemento se disponível
         if self.address_line2:
             address += f", {self.address_line2}"
+        
+        # Adicionar bairro se disponível
+        if self.neighborhood:
+            address += f", {self.neighborhood}"
+        
+        # Adicionar cidade
         if self.city:
             address += f", {self.city}"
+        
+        # Adicionar estado
         if self.state:
             address += f", {self.state}"
+        
+        # Adicionar CEP
         if self.postal_code:
             address += f" - {self.postal_code}"
         
         return address
+    
+    @property
+    def display_gender(self):
+        """Gênero formatado para exibição"""
+        gender_map = {
+            'M': 'Masculino',
+            'F': 'Feminino',
+            'O': 'Outro',
+            'NI': 'Não informado'
+        }
+        return gender_map.get(self.gender, self.gender) if self.gender else None

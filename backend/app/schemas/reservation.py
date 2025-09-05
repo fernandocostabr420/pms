@@ -5,6 +5,9 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, date
 from decimal import Decimal
 
+# ✅ NOVO IMPORT - Schema para dados do check-in
+from app.schemas.guest import GuestCheckInData
+
 
 class ReservationRoomBase(BaseModel):
     """Schema base para ReservationRoom"""
@@ -192,12 +195,20 @@ class ReservationListResponse(BaseModel):
     per_page: int
 
 
-# Schema para operações específicas
+# ===== SCHEMAS PARA OPERAÇÕES ESPECÍFICAS =====
+
 class CheckInRequest(BaseModel):
-    """Schema para check-in"""
+    """Schema para check-in - MODIFICADO PARA INCLUIR DADOS DO HÓSPEDE"""
+    # Dados básicos do check-in (já existiam)
     actual_check_in_time: Optional[datetime] = Field(None, description="Hora real do check-in")
     notes: Optional[str] = Field(None, max_length=500, description="Observações do check-in")
     room_assignments: Optional[Dict[int, int]] = Field(None, description="Atribuições de quartos {reservation_room_id: room_id}")
+    
+    # ✅ NOVO - Dados do hóspede para atualizar durante o check-in
+    guest_data: Optional[GuestCheckInData] = Field(
+        None, 
+        description="Dados do hóspede para atualizar/validar durante o check-in"
+    )
 
 
 class CheckOutRequest(BaseModel):

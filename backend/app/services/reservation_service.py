@@ -20,6 +20,10 @@ from app.schemas.reservation import (
     CheckInRequest, CheckOutRequest, CancelReservationRequest,
     AvailabilityRequest, AvailabilityResponse
 )
+# ✅ NOVO IMPORT - Para atualizar dados do hóspede
+from app.services.guest_service import GuestService
+from app.schemas.guest import GuestCheckInData, GuestUpdate
+
 from app.services.audit_service import AuditService
 from app.utils.decorators import _extract_model_data, AuditContext
 from app.schemas.reservation import ReservationDetailedResponse
@@ -548,7 +552,7 @@ class ReservationService:
         current_user: User,
         request: Optional[Request] = None
     ) -> Optional[Reservation]:
-        """Realiza check-in da reserva"""
+        """Realiza check-in da reserva - MODIFICADO PARA INCLUIR DADOS DO HÓSPEDE"""
         
         reservation_obj = self.get_reservation_by_id(reservation_id, tenant_id)
         if not reservation_obj:
@@ -557,14 +561,40 @@ class ReservationService:
         if not reservation_obj.can_check_in:
             raise ValueError("Check-in não permitido para esta reserva")
 
+        # ✅ NOVA LÓGICA - Processar dados do hóspede se fornecidos
+        guest_updated = False
+        if check_in_request.guest_data:
+            try:
+                guest_updated = self._process_guest_checkin_data(
+                    reservation_obj.guest_id,
+                    tenant_id,
+                    check_in_request.guest_data,
+                    current_user,
+                    request
+                )
+            except Exception as e:
+                # Se falhar na atualização do hóspede, abortar check-in
+                raise ValueError(f"Erro ao atualizar dados do hóspede: {str(e)}")
+
+        # Capturar valores antigos da reserva para auditoria
         old_values = _extract_model_data(reservation_obj)
         
+        # Realizar check-in
         reservation_obj.status = 'checked_in'
         reservation_obj.checked_in_date = check_in_request.actual_check_in_time or datetime.utcnow()
         
+        # Adicionar notas do check-in
+        check_in_notes = []
         if check_in_request.notes:
+            check_in_notes.append(f"Check-in: {check_in_request.notes}")
+        
+        if guest_updated:
+            check_in_notes.append("Check-in: Dados do hóspede atualizados")
+        
+        if check_in_notes:
             current_notes = reservation_obj.internal_notes or ""
-            reservation_obj.internal_notes = f"{current_notes}\nCheck-in: {check_in_request.notes}".strip()
+            new_notes = "\n".join(check_in_notes)
+            reservation_obj.internal_notes = f"{current_notes}\n{new_notes}".strip()
         
         # Atualizar status dos quartos
         for reservation_room in reservation_obj.reservation_rooms:
@@ -577,12 +607,16 @@ class ReservationService:
             # Registrar auditoria
             new_values = _extract_model_data(reservation_obj)
             with AuditContext(self.db, current_user, request) as audit:
+                description = f"Check-in realizado para reserva '{reservation_obj.reservation_number}'"
+                if guest_updated:
+                    description += " com atualização de dados do hóspede"
+                
                 audit.log_update(
                     "reservations", 
                     reservation_obj.id, 
                     old_values, 
                     new_values,
-                    f"Check-in realizado para reserva '{reservation_obj.reservation_number}'"
+                    description
                 )
             
             return reservation_obj
@@ -590,6 +624,119 @@ class ReservationService:
         except Exception:
             self.db.rollback()
             return None
+
+    def _process_guest_checkin_data(
+        self,
+        guest_id: int,
+        tenant_id: int,
+        guest_data: GuestCheckInData,
+        current_user: User,
+        request: Optional[Request] = None
+    ) -> bool:
+        """
+        Processa e atualiza dados do hóspede durante o check-in
+        Retorna True se dados foram atualizados, False caso contrário
+        """
+        guest_service = GuestService(self.db)
+        
+        # Buscar o hóspede
+        guest = guest_service.get_guest_by_id(guest_id, tenant_id)
+        if not guest:
+            raise ValueError("Hóspede não encontrado")
+        
+        # ✅ VALIDAR CAMPOS OBRIGATÓRIOS PARA CHECK-IN
+        required_fields = {
+            'first_name': guest_data.first_name,
+            'last_name': guest_data.last_name,
+            'document_number': guest_data.document_number,
+            'email': guest_data.email,
+            'phone': guest_data.phone
+        }
+        
+        missing_fields = []
+        for field_name, field_value in required_fields.items():
+            if not field_value or not field_value.strip():
+                missing_fields.append(field_name)
+        
+        if missing_fields:
+            field_names = {
+                'first_name': 'Nome',
+                'last_name': 'Sobrenome', 
+                'document_number': 'CPF',
+                'email': 'Email',
+                'phone': 'Telefone'
+            }
+            missing_names = [field_names.get(field, field) for field in missing_fields]
+            raise ValueError(f"Campos obrigatórios não preenchidos: {', '.join(missing_names)}")
+        
+        # ✅ PREPARAR DADOS PARA ATUALIZAÇÃO
+        # Convertendo GuestCheckInData para GuestUpdate
+        update_data = GuestUpdate(
+            first_name=guest_data.first_name,
+            last_name=guest_data.last_name,
+            email=guest_data.email,
+            phone=guest_data.phone,
+            document_type='cpf',  # Assumindo CPF para check-in brasileiro
+            document_number=guest_data.document_number,
+            date_of_birth=guest_data.date_of_birth,
+            gender=guest_data.gender,
+            nationality=guest_data.country or 'Brasil',
+            country=guest_data.country or 'Brasil',
+            postal_code=guest_data.postal_code,
+            state=guest_data.state,
+            city=guest_data.city,
+            address_line1=guest_data.address_line1,
+            address_number=guest_data.address_number,
+            address_line2=guest_data.address_line2,
+            neighborhood=guest_data.neighborhood
+        )
+        
+        # ✅ VERIFICAR SE REALMENTE PRECISA ATUALIZAR
+        # Comparar dados atuais com novos dados
+        needs_update = False
+        current_data = {
+            'first_name': guest.first_name,
+            'last_name': guest.last_name,
+            'email': guest.email,
+            'phone': guest.phone,
+            'document_number': guest.document_number,
+            'date_of_birth': guest.date_of_birth,
+            'gender': getattr(guest, 'gender', None),
+            'country': guest.country,
+            'postal_code': guest.postal_code,
+            'state': guest.state,
+            'city': guest.city,
+            'address_line1': guest.address_line1,
+            'address_number': getattr(guest, 'address_number', None),
+            'address_line2': guest.address_line2,
+            'neighborhood': getattr(guest, 'neighborhood', None)
+        }
+        
+        new_data = update_data.dict(exclude_unset=True, exclude_none=True)
+        
+        for field, new_value in new_data.items():
+            current_value = current_data.get(field)
+            # Comparar valores considerando None e strings vazias como equivalentes
+            if (new_value or '').strip() != (current_value or '').strip():
+                needs_update = True
+                break
+        
+        # ✅ ATUALIZAR APENAS SE NECESSÁRIO
+        if needs_update:
+            updated_guest = guest_service.update_guest(
+                guest_id=guest_id,
+                tenant_id=tenant_id,
+                guest_data=update_data,
+                current_user=current_user,
+                request=request
+            )
+            
+            if not updated_guest:
+                raise ValueError("Falha ao atualizar dados do hóspede")
+            
+            return True
+        
+        return False
 
     def check_out_reservation(
         self, 
