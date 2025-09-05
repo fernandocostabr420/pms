@@ -291,13 +291,22 @@ def list_reservations(
         if max_nights:
             query = query.filter(func.date_part('day', Reservation.check_out_date - Reservation.check_in_date) <= max_nights)
         
-        # ===== FILTROS BOOLEAN =====
+        # ===== FILTROS BOOLEAN - ✅ CORRIGIDO PARA USAR total_paid =====
         
         if is_paid is not None:
             if is_paid:
-                query = query.filter(Reservation.paid_amount >= Reservation.total_amount)
+                # ✅ CORREÇÃO: Usar property total_paid em vez do campo paid_amount
+                query = query.filter(Reservation.total_amount <= func.coalesce(
+                    func.sum(func.case([
+                        (and_(Payment.status == 'confirmed', Payment.is_refund == False), Payment.amount)
+                    ], else_=0)), 0
+                ))
             else:
-                query = query.filter(Reservation.paid_amount < Reservation.total_amount)
+                query = query.filter(Reservation.total_amount > func.coalesce(
+                    func.sum(func.case([
+                        (and_(Payment.status == 'confirmed', Payment.is_refund == False), Payment.amount)
+                    ], else_=0)), 0
+                ))
         
         if requires_deposit is not None:
             query = query.filter(Reservation.requires_deposit == requires_deposit)
@@ -372,7 +381,7 @@ def list_reservations(
                 'total_guests': reservation.total_guests,
                 'room_rate': reservation.room_rate,
                 'total_amount': reservation.total_amount,
-                'paid_amount': reservation.paid_amount,
+                'paid_amount': reservation.paid_amount,  # Mantido para compatibilidade
                 'discount': reservation.discount,
                 'taxes': reservation.taxes,
                 'source': reservation.source,
@@ -410,9 +419,9 @@ def list_reservations(
             else:
                 reservation_dict['property_name'] = "Propriedade não encontrada"
             
-            # Campos computados - pagamento
+            # ✅ CORREÇÃO: Campos computados - pagamento usando total_paid
             total_amount = float(reservation.total_amount) if reservation.total_amount else 0
-            paid_amount = float(reservation.paid_amount) if reservation.paid_amount else 0
+            paid_amount = float(reservation.total_paid) if reservation.total_paid else 0  # ✅ MUDANÇA AQUI
             
             reservation_dict['is_paid'] = paid_amount >= total_amount if total_amount > 0 else True
             reservation_dict['balance'] = max(0, total_amount - paid_amount)
@@ -608,16 +617,38 @@ def get_reservations_detailed(
         if guest_country:
             query = query.filter(Guest.country == guest_country)
 
-        # Filtros financeiros
+        # ✅ CORREÇÃO: Filtros financeiros usando total_paid
         if min_amount is not None:
             query = query.filter(Reservation.total_amount >= Decimal(str(min_amount)))
         if max_amount is not None:
             query = query.filter(Reservation.total_amount <= Decimal(str(max_amount)))
         if is_paid is not None:
             if is_paid:
-                query = query.filter(Reservation.paid_amount >= Reservation.total_amount)
+                # Usamos uma subquery para calcular total_paid de forma correta
+                from app.models.payment import Payment
+                paid_subquery = db.query(
+                    Payment.reservation_id,
+                    func.sum(Payment.amount).label('total_paid')
+                ).filter(
+                    Payment.status == 'confirmed',
+                    Payment.is_refund == False
+                ).group_by(Payment.reservation_id).subquery()
+                
+                query = query.outerjoin(paid_subquery, Reservation.id == paid_subquery.c.reservation_id)
+                query = query.filter(Reservation.total_amount <= func.coalesce(paid_subquery.c.total_paid, 0))
             else:
-                query = query.filter(Reservation.paid_amount < Reservation.total_amount)
+                # Similar para não pago
+                from app.models.payment import Payment
+                paid_subquery = db.query(
+                    Payment.reservation_id,
+                    func.sum(Payment.amount).label('total_paid')
+                ).filter(
+                    Payment.status == 'confirmed',
+                    Payment.is_refund == False
+                ).group_by(Payment.reservation_id).subquery()
+                
+                query = query.outerjoin(paid_subquery, Reservation.id == paid_subquery.c.reservation_id)
+                query = query.filter(Reservation.total_amount > func.coalesce(paid_subquery.c.total_paid, 0))
 
         # Filtros de hóspedes
         if min_guests:
@@ -731,12 +762,12 @@ def get_reservations_detailed(
                 # Continuar processando as outras reservas
                 continue
         
-        # Calcular estatísticas da busca
+        # ✅ CORREÇÃO: Calcular estatísticas da busca usando total_paid
         summary = None
         if total > 0 and reservations:
             # Calcular estatísticas básicas
             total_amount = sum(float(r.total_amount or 0) for r in reservations)
-            total_paid = sum(float(r.paid_amount or 0) for r in reservations)
+            total_paid = sum(float(r.total_paid or 0) for r in reservations)  # ✅ MUDANÇA AQUI
             total_pending = total_amount - total_paid
             
             # Distribuição por status
@@ -902,6 +933,10 @@ def get_recent_reservations(
         for reservation in recent_reservations:
             nights = (reservation.check_out_date - reservation.check_in_date).days
             
+            # ✅ CORREÇÃO: Usar total_paid em vez de paid_amount
+            total_paid = float(reservation.total_paid) if reservation.total_paid else 0.0
+            balance_due = float(reservation.total_amount) - total_paid
+            
             reservations_list.append({
                 "id": reservation.id,
                 "reservation_number": reservation.reservation_number,
@@ -912,8 +947,8 @@ def get_recent_reservations(
                 "check_out_date": reservation.check_out_date.isoformat(),
                 "status": reservation.status,
                 "total_amount": float(reservation.total_amount),
-                "paid_amount": float(reservation.paid_amount),
-                "balance_due": float(reservation.total_amount - reservation.paid_amount),
+                "paid_amount": total_paid,  # ✅ MUDANÇA AQUI
+                "balance_due": balance_due,
                 "nights": nights,
                 "created_at": reservation.created_at.isoformat() if reservation.created_at else None
             })
@@ -936,15 +971,32 @@ def get_checked_in_pending_payment(
 ):
     """Obtém reservas com check-in feito e saldo pendente"""
     try:
-        # Query mais simples para isolar o problema
+        # ✅ CORREÇÃO: Query mais complexa para usar total_paid
+        from app.models.payment import Payment
+        
+        # Subquery para calcular total pago de cada reserva
+        paid_subquery = db.query(
+            Payment.reservation_id,
+            func.sum(Payment.amount).label('total_paid')
+        ).filter(
+            Payment.tenant_id == current_user.tenant_id,
+            Payment.status == 'confirmed',
+            Payment.is_refund == False,
+            Payment.is_active == True
+        ).group_by(Payment.reservation_id).subquery()
+        
+        # Query principal com join da subquery
         base_query = db.query(Reservation).options(
             joinedload(Reservation.guest),
             selectinload(Reservation.reservation_rooms).joinedload(ReservationRoom.room)
+        ).outerjoin(
+            paid_subquery, Reservation.id == paid_subquery.c.reservation_id
         ).filter(
             Reservation.tenant_id == current_user.tenant_id,
             Reservation.is_active == True,
             Reservation.status == 'checked_in',
-            Reservation.total_amount > Reservation.paid_amount  # Tem saldo pendente
+            # ✅ MUDANÇA: Usar subquery em vez de paid_amount
+            Reservation.total_amount > func.coalesce(paid_subquery.c.total_paid, 0)
         )
         
         if property_id:
@@ -963,7 +1015,9 @@ def get_checked_in_pending_payment(
             if reservation.reservation_rooms and reservation.reservation_rooms[0].room:
                 room_number = reservation.reservation_rooms[0].room.room_number
             
-            pending_amount = float(reservation.total_amount - reservation.paid_amount)
+            # ✅ CORREÇÃO: Usar total_paid
+            total_paid = float(reservation.total_paid) if reservation.total_paid else 0.0
+            pending_amount = float(reservation.total_amount) - total_paid
             
             pending_payments.append({
                 "reservation_id": reservation.id,
@@ -973,7 +1027,7 @@ def get_checked_in_pending_payment(
                 "pending_amount": pending_amount,
                 "days_since_checkin": days_since_checkin,
                 "total_amount": float(reservation.total_amount),
-                "paid_amount": float(reservation.paid_amount),
+                "paid_amount": total_paid,  # ✅ MUDANÇA AQUI
                 "payment_status": "overdue" if days_since_checkin > 3 else "pending"
             })
         
@@ -1025,20 +1079,40 @@ def get_dashboard_summary(
             Reservation.status == 'checked_in'
         ).count()
         
-        # Receita total e pendente
-        revenue_data = base_query.with_entities(
-            func.sum(Reservation.total_amount).label('total_revenue'),
-            func.sum(Reservation.paid_amount).label('paid_revenue')
-        ).first()
+        # ✅ CORREÇÃO: Receita total e pendente usando total_paid
+        from app.models.payment import Payment
         
-        total_revenue = float(revenue_data.total_revenue or 0)
-        paid_revenue = float(revenue_data.paid_revenue or 0)
-        pending_revenue = total_revenue - paid_revenue
+        # Subquery para calcular total pago
+        paid_subquery = db.query(
+            Payment.reservation_id,
+            func.sum(Payment.amount).label('total_paid')
+        ).filter(
+            Payment.tenant_id == current_user.tenant_id,
+            Payment.status == 'confirmed',
+            Payment.is_refund == False,
+            Payment.is_active == True
+        ).group_by(Payment.reservation_id).subquery()
         
-        # Saldo pendente de check-ins
-        checked_in_pending = base_query.filter(
+        # Receita total
+        total_revenue = base_query.with_entities(
+            func.sum(Reservation.total_amount)
+        ).scalar() or 0
+        
+        # Receita paga (usando subquery)
+        paid_revenue = base_query.outerjoin(
+            paid_subquery, Reservation.id == paid_subquery.c.reservation_id
+        ).with_entities(
+            func.sum(func.coalesce(paid_subquery.c.total_paid, 0))
+        ).scalar() or 0
+        
+        pending_revenue = float(total_revenue) - float(paid_revenue)
+        
+        # ✅ CORREÇÃO: Saldo pendente de check-ins usando total_paid
+        checked_in_pending = base_query.outerjoin(
+            paid_subquery, Reservation.id == paid_subquery.c.reservation_id
+        ).filter(
             Reservation.status == 'checked_in',
-            Reservation.total_amount > Reservation.paid_amount
+            Reservation.total_amount > func.coalesce(paid_subquery.c.total_paid, 0)
         ).count()
         
         return {
@@ -1046,8 +1120,8 @@ def get_dashboard_summary(
             "todays_checkins": todays_checkins,
             "todays_checkouts": todays_checkouts,
             "current_guests": current_guests,
-            "total_revenue": total_revenue,
-            "paid_revenue": paid_revenue,
+            "total_revenue": float(total_revenue),
+            "paid_revenue": float(paid_revenue),
             "pending_revenue": pending_revenue,
             "checked_in_with_pending_payment": checked_in_pending,
             "summary_date": today.isoformat(),
@@ -1131,9 +1205,9 @@ def get_reservation(
         else:
             base_dict['nights'] = 0
         
-        # Campos computados - pagamento
+        # ✅ CORREÇÃO PRINCIPAL: Campos computados - pagamento usando total_paid
         total_amount = float(reservation_obj.total_amount) if reservation_obj.total_amount else 0
-        paid_amount = float(reservation_obj.paid_amount) if reservation_obj.paid_amount else 0
+        paid_amount = float(reservation_obj.total_paid) if reservation_obj.total_paid else 0  # ✅ MUDANÇA AQUI
         
         base_dict['is_paid'] = paid_amount >= total_amount if total_amount > 0 else True
         base_dict['balance_due'] = max(0, total_amount - paid_amount)

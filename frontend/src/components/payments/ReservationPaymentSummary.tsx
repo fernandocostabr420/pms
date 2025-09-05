@@ -19,7 +19,8 @@ import {
   CreditCard,
   AlertTriangle,
   CheckCircle,
-  Clock
+  Clock,
+  Zap
 } from 'lucide-react';
 import { useReservationPayments } from '@/hooks/useReservationPayments';
 import { 
@@ -119,11 +120,18 @@ export default function ReservationPaymentSummary({
             <Button 
               size="sm" 
               onClick={() => setIsPaymentModalOpen(true)}
+              className="bg-green-600 hover:bg-green-700"
             >
               <Plus className="h-4 w-4 mr-2" />
               Novo Pagamento
             </Button>
           </div>
+        </div>
+        
+        {/* ✅ Aviso sobre confirmação automática */}
+        <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 p-2 rounded-lg mt-2">
+          <Zap className="h-4 w-4" />
+          <span>Pagamentos são confirmados automaticamente ao serem criados</span>
         </div>
       </CardHeader>
 
@@ -197,8 +205,16 @@ export default function ReservationPaymentSummary({
             <div className="max-h-48 overflow-y-auto space-y-2">
               {summary.payments.map((payment) => {
                 const paymentDate = format(new Date(payment.payment_date), 'dd/MM/yy', { locale: ptBR });
-                const statusBadgeClass = PAYMENT_STATUS_COLORS[payment.status as PaymentStatusEnum] || "bg-gray-100 text-gray-800";
-                const statusLabel = PAYMENT_STATUS_LABELS[payment.status as PaymentStatusEnum] || payment.status;
+                
+                // ✅ Status visual simplificado - sempre verde para confirmados
+                const statusBadgeClass = payment.status === "confirmed" 
+                  ? "bg-green-100 text-green-800 border-green-200" 
+                  : PAYMENT_STATUS_COLORS[payment.status as PaymentStatusEnum] || "bg-gray-100 text-gray-800";
+                
+                const statusLabel = payment.status === "confirmed" 
+                  ? "Confirmado" 
+                  : PAYMENT_STATUS_LABELS[payment.status as PaymentStatusEnum] || payment.status;
+                
                 const methodLabel = PAYMENT_METHOD_LABELS[payment.payment_method as PaymentMethodEnum] || 
                                    payment.payment_method_display || payment.payment_method;
 
@@ -208,13 +224,16 @@ export default function ReservationPaymentSummary({
                       <CreditCard className="h-3 w-3 text-gray-400" />
                       <span className="font-medium">#{payment.payment_number}</span>
                       <span className="text-gray-600">{paymentDate}</span>
+                      <span className="text-gray-500 text-[10px]">{methodLabel}</span>
                     </div>
                     
                     <div className="flex items-center gap-2">
                       <span className="font-medium">
                         {formatCurrency(payment.amount)}
                       </span>
-                      <Badge className={cn("text-xs px-1.5 py-0.5", statusBadgeClass)}>
+                      {/* ✅ Badge com ícone para confirmados automaticamente */}
+                      <Badge className={cn("text-xs px-1.5 py-0.5 flex items-center gap-1", statusBadgeClass)}>
+                        {payment.status === "confirmed" && <CheckCircle className="h-2 w-2" />}
                         {statusLabel}
                       </Badge>
                     </div>
@@ -225,6 +244,17 @@ export default function ReservationPaymentSummary({
           </div>
         )}
 
+        {/* ✅ Informação sobre novos pagamentos */}
+        {summary.payments.length === 0 && (
+          <div className="text-center py-6 bg-gray-50 rounded-lg">
+            <DollarSign className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+            <p className="text-sm text-gray-600 mb-2">Nenhum pagamento registrado</p>
+            <p className="text-xs text-gray-500">
+              Novos pagamentos serão confirmados automaticamente
+            </p>
+          </div>
+        )}
+
         {/* Última atualização */}
         {summary.last_payment_date && (
           <div className="text-xs text-gray-500 text-center pt-2 border-t">
@@ -232,6 +262,12 @@ export default function ReservationPaymentSummary({
             {format(new Date(summary.last_payment_date), 'dd/MM/yyyy \'às\' HH:mm', { locale: ptBR })}
           </div>
         )}
+
+        {/* ✅ Informação adicional sobre política de confirmação */}
+        <div className="text-xs text-center text-gray-500 bg-blue-50 p-2 rounded border border-blue-200">
+          💡 <strong>Política:</strong> Todos os pagamentos são processados e confirmados automaticamente 
+          para maior agilidade no fluxo financeiro
+        </div>
       </CardContent>
 
       {/* Modal para novo pagamento */}

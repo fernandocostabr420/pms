@@ -26,7 +26,7 @@ import {
   FileText
 } from 'lucide-react';
 import { usePayments } from '@/hooks/usePayments';
-import { PaymentResponse, PaymentStatusEnum } from '@/types/payment';
+import { PaymentResponse } from '@/types/payment';
 import PaymentStats from '@/components/payments/PaymentStats';
 import PaymentFilters from '@/components/payments/PaymentFilters';
 import PaymentCard from '@/components/payments/PaymentCard';
@@ -49,7 +49,6 @@ export default function PaymentsPage() {
     currentPage,
     perPage,
     clearFilters,
-    updatePaymentStatus,
     deletePayment,
   } = usePayments();
 
@@ -77,21 +76,7 @@ export default function PaymentsPage() {
     setIsDeleteDialogOpen(true);
   };
 
-  const handleUpdateStatus = async (payment: PaymentResponse, status: PaymentStatusEnum) => {
-    try {
-      setActionLoading(`${status}-${payment.id}`);
-      
-      await updatePaymentStatus(payment.id, {
-        status,
-        notes: `Status alterado para ${status}`,
-      });
-
-    } catch (error) {
-      console.error('Erro ao atualizar status:', error);
-    } finally {
-      setActionLoading(null);
-    }
-  };
+  // ✅ REMOVIDO: handleUpdateStatus - pagamentos são sempre confirmados automaticamente
 
   const confirmDelete = async () => {
     if (!paymentToDelete) return;
@@ -130,6 +115,9 @@ export default function PaymentsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Pagamentos</h1>
           <p className="text-gray-600">Gerencie todos os pagamentos das reservas</p>
+          <p className="text-sm text-green-600 mt-1">
+            ✅ Todos os pagamentos são confirmados automaticamente
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Button 
@@ -207,8 +195,10 @@ export default function PaymentsPage() {
                       onView={() => {/* Implementar visualização detalhada */}}
                       onEdit={() => handleEditPayment(payment)}
                       onDelete={() => handleDeletePayment(payment)}
-                      onUpdateStatus={(status) => handleUpdateStatus(payment, status)}
+                      // ✅ REMOVIDO: onUpdateStatus - não há mais alteração de status
                       actionLoading={getActionLoadingForPayment(payment.id)}
+                      // ✅ NOVA PROP: informar que status não é editável
+                      statusReadOnly={true}
                     />
                   </div>
                 ))}

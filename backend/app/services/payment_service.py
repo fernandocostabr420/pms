@@ -57,7 +57,7 @@ class PaymentService:
         current_user: User,
         request: Optional[Request] = None
     ) -> Optional[Payment]:
-        """Cria novo pagamento"""
+        """Cria novo pagamento - SEMPRE CONFIRMADO AUTOMATICAMENTE"""
         
         # Verificar se a reserva existe e pertence ao tenant
         reservation = self.db.query(Reservation).filter(
@@ -80,7 +80,7 @@ class PaymentService:
         if payment_data.fee_amount:
             net_amount = payment_data.amount - payment_data.fee_amount
         
-        # Criar pagamento
+        # Criar pagamento SEMPRE CONFIRMADO
         payment_obj = Payment(
             tenant_id=tenant_id,
             reservation_id=payment_data.reservation_id,
@@ -94,7 +94,8 @@ class PaymentService:
             fee_amount=payment_data.fee_amount,
             net_amount=net_amount,
             is_partial=payment_data.is_partial,
-            status="pending"
+            status="confirmed",  # ✅ SEMPRE CONFIRMADO
+            confirmed_date=datetime.utcnow()  # ✅ DATA DE CONFIRMAÇÃO AUTOMÁTICA
         )
         
         try:
@@ -109,7 +110,7 @@ class PaymentService:
                     "payments", 
                     payment_obj.id,
                     new_values,
-                    f"Pagamento criado para reserva '{reservation.reservation_number}' - {payment_obj.payment_method_display} R$ {payment_obj.amount}"
+                    f"Pagamento criado e confirmado automaticamente para reserva '{reservation.reservation_number}' - {payment_obj.payment_method_display} R$ {payment_obj.amount}"
                 )
             
             return payment_obj
@@ -341,7 +342,7 @@ class PaymentService:
         # Calcular totais
         total_paid = sum(p.amount for p in payments if p.status == "confirmed" and not p.is_refund)
         total_refunded = sum(p.amount for p in payments if p.status == "confirmed" and p.is_refund)
-        balance_due = (reservation.total_amount or Decimal('0')) - total_paid + total_refunded
+        balance_due = reservation.balance_due
         
         # Data do último pagamento
         last_payment_date = None

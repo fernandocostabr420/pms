@@ -20,7 +20,8 @@ import {
   User,
   Building,
   Clock,
-  Hash
+  Hash,
+  CheckCircle
 } from 'lucide-react';
 import { PaymentWithReservation } from '@/types/payment';
 import { 
@@ -51,8 +52,14 @@ export default function PaymentDetails({
     ? format(new Date(payment.confirmed_date), 'dd/MM/yyyy \'às\' HH:mm', { locale: ptBR })
     : null;
 
-  const statusBadgeClass = PAYMENT_STATUS_COLORS[payment.status as PaymentStatusEnum] || "bg-gray-100 text-gray-800";
-  const statusLabel = PAYMENT_STATUS_LABELS[payment.status as PaymentStatusEnum] || payment.status;
+  // ✅ Status sempre verde para pagamentos confirmados automaticamente
+  const statusBadgeClass = payment.status === "confirmed" 
+    ? "bg-green-100 text-green-800 border-green-200" 
+    : PAYMENT_STATUS_COLORS[payment.status as PaymentStatusEnum] || "bg-gray-100 text-gray-800";
+  
+  const statusLabel = payment.status === "confirmed" 
+    ? "Confirmado Automaticamente" 
+    : PAYMENT_STATUS_LABELS[payment.status as PaymentStatusEnum] || payment.status;
   
   const methodLabel = PAYMENT_METHOD_LABELS[payment.payment_method as PaymentMethodEnum] || 
                      payment.payment_method_display || payment.payment_method;
@@ -81,7 +88,9 @@ export default function PaymentDetails({
                 <CardTitle className="flex items-center justify-between">
                   <span>Informações do Pagamento</span>
                   <div className="flex items-center gap-2">
-                    <Badge className={cn("text-xs", statusBadgeClass)}>
+                    {/* ✅ Status com ícone de confirmação automática */}
+                    <Badge className={cn("text-xs flex items-center gap-1", statusBadgeClass)}>
+                      {payment.status === "confirmed" && <CheckCircle className="h-3 w-3" />}
                       {statusLabel}
                     </Badge>
                     {payment.is_partial && (
@@ -154,6 +163,20 @@ export default function PaymentDetails({
                 </div>
               </CardContent>
             </Card>
+
+            {/* ✅ Aviso sobre confirmação automática */}
+            {payment.status === "confirmed" && (
+              <Card className="border-green-200 bg-green-50">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2 text-green-700">
+                    <CheckCircle className="h-4 w-4" />
+                    <span className="text-sm font-medium">
+                      Este pagamento foi confirmado automaticamente no momento da criação
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Observações */}
             {(payment.notes || payment.internal_notes) && (
@@ -260,16 +283,31 @@ export default function PaymentDetails({
                   </div>
                 </div>
 
+                {/* ✅ Confirmação automática sempre destacada */}
                 {confirmedDate && (
                   <div className="bg-green-50 border border-green-200 p-3 rounded-lg">
-                    <div className="text-sm text-green-700 mb-1">Confirmado em</div>
+                    <div className="text-sm text-green-700 mb-1 flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4" />
+                      {payment.status === "confirmed" ? "Confirmado automaticamente em" : "Confirmado em"}
+                    </div>
                     <div className="font-medium text-green-800">{confirmedDate}</div>
                   </div>
                 )}
 
                 <div className="bg-gray-50 p-3 rounded-lg">
                   <div className="text-sm text-gray-600 mb-1">Status atual</div>
-                  <div className="font-medium capitalize">{statusLabel}</div>
+                  <div className="font-medium capitalize flex items-center gap-2">
+                    {payment.status === "confirmed" && <CheckCircle className="h-4 w-4 text-green-600" />}
+                    {statusLabel}
+                  </div>
+                </div>
+
+                {/* ✅ Informação sobre política de auto-confirmação */}
+                <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg">
+                  <div className="text-sm text-blue-700">
+                    <strong>Política do Sistema:</strong> Todos os pagamentos são confirmados automaticamente 
+                    no momento da criação para agilizar o processo financeiro.
+                  </div>
                 </div>
               </CardContent>
             </Card>

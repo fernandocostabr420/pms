@@ -1103,25 +1103,25 @@ class ReservationService:
             rooms_data.append(room_data)
         
         # === 4. DADOS DE PAGAMENTO EXPANDIDOS ===
-        balance_due = (reservation.total_amount or Decimal('0.00')) - reservation.paid_amount
+        balance_due = reservation.balance_due
         deposit_amount = None
         if reservation.requires_deposit and reservation.total_amount:
             deposit_amount = reservation.total_amount * Decimal('0.30')  # 30% como depósito padrão
         
         payment_data = {
             'total_amount': float(reservation.total_amount or Decimal('0.00')),
-            'paid_amount': float(reservation.paid_amount),
+            'paid_amount': float(reservation.total_paid),
             'balance_due': float(balance_due),
             'discount': float(reservation.discount),
             'taxes': float(reservation.taxes),
             'deposit_required': reservation.requires_deposit,
             'deposit_amount': float(deposit_amount) if deposit_amount else None,
-            'deposit_paid': (reservation.paid_amount >= deposit_amount) if deposit_amount else False,
+            'deposit_paid': (reservation.total_paid >= deposit_amount) if deposit_amount else False,
             'last_payment_date': None,  # TODO: Implementar quando tiver tabela de pagamentos
             'payment_method_last': None,  # TODO: Implementar quando tiver tabela de pagamentos
             'total_payments': 1 if reservation.paid_amount > 0 else 0,  # TODO: Implementar quando tiver tabela de pagamentos
             'is_overdue': balance_due > 0 and reservation.check_in_date < date.today(),
-            'payment_status': 'paid' if balance_due <= 0 else 'partial' if reservation.paid_amount > 0 else 'pending',
+            'payment_status': reservation.payment_status,
         }
         
         # === 5. AÇÕES CONTEXTUAIS ===

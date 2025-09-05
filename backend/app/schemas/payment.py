@@ -29,7 +29,7 @@ class PaymentStatusEnum(str, Enum):
 
 # Schemas para requisições
 class PaymentCreate(BaseModel):
-    """Schema para criação de pagamento"""
+    """Schema para criação de pagamento - STATUS REMOVIDO (sempre confirmado)"""
     reservation_id: int = Field(..., description="ID da reserva")
     amount: Decimal = Field(..., gt=0, description="Valor do pagamento")
     payment_method: PaymentMethodEnum = Field(..., description="Método de pagamento")
@@ -39,6 +39,7 @@ class PaymentCreate(BaseModel):
     internal_notes: Optional[str] = Field(None, max_length=1000, description="Notas internas")
     fee_amount: Optional[Decimal] = Field(None, ge=0, description="Taxa cobrada")
     is_partial: bool = Field(default=False, description="Pagamento parcial")
+    # ✅ REMOVIDO: status (sempre será "confirmed" automaticamente)
 
 
 class PaymentUpdate(BaseModel):

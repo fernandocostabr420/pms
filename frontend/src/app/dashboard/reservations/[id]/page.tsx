@@ -8,7 +8,9 @@ import { useReservationDetails } from '@/hooks/useReservationDetails';
 import { ReservationHeader } from '@/components/reservations/ReservationHeader';
 import CancelReservationModal from '@/components/reservations/CancelReservationModal';
 import EditReservationModal from '@/components/reservations/EditReservationModal';
-import CheckInModal from '@/components/reservations/CheckInModal'; // ✅ NOVO IMPORT
+import CheckInModal from '@/components/reservations/CheckInModal';
+// ✅ NOVO IMPORT - PaymentModal
+import PaymentModal from '@/components/reservations/PaymentModal';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Loader2 } from 'lucide-react';
@@ -23,7 +25,9 @@ export default function ReservationDetailsPage() {
   const { data, loading, error, refresh } = useReservationDetails(reservationId);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
-  const [checkInModalOpen, setCheckInModalOpen] = useState(false); // ✅ NOVO ESTADO
+  const [checkInModalOpen, setCheckInModalOpen] = useState(false);
+  // ✅ NOVO ESTADO - PaymentModal
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const handleAction = async (action: string) => {
@@ -39,7 +43,6 @@ export default function ReservationDetailsPage() {
         break;
         
       case 'checkin':
-        // ✅ MODIFICADO: Abre modal de check-in
         setCheckInModalOpen(true);
         break;
         
@@ -53,12 +56,8 @@ export default function ReservationDetailsPage() {
         break;
         
       case 'payment':
-        // TODO: Implementar modal de pagamento
-        toast({
-          title: 'Em desenvolvimento',
-          description: 'Funcionalidade de pagamento será implementada em breve.',
-          variant: 'default',
-        });
+        // ✅ NOVO: Abrir modal de pagamento
+        setPaymentModalOpen(true);
         break;
         
       default:
@@ -79,7 +78,6 @@ export default function ReservationDetailsPage() {
     });
   };
 
-  // ✅ NOVO HANDLER PARA SUCESSO DO CHECK-IN
   const handleCheckInSuccess = async () => {
     setCheckInModalOpen(false);
     
@@ -89,6 +87,20 @@ export default function ReservationDetailsPage() {
     toast({
       title: 'Check-in Realizado',
       description: 'Check-in realizado com sucesso!',
+      variant: 'default',
+    });
+  };
+
+  // ✅ NOVO HANDLER PARA SUCESSO DO PAGAMENTO
+  const handlePaymentSuccess = async () => {
+    setPaymentModalOpen(false);
+    
+    // Recarregar dados da reserva
+    await refresh();
+    
+    toast({
+      title: 'Pagamento Registrado',
+      description: 'Pagamento registrado com sucesso!',
       variant: 'default',
     });
   };
@@ -504,13 +516,24 @@ export default function ReservationDetailsPage() {
         reservation={data}
       />
 
-      {/* ✅ NOVO MODAL DE CHECK-IN */}
+      {/* Modal de Check-in */}
       <CheckInModal
         isOpen={checkInModalOpen}
         onClose={() => setCheckInModalOpen(false)}
         onSuccess={handleCheckInSuccess}
         reservationId={data.id.toString()}
         existingGuestData={getExistingGuestData()}
+      />
+
+      {/* ✅ NOVO MODAL DE PAGAMENTO */}
+      <PaymentModal
+        isOpen={paymentModalOpen}
+        onClose={() => setPaymentModalOpen(false)}
+        onSuccess={handlePaymentSuccess}
+        reservationId={data.id}
+        reservationNumber={data.reservation_number}
+        totalAmount={parseFloat(data.payment.total_amount) || 0}
+        balanceDue={parseFloat(data.payment.balance_due) || 0}
       />
     </div>
   );
