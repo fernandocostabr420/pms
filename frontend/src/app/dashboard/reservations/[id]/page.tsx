@@ -7,7 +7,8 @@ import { ptBR } from 'date-fns/locale';
 import { useReservationDetails } from '@/hooks/useReservationDetails';
 import { ReservationHeader } from '@/components/reservations/ReservationHeader';
 import CancelReservationModal from '@/components/reservations/CancelReservationModal';
-import EditReservationModal from '@/components/reservations/EditReservationModal'; // ✅ NOVO IMPORT
+import EditReservationModal from '@/components/reservations/EditReservationModal';
+import CheckInModal from '@/components/reservations/CheckInModal'; // ✅ NOVO IMPORT
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Loader2 } from 'lucide-react';
@@ -21,7 +22,8 @@ export default function ReservationDetailsPage() {
   
   const { data, loading, error, refresh } = useReservationDetails(reservationId);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
-  const [editModalOpen, setEditModalOpen] = useState(false); // ✅ NOVO ESTADO
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [checkInModalOpen, setCheckInModalOpen] = useState(false); // ✅ NOVO ESTADO
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const handleAction = async (action: string) => {
@@ -33,17 +35,12 @@ export default function ReservationDetailsPage() {
         break;
         
       case 'edit':
-        // ✅ MODIFICADO: Abre modal em vez de navegar
         setEditModalOpen(true);
         break;
         
       case 'checkin':
-        // TODO: Implementar modal de check-in
-        toast({
-          title: 'Em desenvolvimento',
-          description: 'Funcionalidade de check-in será implementada em breve.',
-          variant: 'default',
-        });
+        // ✅ MODIFICADO: Abre modal de check-in
+        setCheckInModalOpen(true);
         break;
         
       case 'checkout':
@@ -69,7 +66,6 @@ export default function ReservationDetailsPage() {
     }
   };
 
-  // ✅ NOVO HANDLER PARA SUCESSO DA EDIÇÃO
   const handleEditSuccess = async () => {
     setEditModalOpen(false);
     
@@ -79,6 +75,20 @@ export default function ReservationDetailsPage() {
     toast({
       title: 'Sucesso',
       description: 'Reserva atualizada com sucesso',
+      variant: 'default',
+    });
+  };
+
+  // ✅ NOVO HANDLER PARA SUCESSO DO CHECK-IN
+  const handleCheckInSuccess = async () => {
+    setCheckInModalOpen(false);
+    
+    // Recarregar dados da reserva
+    await refresh();
+    
+    toast({
+      title: 'Check-in Realizado',
+      description: 'Check-in realizado com sucesso!',
       variant: 'default',
     });
   };
@@ -115,6 +125,21 @@ export default function ReservationDetailsPage() {
     } finally {
       setActionLoading(null);
     }
+  };
+
+  // ✅ PREPARAR DADOS DO HÓSPEDE PARA PRÉ-PREENCHIMENTO
+  const getExistingGuestData = () => {
+    if (!data?.guest) return undefined;
+    
+    return {
+      first_name: data.guest.full_name?.split(' ')[0] || '',
+      last_name: data.guest.full_name?.split(' ').slice(1).join(' ') || '',
+      email: data.guest.email || '',
+      phone: data.guest.phone || '',
+      document_number: data.guest.document_number || '',
+      country: data.guest.nationality || 'Brasil',
+      // Outros campos podem ser mapeados se disponíveis
+    };
   };
 
   if (loading) {
@@ -471,12 +496,21 @@ export default function ReservationDetailsPage() {
         loading={actionLoading === 'cancel'}
       />
 
-      {/* ✅ NOVO MODAL DE EDIÇÃO */}
+      {/* Modal de Edição */}
       <EditReservationModal
         isOpen={editModalOpen}
         onClose={() => setEditModalOpen(false)}
         onSuccess={handleEditSuccess}
         reservation={data}
+      />
+
+      {/* ✅ NOVO MODAL DE CHECK-IN */}
+      <CheckInModal
+        isOpen={checkInModalOpen}
+        onClose={() => setCheckInModalOpen(false)}
+        onSuccess={handleCheckInSuccess}
+        reservationId={data.id.toString()}
+        existingGuestData={getExistingGuestData()}
       />
     </div>
   );
