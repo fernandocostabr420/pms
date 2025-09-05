@@ -9,7 +9,13 @@ import {
   PaymentStats,
   PaymentCreate,
   PaymentUpdate,
-  PaymentStatusUpdate
+  PaymentStatusUpdate,
+  // ✅ NOVOS IMPORTS PARA FUNCIONALIDADES ADMINISTRATIVAS
+  PaymentConfirmedUpdate,
+  PaymentDeleteConfirmed,
+  PaymentPermissions,
+  PaymentSecurityWarning,
+  PaymentAuditLog
 } from '@/types/payment';
 import { useToast } from '@/hooks/use-toast';
 
@@ -33,6 +39,10 @@ interface UsePaymentsReturn {
   currentPage: number;
   perPage: number;
   
+  // ✅ NOVO: Estado para permissões e administração
+  isAdmin: boolean;
+  loadingPermissions: boolean;
+  
   // Ações
   loadPayments: () => Promise<void>;
   refreshData: () => Promise<void>;
@@ -44,9 +54,17 @@ interface UsePaymentsReturn {
   // Operações CRUD
   createPayment: (data: PaymentCreate) => Promise<PaymentResponse | null>;
   updatePayment: (id: number, data: PaymentUpdate) => Promise<PaymentResponse | null>;
-  deletePayment: (id: number) => Promise<boolean>;
+  deletePayment: (id: number, justification?: PaymentDeleteConfirmed) => Promise<boolean>;
   updatePaymentStatus: (id: number, data: PaymentStatusUpdate) => Promise<PaymentResponse | null>;
   getPaymentByNumber: (paymentNumber: string) => Promise<PaymentResponse | null>;
+  
+  // ✅ NOVAS OPERAÇÕES ADMINISTRATIVAS
+  updateConfirmedPayment: (id: number, data: PaymentConfirmedUpdate) => Promise<PaymentResponse | null>;
+  deleteConfirmedPayment: (id: number, data: PaymentDeleteConfirmed) => Promise<boolean>;
+  getPaymentPermissions: (id: number) => Promise<PaymentPermissions | null>;
+  getPaymentSecurityWarning: (id: number, operation: 'edit_confirmed' | 'delete_confirmed') => Promise<PaymentSecurityWarning | null>;
+  getPaymentAuditLog: (id: number) => Promise<PaymentAuditLog[]>;
+  checkAdminPermissions: () => Promise<boolean>;
 }
 
 const initialFilters: PaymentFilters = {
@@ -67,6 +85,10 @@ export function usePayments(): UsePaymentsReturn {
     pages: 1,
     per_page: 20,
   });
+
+  // ✅ NOVOS ESTADOS PARA ADMINISTRAÇÃO
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [loadingPermissions, setLoadingPermissions] = useState(true);
 
   const { toast } = useToast();
 
@@ -125,6 +147,22 @@ export function usePayments(): UsePaymentsReturn {
       console.error('Erro ao calcular estatísticas:', err);
     }
   }, [payments]);
+
+  // ✅ NOVA FUNÇÃO: Verificar permissões de administrador
+  const checkAdminPermissions = useCallback(async (): Promise<boolean> => {
+    try {
+      setLoadingPermissions(true);
+      const isAdminUser = await apiClient.checkAdminPermissions();
+      setIsAdmin(isAdminUser);
+      return isAdminUser;
+    } catch (error) {
+      console.error('Erro ao verificar permissões de admin:', error);
+      setIsAdmin(false);
+      return false;
+    } finally {
+      setLoadingPermissions(false);
+    }
+  }, []);
 
   const refreshData = useCallback(async () => {
     await loadPayments();
@@ -202,9 +240,10 @@ export function usePayments(): UsePaymentsReturn {
     }
   }, [toast]);
 
-  const deletePayment = useCallback(async (id: number) => {
+  // ✅ MÉTODO MODIFICADO: deletePayment - suporte para justificativas
+  const deletePayment = useCallback(async (id: number, justification?: PaymentDeleteConfirmed) => {
     try {
-      await apiClient.deletePayment(id);
+      await apiClient.deletePayment(id, justification);
       
       // Remover da lista
       setPayments(prev => prev.filter(payment => payment.id !== id));
@@ -269,6 +308,95 @@ export function usePayments(): UsePaymentsReturn {
     }
   }, [toast]);
 
+  // ✅ NOVAS OPERAÇÕES ADMINISTRATIVAS
+
+  const updateConfirmedPayment = useCallback(async (id: number, data: PaymentConfirmedUpdate) => {
+    try {
+      const response = await apiClient.updateConfirmedPayment(id, data);
+      
+      // Atualizar o pagamento na lista
+      setPayments(prev => 
+        prev.map(payment => 
+          payment.id === id ? response : payment
+        )
+      );
+      
+      toast({
+        title: "Pagamento confirmado atualizado",
+        description: `Pagamento #${response.payment_number} foi atualizado administrativamente.`,
+        variant: "default",
+      });
+      
+      return response;
+    } catch (err: any) {
+      console.error('Erro ao atualizar pagamento confirmado:', err);
+      toast({
+        title: "Erro",
+        description: err.response?.data?.detail || 'Erro ao atualizar pagamento confirmado',
+        variant: "destructive",
+      });
+      return null;
+    }
+  }, [toast]);
+
+  const deleteConfirmedPayment = useCallback(async (id: number, data: PaymentDeleteConfirmed) => {
+    try {
+      await apiClient.deleteConfirmedPayment(id, data);
+      
+      // Remover da lista
+      setPayments(prev => prev.filter(payment => payment.id !== id));
+      
+      toast({
+        title: "Pagamento confirmado excluído",
+        description: "O pagamento confirmado foi excluído administrativamente.",
+        variant: "default",
+      });
+      
+      return true;
+    } catch (err: any) {
+      console.error('Erro ao excluir pagamento confirmado:', err);
+      toast({
+        title: "Erro",
+        description: err.response?.data?.detail || 'Erro ao excluir pagamento confirmado',
+        variant: "destructive",
+      });
+      return false;
+    }
+  }, [toast]);
+
+  const getPaymentPermissions = useCallback(async (id: number): Promise<PaymentPermissions | null> => {
+    try {
+      const permissions = await apiClient.getPaymentPermissions(id);
+      return permissions;
+    } catch (err: any) {
+      console.error('Erro ao verificar permissões do pagamento:', err);
+      return null;
+    }
+  }, []);
+
+  const getPaymentSecurityWarning = useCallback(async (
+    id: number, 
+    operation: 'edit_confirmed' | 'delete_confirmed'
+  ): Promise<PaymentSecurityWarning | null> => {
+    try {
+      const warning = await apiClient.getPaymentSecurityWarning(id, operation);
+      return warning;
+    } catch (err: any) {
+      console.error('Erro ao obter aviso de segurança:', err);
+      return null;
+    }
+  }, []);
+
+  const getPaymentAuditLog = useCallback(async (id: number): Promise<PaymentAuditLog[]> => {
+    try {
+      const auditLog = await apiClient.getPaymentAuditLog(id);
+      return auditLog;
+    } catch (err: any) {
+      console.error('Erro ao carregar log de auditoria:', err);
+      return [];
+    }
+  }, []);
+
   // Carregar dados inicial
   useEffect(() => {
     loadPayments();
@@ -277,6 +405,11 @@ export function usePayments(): UsePaymentsReturn {
   useEffect(() => {
     loadStats();
   }, [loadStats]);
+
+  // ✅ NOVO: Verificar permissões de admin ao inicializar
+  useEffect(() => {
+    checkAdminPermissions();
+  }, [checkAdminPermissions]);
 
   return {
     payments,
@@ -287,6 +420,11 @@ export function usePayments(): UsePaymentsReturn {
     filters,
     currentPage,
     perPage,
+    
+    // ✅ NOVOS RETORNOS ADMINISTRATIVOS
+    isAdmin,
+    loadingPermissions,
+    
     loadPayments,
     refreshData,
     setFilters,
@@ -298,5 +436,13 @@ export function usePayments(): UsePaymentsReturn {
     deletePayment,
     updatePaymentStatus,
     getPaymentByNumber,
+    
+    // ✅ NOVAS OPERAÇÕES ADMINISTRATIVAS
+    updateConfirmedPayment,
+    deleteConfirmedPayment,
+    getPaymentPermissions,
+    getPaymentSecurityWarning,
+    getPaymentAuditLog,
+    checkAdminPermissions,
   };
 }

@@ -153,12 +153,18 @@ export interface TodaysReservationsImproved {
   current_guests: any[];
 }
 
+// ✅ NOVOS IMPORTS PARA FUNCIONALIDADES ADMINISTRATIVAS DE PAGAMENTOS
 import {
   PaymentResponse,
   PaymentListResponse, 
   PaymentCreate,
   PaymentUpdate,
-  PaymentStatusUpdate
+  PaymentStatusUpdate,
+  // ✅ NOVOS TIPOS PARA FUNCIONALIDADES ADMINISTRATIVAS
+  PaymentConfirmedUpdate,
+  PaymentDeleteConfirmed,
+  PaymentPermissions,
+  PaymentSecurityWarning
 } from '@/types/payment';
 
 class PMSApiClient {
@@ -310,6 +316,24 @@ class PMSApiClient {
     return tenantData ? JSON.parse(tenantData) : null;
   }
 
+  // ✅ NOVO MÉTODO: Verificar se o usuário atual tem permissões de administrador
+  async checkAdminPermissions(): Promise<boolean> {
+    try {
+      // Primeiro verificar no cache local
+      const userData = this.getCurrentUser();
+      if (userData && userData.is_superuser !== undefined) {
+        return userData.is_superuser;
+      }
+      
+      // Se não tem no cache, buscar do servidor
+      const response = await this.get<{ is_superuser: boolean }>('/auth/me');
+      return response.data.is_superuser;
+    } catch (error) {
+      console.error('Erro ao verificar permissões de admin:', error);
+      return false;
+    }
+  }
+
   // ===== GENERIC HTTP METHODS =====
   
   async get<T>(url: string, params?: any): Promise<AxiosResponse<T>> {
@@ -324,8 +348,8 @@ class PMSApiClient {
     return this.client.put<T>(url, data);
   }
 
-  async delete<T>(url: string): Promise<AxiosResponse<T>> {
-    return this.client.delete<T>(url);
+  async delete<T>(url: string, options?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+    return this.client.delete<T>(url, options);
   }
 
   // ===== PROPERTIES API =====
@@ -1458,7 +1482,7 @@ async getTodaysReservationsImproved(propertyId?: number, includeDetails: boolean
     return response.data;
   }
 
-  // ===== PAYMENT METHODS =====
+  // ===== PAYMENT METHODS (MÉTODOS ORIGINAIS + NOVOS ADMINISTRATIVOS) =====
 
 async getPayments(params?: {
   page?: number;
@@ -1488,13 +1512,34 @@ async getPayment(id: number): Promise<PaymentResponse> {
   return response.data;
 }
 
-async updatePayment(id: number, data: PaymentUpdate): Promise<PaymentResponse> {
-  const response = await this.put<PaymentResponse>(`/payments/${id}`, data);
-  return response.data;
+// ✅ MÉTODO MODIFICADO: updatePayment - suporte para pagamentos confirmados
+async updatePayment(
+  id: number, 
+  data: PaymentUpdate | PaymentConfirmedUpdate
+): Promise<PaymentResponse> {
+  // Verificar se é uma atualização de pagamento confirmado (tem admin_reason)
+  if ('admin_reason' in data && data.admin_reason) {
+    // Usar endpoint específico para pagamentos confirmados
+    return await this.updateConfirmedPayment(id, data as PaymentConfirmedUpdate);
+  } else {
+    // Método original
+    const response = await this.put<PaymentResponse>(`/payments/${id}`, data);
+    return response.data;
+  }
 }
 
-async deletePayment(id: number): Promise<void> {
-  await this.delete(`/payments/${id}`);
+// ✅ MÉTODO MODIFICADO: deletePayment - suporte para justificativas
+async deletePayment(
+  id: number, 
+  justification?: { admin_reason: string }
+): Promise<void> {
+  if (justification) {
+    // Se tem justificativa, usar endpoint específico para pagamentos confirmados
+    await this.delete(`/payments/${id}`, { data: justification });
+  } else {
+    // Método original para pagamentos não confirmados
+    await this.delete(`/payments/${id}`);
+  }
 }
 
 async updatePaymentStatus(id: number, data: PaymentStatusUpdate): Promise<PaymentResponse> {
@@ -1509,6 +1554,59 @@ async getPaymentByNumber(paymentNumber: string): Promise<PaymentResponse> {
 
 async getPaymentsByReservation(reservationId: number): Promise<PaymentResponse[]> {
   const response = await this.get<PaymentResponse[]>(`/payments/by-reservation/${reservationId}`);
+  return response.data;
+}
+
+// ===== ✅ NOVOS MÉTODOS ADMINISTRATIVOS PARA PAGAMENTOS CONFIRMADOS =====
+
+/**
+ * Verifica as permissões do usuário para um pagamento específico
+ */
+async getPaymentPermissions(id: number): Promise<PaymentPermissions> {
+  const response = await this.get<PaymentPermissions>(`/payments/${id}/permissions`);
+  return response.data;
+}
+
+/**
+ * Obtém aviso de segurança para operações sensíveis
+ */
+async getPaymentSecurityWarning(
+  id: number, 
+  operation: 'edit_confirmed' | 'delete_confirmed'
+): Promise<PaymentSecurityWarning> {
+  const response = await this.get<PaymentSecurityWarning>(
+    `/payments/${id}/security-warning`,
+    { operation }
+  );
+  return response.data;
+}
+
+/**
+ * Atualiza pagamento confirmado com justificativa obrigatória (apenas admin)
+ */
+async updateConfirmedPayment(
+  id: number, 
+  data: PaymentConfirmedUpdate
+): Promise<PaymentResponse> {
+  const response = await this.put<PaymentResponse>(`/payments/${id}/confirmed`, data);
+  return response.data;
+}
+
+/**
+ * Exclui pagamento confirmado com justificativa obrigatória (apenas admin)
+ */
+async deleteConfirmedPayment(
+  id: number, 
+  data: PaymentDeleteConfirmed
+): Promise<void> {
+  await this.delete(`/payments/${id}/confirmed`, { data });
+}
+
+/**
+ * Obtém histórico de alterações administrativas em um pagamento
+ */
+async getPaymentAuditLog(id: number): Promise<any[]> {
+  const response = await this.get<any[]>(`/payments/${id}/audit-log`);
   return response.data;
 }
 

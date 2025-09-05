@@ -1,4 +1,4 @@
-// frontend/src/components/payments/PaymentModal.tsx
+// frontend/src/components/payments/PaymentEditModal.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -27,30 +27,25 @@ import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   Loader2, 
-  AlertCircle, 
-  // ✅ NOVOS ÍCONES PARA FUNCIONALIDADES ADMINISTRATIVAS
+  AlertTriangle,
   Shield,
-  AlertTriangle
+  Edit2,
+  DollarSign
 } from 'lucide-react';
 import { 
   PaymentResponse, 
-  PaymentCreate, 
-  PaymentUpdate, 
+  PaymentUpdate,
+  PaymentConfirmedUpdate,
   PaymentMethodEnum, 
   PAYMENT_METHOD_LABELS,
-  // ✅ NOVOS IMPORTS PARA FUNCIONALIDADES ADMINISTRATIVAS
-  PaymentConfirmedUpdate,
   validateAdminReason,
   ADMIN_REASON_MIN_LENGTH,
   ADMIN_REASON_MAX_LENGTH
 } from '@/types/payment';
-import { ReservationResponse } from '@/types/reservation';
-import apiClient from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
-// ✅ SCHEMA ATUALIZADO PARA SUPORTAR EDIÇÃO ADMINISTRATIVA
-const paymentSchema = z.object({
-  reservation_id: z.number().min(1, 'Reserva é obrigatória'),
+// Schema único que sempre inclui admin_reason (será validado condicionalmente)
+const editPaymentSchema = z.object({
   amount: z.number().min(0.01, 'Valor deve ser maior que zero'),
   payment_method: z.nativeEnum(PaymentMethodEnum, {
     errorMap: () => ({ message: 'Método de pagamento é obrigatório' })
@@ -61,61 +56,30 @@ const paymentSchema = z.object({
   internal_notes: z.string().optional(),
   fee_amount: z.number().min(0).optional(),
   is_partial: z.boolean().optional(),
+  admin_reason: z.string().optional(), // Sempre opcional no schema, validação manual
 });
 
-// ✅ SCHEMA PARA EDIÇÃO ADMINISTRATIVA
-const adminPaymentSchema = paymentSchema.extend({
-  admin_reason: z.string()
-    .min(ADMIN_REASON_MIN_LENGTH, `Justificativa deve ter pelo menos ${ADMIN_REASON_MIN_LENGTH} caracteres`)
-    .max(ADMIN_REASON_MAX_LENGTH, `Justificativa deve ter no máximo ${ADMIN_REASON_MAX_LENGTH} caracteres`)
-});
+type EditPaymentFormData = z.infer<typeof editPaymentSchema>;
 
-type PaymentFormData = z.infer<typeof paymentSchema>;
-type AdminPaymentFormData = z.infer<typeof adminPaymentSchema>;
-
-interface PaymentModalProps {
+interface PaymentEditModalProps {
   isOpen: boolean;
   onClose: () => void;
-  payment?: PaymentResponse | null;
-  reservationId?: number;
-  onSuccess: () => void;
-  // ✅ NOVAS PROPS PARA FUNCIONALIDADES ADMINISTRATIVAS
-  isAdminMode?: boolean;
+  payment: PaymentResponse | null;
+  onSuccess: (updatedPayment: PaymentResponse) => void;
   isAdmin?: boolean;
 }
 
-export default function PaymentModal({ 
+export default function PaymentEditModal({ 
   isOpen, 
   onClose, 
-  payment, 
-  reservationId,
+  payment,
   onSuccess,
-  // ✅ NOVAS PROPS
-  isAdminMode = false,
   isAdmin = false
-}: PaymentModalProps) {
-  const [reservations, setReservations] = useState<ReservationResponse[]>([]);
+}: PaymentEditModalProps) {
   const [loading, setLoading] = useState(false);
-  const [loadingData, setLoadingData] = useState(false);
   const { toast } = useToast();
 
-  const isEdit = !!payment;
-  const isConfirmedPayment = payment?.status === 'confirmed';
-  const requiresAdminReason = isAdminMode && isConfirmedPayment;
-  
-  // ✅ TÍTULO DINÂMICO BASEADO NO MODO
-  const getModalTitle = () => {
-    if (isEdit) {
-      if (isAdminMode && isConfirmedPayment) {
-        return 'Editar Pagamento Confirmado (Administrador)';
-      }
-      return 'Editar Pagamento';
-    }
-    return 'Novo Pagamento';
-  };
-
-  const modalTitle = getModalTitle();
-
+  // Sempre chamar useForm primeiro, sem condições
   const {
     register,
     handleSubmit,
@@ -124,29 +88,27 @@ export default function PaymentModal({
     setValue,
     watch,
     clearErrors
-  } = useForm<AdminPaymentFormData>({
-    resolver: zodResolver(requiresAdminReason ? adminPaymentSchema : paymentSchema),
+  } = useForm<EditPaymentFormData>({
+    resolver: zodResolver(editPaymentSchema),
     defaultValues: {
-      payment_date: new Date().toISOString().slice(0, 16), // yyyy-MM-ddTHH:mm
+      amount: 0,
+      payment_method: PaymentMethodEnum.PIX,
+      payment_date: new Date().toISOString().slice(0, 16),
+      reference_number: '',
+      notes: '',
+      internal_notes: '',
+      fee_amount: 0,
       is_partial: false,
+      admin_reason: '',
     }
   });
 
-  // Carregar dados quando modal abre
+  // Resetar form quando payment muda - HOOK SEMPRE CHAMADO
   useEffect(() => {
-    if (isOpen) {
-      loadInitialData();
-    }
-  }, [isOpen]);
-
-  // Resetar form quando payment muda
-  useEffect(() => {
-    if (payment) {
-      // Converter data para formato datetime-local
+    if (payment && isOpen) {
       const paymentDate = new Date(payment.payment_date).toISOString().slice(0, 16);
       
-      const formData: Partial<AdminPaymentFormData> = {
-        reservation_id: payment.reservation_id,
+      reset({
         amount: payment.amount,
         payment_method: payment.payment_method as PaymentMethodEnum,
         payment_date: paymentDate,
@@ -155,109 +117,104 @@ export default function PaymentModal({
         internal_notes: payment.internal_notes || '',
         fee_amount: payment.fee_amount || 0,
         is_partial: payment.is_partial,
-      };
-
-      // ✅ LIMPAR JUSTIFICATIVA ADMINISTRATIVA AO CARREGAR PAGAMENTO
-      if (requiresAdminReason) {
-        formData.admin_reason = '';
-      }
-
-      reset(formData);
-    } else if (reservationId) {
-      setValue('reservation_id', reservationId);
-    } else {
-      reset({
-        payment_date: new Date().toISOString().slice(0, 16),
-        is_partial: false,
+        admin_reason: '',
       });
     }
-  }, [payment, reservationId, reset, setValue, requiresAdminReason]);
+  }, [payment, isOpen, reset]);
 
-  const loadInitialData = async () => {
-    try {
-      setLoadingData(true);
-      
-      // Carregar reservas para o select
-      const reservationsData = await apiClient.getReservations({ 
-        per_page: 100,
-        status: 'confirmed,checked_in'
-      });
-      setReservations(reservationsData.reservations);
+  // Depois de TODOS os hooks, fazer verificações
+  if (!payment) {
+    return null;
+  }
 
-    } catch (error) {
-      console.error('Erro ao carregar dados:', error);
+  const isConfirmed = payment.status === 'confirmed';
+  const requiresAdminReason = isConfirmed && isAdmin;
+  const canEdit = !isConfirmed || (isConfirmed && isAdmin);
+
+  const onSubmit = async (data: EditPaymentFormData) => {
+    if (!payment || !canEdit) {
       toast({
-        title: "Erro",
-        description: "Erro ao carregar dados necessários",
+        title: "Sem permissão",
+        description: "Você não tem permissão para editar este pagamento.",
         variant: "destructive",
       });
-    } finally {
-      setLoadingData(false);
+      return;
     }
-  };
 
-  const onSubmit = async (data: AdminPaymentFormData) => {
+    // Validação condicional da justificativa administrativa
+    if (requiresAdminReason) {
+      if (!data.admin_reason || data.admin_reason.trim().length < ADMIN_REASON_MIN_LENGTH) {
+        toast({
+          title: "Justificativa obrigatória",
+          description: `Justificativa deve ter pelo menos ${ADMIN_REASON_MIN_LENGTH} caracteres`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const reasonValidation = validateAdminReason(data.admin_reason);
+      if (!reasonValidation.valid) {
+        toast({
+          title: "Erro na justificativa",
+          description: reasonValidation.error,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     try {
       setLoading(true);
       clearErrors();
 
       // Converter data para ISO
       const basePaymentData = {
-        ...data,
+        amount: data.amount,
+        payment_method: data.payment_method,
         payment_date: new Date(data.payment_date).toISOString(),
+        reference_number: data.reference_number || undefined,
+        notes: data.notes || undefined,
+        internal_notes: data.internal_notes || undefined,
         fee_amount: data.fee_amount || undefined,
+        is_partial: data.is_partial,
       };
 
       let response;
 
-      if (isEdit && payment) {
-        // ✅ LÓGICA PARA EDIÇÃO ADMINISTRATIVA
-        if (isAdminMode && isConfirmedPayment && data.admin_reason) {
-          // Validar justificativa administrativa
-          const reasonValidation = validateAdminReason(data.admin_reason);
-          if (!reasonValidation.valid) {
-            toast({
-              title: "Erro na justificativa",
-              description: reasonValidation.error,
-              variant: "destructive",
-            });
-            return;
-          }
+      if (requiresAdminReason && data.admin_reason) {
+        const adminData: PaymentConfirmedUpdate = {
+          ...basePaymentData,
+          admin_reason: data.admin_reason
+        };
 
-          const adminData: PaymentConfirmedUpdate = {
-            ...basePaymentData,
-            admin_reason: data.admin_reason
-          };
-
-          // Usar endpoint específico para pagamentos confirmados
-          response = await apiClient.updateConfirmedPayment(payment.id, adminData);
-        } else {
-          // Edição normal
-          response = await apiClient.updatePayment(payment.id, basePaymentData as PaymentUpdate);
-        }
+        // Usar API client para edição administrativa
+        const apiClient = (await import('@/lib/api')).default;
+        response = await apiClient.updateConfirmedPayment(payment.id, adminData);
       } else {
-        // Criação normal
-        response = await apiClient.createPayment(basePaymentData as PaymentCreate);
+        // Edição normal
+        const apiClient = (await import('@/lib/api')).default;
+        response = await apiClient.updatePayment(payment.id, basePaymentData as PaymentUpdate);
       }
 
       if (response) {
-        const successMessage = isEdit 
-          ? (isAdminMode ? 'Pagamento confirmado atualizado administrativamente' : 'Pagamento atualizado')
-          : 'Pagamento criado';
+        const successMessage = requiresAdminReason 
+          ? 'Pagamento confirmado atualizado administrativamente'
+          : 'Pagamento atualizado';
           
         toast({
           title: successMessage,
-          description: `O pagamento foi ${isEdit ? 'atualizado' : 'criado'} com sucesso.`,
+          description: `Pagamento #${response.payment_number} foi atualizado com sucesso.`,
         });
-        onSuccess();
+        
+        onSuccess(response);
         onClose();
       }
 
     } catch (error: any) {
-      console.error('Erro ao salvar pagamento:', error);
+      console.error('Erro ao atualizar pagamento:', error);
       toast({
         title: "Erro",
-        description: error.response?.data?.detail || `Erro ao ${isEdit ? 'atualizar' : 'criar'} pagamento`,
+        description: error.response?.data?.detail || 'Erro ao atualizar pagamento',
         variant: "destructive",
       });
     } finally {
@@ -268,7 +225,6 @@ export default function PaymentModal({
   const handleClose = () => {
     if (!loading) {
       onClose();
-      setTimeout(() => reset(), 100);
     }
   };
 
@@ -277,55 +233,53 @@ export default function PaymentModal({
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {isAdminMode && <Shield className="h-5 w-5 text-orange-600" />}
-            {modalTitle}
+            {requiresAdminReason ? (
+              <>
+                <Shield className="h-5 w-5 text-orange-600" />
+                Editar Pagamento Confirmado (Admin)
+              </>
+            ) : (
+              <>
+                <Edit2 className="h-5 w-5 text-blue-600" />
+                Editar Pagamento
+              </>
+            )}
           </DialogTitle>
-          {/* ✅ AVISO PARA MODO ADMINISTRATIVO */}
-          {isAdminMode && isConfirmedPayment && (
+          
+          {/* Informações do pagamento */}
+          <div className="bg-gray-50 p-3 rounded-lg">
+            <div className="flex items-center gap-2 text-sm">
+              <DollarSign className="h-4 w-4 text-green-600" />
+              <span className="font-medium">#{payment.payment_number}</span>
+              <span className="text-gray-500">•</span>
+              <span className="text-gray-600">Reserva #{payment.reservation_id}</span>
+            </div>
+          </div>
+
+          {/* Aviso para edição administrativa */}
+          {requiresAdminReason && (
             <Alert className="border-orange-200 bg-orange-50">
               <AlertTriangle className="h-4 w-4 text-orange-600" />
               <AlertDescription className="text-orange-700">
-                <strong>Atenção:</strong> Você está editando um pagamento confirmado. Esta operação requer justificativa 
+                <strong>Atenção:</strong> Este é um pagamento confirmado. A edição requer justificativa 
                 obrigatória e será registrada no log de auditoria.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Aviso se não pode editar */}
+          {!canEdit && (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>
+                Pagamentos confirmados só podem ser editados por administradores.
               </AlertDescription>
             </Alert>
           )}
         </DialogHeader>
 
-        {loadingData ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="text-center">
-              <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-600" />
-              <p className="mt-2 text-gray-600">Carregando dados...</p>
-            </div>
-          </div>
-        ) : (
+        {canEdit && (
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-            {/* Reserva */}
-            <div className="space-y-2">
-              <Label htmlFor="reservation_id">Reserva *</Label>
-              <Select 
-                value={watch('reservation_id')?.toString()} 
-                onValueChange={(value) => setValue('reservation_id', parseInt(value))}
-                disabled={loading || isEdit}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecionar reserva" />
-                </SelectTrigger>
-                <SelectContent>
-                  {reservations.map((reservation) => (
-                    <SelectItem key={reservation.id} value={reservation.id.toString()}>
-                      #{reservation.reservation_number} - {reservation.guest_name} 
-                      ({reservation.check_in_date} - {reservation.check_out_date})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {errors.reservation_id && (
-                <p className="text-sm text-red-600">{errors.reservation_id.message}</p>
-              )}
-            </div>
-
             {/* Valor e Taxa */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -408,9 +362,6 @@ export default function PaymentModal({
                 placeholder="Ex: TID123456, DOC789"
                 disabled={loading}
               />
-              {errors.reference_number && (
-                <p className="text-sm text-red-600">{errors.reference_number.message}</p>
-              )}
             </div>
 
             {/* Pagamento Parcial */}
@@ -424,7 +375,7 @@ export default function PaymentModal({
               <Label htmlFor="is_partial">Pagamento parcial</Label>
             </div>
 
-            {/* ✅ JUSTIFICATIVA ADMINISTRATIVA (OBRIGATÓRIA PARA PAGAMENTOS CONFIRMADOS) */}
+            {/* Justificativa Administrativa */}
             {requiresAdminReason && (
               <div className="space-y-2">
                 <Label htmlFor="admin_reason" className="text-orange-700 font-medium">
@@ -458,9 +409,6 @@ export default function PaymentModal({
                 rows={3}
                 disabled={loading}
               />
-              {errors.notes && (
-                <p className="text-sm text-red-600">{errors.notes.message}</p>
-              )}
             </div>
 
             {/* Notas Internas */}
@@ -473,9 +421,6 @@ export default function PaymentModal({
                 rows={2}
                 disabled={loading}
               />
-              {errors.internal_notes && (
-                <p className="text-sm text-red-600">{errors.internal_notes.message}</p>
-              )}
             </div>
 
             <DialogFooter className="gap-2">
@@ -487,16 +432,20 @@ export default function PaymentModal({
               >
                 Cancelar
               </Button>
-              <Button type="submit" disabled={loading} className={isAdminMode ? "bg-orange-600 hover:bg-orange-700" : ""}>
+              <Button 
+                type="submit" 
+                disabled={loading}
+                className={requiresAdminReason ? "bg-orange-600 hover:bg-orange-700" : ""}
+              >
                 {loading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {isEdit ? 'Atualizando...' : 'Criando...'}
+                    Atualizando...
                   </>
                 ) : (
                   <>
-                    {isAdminMode && <Shield className="mr-2 h-4 w-4" />}
-                    {isEdit ? 'Atualizar' : 'Criar'}
+                    {requiresAdminReason && <Shield className="mr-2 h-4 w-4" />}
+                    Atualizar Pagamento
                   </>
                 )}
               </Button>
