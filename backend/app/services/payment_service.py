@@ -16,7 +16,7 @@ from app.models.user import User
 from app.schemas.payment import (
     PaymentCreate, PaymentUpdate, PaymentStatusUpdate, PaymentFilters,
     PaymentResponse, PaymentWithReservation, ReservationPaymentSummary,
-    PaymentReport, PaymentBulkOperation
+    PaymentReport, PaymentBulkOperation, PaymentConfirmedUpdate
 )
 from app.services.audit_service import AuditService
 from app.utils.decorators import _extract_model_data, AuditContext
@@ -49,6 +49,46 @@ class PaymentService:
             Payment.tenant_id == tenant_id,
             Payment.is_active == True
         ).first()
+
+    def _validate_admin_permission(self, current_user: User, operation: str) -> None:
+        """Valida se o usuário tem permissão de administrador para operações sensíveis"""
+        if not current_user.is_superuser:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Apenas administradores podem {operation} pagamentos confirmados"
+            )
+
+    def _log_sensitive_operation(
+        self, 
+        payment_obj: Payment, 
+        operation: str, 
+        reason: str, 
+        current_user: User, 
+        request: Optional[Request]
+    ) -> None:
+        """Log detalhado para operações sensíveis em pagamentos confirmados"""
+        import json
+        
+        operation_details = {
+            "payment_id": payment_obj.id,
+            "payment_number": payment_obj.payment_number,
+            "reservation_id": payment_obj.reservation_id,
+            "amount": float(payment_obj.amount),
+            "operation": operation,
+            "reason": reason,
+            "user_id": current_user.id,
+            "user_email": current_user.email,
+            "timestamp": datetime.utcnow().isoformat(),
+            "ip_address": request.client.host if request else None,
+            "user_agent": request.headers.get("user-agent") if request else None
+        }
+        
+        # Adicionar às notas internas do pagamento
+        timestamp = datetime.utcnow().strftime("%d/%m/%Y %H:%M")
+        new_note = f"[{timestamp}] {operation.upper()} ADMINISTRATIVO por {current_user.email}: {reason}"
+        
+        current_notes = payment_obj.internal_notes or ""
+        payment_obj.internal_notes = f"{current_notes}\n{new_note}".strip()
 
     def create_payment(
         self, 
@@ -127,20 +167,39 @@ class PaymentService:
         current_user: User,
         request: Optional[Request] = None
     ) -> Optional[Payment]:
-        """Atualiza pagamento"""
+        """Atualiza pagamento - PERMITE edição de pagamentos confirmados com validações"""
         
         payment_obj = self.get_payment_by_id(payment_id, tenant_id)
         if not payment_obj:
             return None
         
-        # Não permitir edição de pagamentos confirmados/processados
-        if payment_obj.status in ["confirmed", "refunded"]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Não é possível editar pagamentos confirmados ou estornados"
-            )
-        
         old_values = _extract_model_data(payment_obj)
+        old_status = payment_obj.status
+        
+        # ✅ NOVA LÓGICA: Permitir edição de pagamentos confirmados com validações
+        if payment_obj.status in ["confirmed", "refunded"]:
+            # Validar permissão de administrador
+            self._validate_admin_permission(current_user, "editar")
+            
+            # Se é uma edição de pagamento confirmado, verificar se há justificativa
+            if hasattr(payment_data, 'admin_reason') and payment_data.admin_reason:
+                # Log da operação sensível
+                self._log_sensitive_operation(
+                    payment_obj, 
+                    "EDIÇÃO", 
+                    payment_data.admin_reason, 
+                    current_user, 
+                    request
+                )
+            else:
+                # Se não tem justificativa, adicionar nota padrão
+                self._log_sensitive_operation(
+                    payment_obj, 
+                    "EDIÇÃO", 
+                    "Edição administrativa sem justificativa específica", 
+                    current_user, 
+                    request
+                )
         
         # Atualizar campos se fornecidos
         if payment_data.amount is not None:
@@ -166,6 +225,91 @@ class PaymentService:
             self.db.commit()
             self.db.refresh(payment_obj)
             
+            # Registrar auditoria detalhada
+            new_values = _extract_model_data(payment_obj)
+            audit_message = f"Pagamento atualizado - {payment_obj.payment_number}"
+            
+            if old_status in ["confirmed", "refunded"]:
+                audit_message += f" [EDIÇÃO ADMINISTRATIVA por {current_user.email}]"
+            
+            with AuditContext(self.db, current_user, request) as audit:
+                audit.log_update(
+                    "payments", 
+                    payment_obj.id, 
+                    old_values, 
+                    new_values,
+                    audit_message
+                )
+            
+            return payment_obj
+            
+        except IntegrityError:
+            self.db.rollback()
+            return None
+
+    def update_confirmed_payment(
+        self, 
+        payment_id: int, 
+        payment_data: PaymentConfirmedUpdate, 
+        tenant_id: int,
+        current_user: User,
+        request: Optional[Request] = None
+    ) -> Optional[Payment]:
+        """Método específico para atualização de pagamentos confirmados com justificativa obrigatória"""
+        
+        payment_obj = self.get_payment_by_id(payment_id, tenant_id)
+        if not payment_obj:
+            return None
+        
+        # Validar que o pagamento está confirmado
+        if payment_obj.status != "confirmed":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Este método é apenas para pagamentos confirmados"
+            )
+        
+        # Validar permissão de administrador
+        self._validate_admin_permission(current_user, "editar")
+        
+        # Justificativa é obrigatória
+        if not payment_data.admin_reason or len(payment_data.admin_reason.strip()) < 10:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Justificativa detalhada (mínimo 10 caracteres) é obrigatória para editar pagamentos confirmados"
+            )
+        
+        old_values = _extract_model_data(payment_obj)
+        
+        # Log da operação sensível
+        self._log_sensitive_operation(
+            payment_obj, 
+            "EDIÇÃO CONFIRMADO", 
+            payment_data.admin_reason, 
+            current_user, 
+            request
+        )
+        
+        # Atualizar campos permitidos
+        if payment_data.amount is not None:
+            payment_obj.amount = payment_data.amount
+        if payment_data.payment_method is not None:
+            payment_obj.payment_method = payment_data.payment_method.value
+        if payment_data.payment_date is not None:
+            payment_obj.payment_date = payment_data.payment_date
+        if payment_data.reference_number is not None:
+            payment_obj.reference_number = payment_data.reference_number
+        if payment_data.notes is not None:
+            payment_obj.notes = payment_data.notes
+        if payment_data.fee_amount is not None:
+            payment_obj.fee_amount = payment_data.fee_amount
+            payment_obj.net_amount = payment_obj.amount - payment_data.fee_amount
+        if payment_data.is_partial is not None:
+            payment_obj.is_partial = payment_data.is_partial
+        
+        try:
+            self.db.commit()
+            self.db.refresh(payment_obj)
+            
             # Registrar auditoria
             new_values = _extract_model_data(payment_obj)
             with AuditContext(self.db, current_user, request) as audit:
@@ -174,7 +318,7 @@ class PaymentService:
                     payment_obj.id, 
                     old_values, 
                     new_values,
-                    f"Pagamento atualizado - {payment_obj.payment_number}"
+                    f"EDIÇÃO ADMINISTRATIVA de pagamento confirmado - {payment_obj.payment_number} por {current_user.email}. Motivo: {payment_data.admin_reason}"
                 )
             
             return payment_obj
@@ -449,19 +593,34 @@ class PaymentService:
         payment_id: int, 
         tenant_id: int,
         current_user: User,
+        admin_reason: Optional[str] = None,
         request: Optional[Request] = None
     ) -> bool:
-        """Marca pagamento como inativo (soft delete)"""
+        """Marca pagamento como inativo (soft delete) - PERMITE exclusão de pagamentos confirmados"""
         
         payment_obj = self.get_payment_by_id(payment_id, tenant_id)
         if not payment_obj:
             return False
         
-        # Não permitir exclusão de pagamentos confirmados
+        # ✅ NOVA LÓGICA: Permitir exclusão de pagamentos confirmados com validações
         if payment_obj.status == "confirmed":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Não é possível excluir pagamentos confirmados"
+            # Validar permissão de administrador
+            self._validate_admin_permission(current_user, "excluir")
+            
+            # Justificativa é obrigatória para exclusão de pagamentos confirmados
+            if not admin_reason or len(admin_reason.strip()) < 10:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Justificativa detalhada (mínimo 10 caracteres) é obrigatória para excluir pagamentos confirmados"
+                )
+            
+            # Log da operação sensível
+            self._log_sensitive_operation(
+                payment_obj, 
+                "EXCLUSÃO", 
+                admin_reason, 
+                current_user, 
+                request
             )
         
         old_values = _extract_model_data(payment_obj)
@@ -470,13 +629,18 @@ class PaymentService:
         try:
             self.db.commit()
             
-            # Registrar auditoria
+            # Registrar auditoria detalhada
+            audit_message = f"Pagamento excluído - {payment_obj.payment_number}"
+            
+            if payment_obj.status == "confirmed":
+                audit_message += f" [EXCLUSÃO ADMINISTRATIVA por {current_user.email}. Motivo: {admin_reason}]"
+            
             with AuditContext(self.db, current_user, request) as audit:
                 audit.log_delete(
                     "payments", 
                     payment_obj.id, 
                     old_values,
-                    f"Pagamento excluído - {payment_obj.payment_number}"
+                    audit_message
                 )
             
             return True
