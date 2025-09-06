@@ -18,6 +18,7 @@ export interface MapReservationResponse {
   total_guests: number;
   source?: string;
   notes?: string;
+  created_date: string;
   
   // Status indicators
   is_arrival: boolean;
