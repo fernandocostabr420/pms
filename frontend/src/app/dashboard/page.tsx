@@ -418,10 +418,10 @@ export default function DashboardPage() {
                               </span>
                             </div>
                             
-                            {/* Data e origem na mesma linha */}
+                            {/* Data e origem na mesma linha - ✅ CORREÇÃO APLICADA AQUI */}
                             <div className="flex items-center justify-between">
                               <span className="text-xs text-gray-500">
-                                {format(new Date(reservation.check_in_date + 'T00:00:00'), 'dd/MM', { locale: ptBR })} • {reservation.nights}n
+                                {format(new Date(reservation.check_in_date + 'T00:00:00'), 'dd/MM', { locale: ptBR })} • {formatNights(reservation.nights)}
                               </span>
                               
                               <div className="flex items-center gap-1">
