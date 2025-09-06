@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import apiClient from '@/lib/api';
+import { formatReservationDate } from '@/lib/calendar-utils'; // ✅ IMPORT CORRETO
 
 export default function ReservationDetailsPage() {
   const params = useParams();

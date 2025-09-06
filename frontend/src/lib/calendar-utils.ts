@@ -41,6 +41,34 @@ export function formatDateBR(date: Date | string, formatStr: string = 'dd/MM/yyy
 }
 
 /**
+ * Formata data de reserva de forma consistente
+ * Esta função garante que as datas sejam formatadas da mesma forma
+ * que funciona corretamente no mapa de reservas
+ */
+export function formatReservationDate(dateString: string, formatStr: string = 'dd/MM/yyyy'): string {
+  try {
+    // Usa a mesma lógica que funciona no mapa
+    return formatDateBR(dateString, formatStr);
+  } catch (error) {
+    console.warn('Erro ao formatar data de reserva:', dateString, error);
+    return dateString;
+  }
+}
+
+/**
+ * Formata data de reserva no formato longo (ex: "10 de setembro de 2025")
+ */
+export function formatReservationDateLong(dateString: string): string {
+  try {
+    // Usa a mesma lógica segura mas com formato longo
+    return formatDateBR(dateString, 'PPP');
+  } catch (error) {
+    console.warn('Erro ao formatar data de reserva:', dateString, error);
+    return dateString;
+  }
+}
+
+/**
  * Formata período de datas
  */
 export function formatDateRange(checkIn: string, checkOut: string): string {

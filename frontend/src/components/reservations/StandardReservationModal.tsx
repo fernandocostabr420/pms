@@ -2,6 +2,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation'; // ✅ NOVO: Import do router
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -220,7 +221,8 @@ export default function StandardReservationModal({
   showAdvancedFields = true
 }: StandardReservationModalProps) {
   
-  // ===== HOOK PERSONALIZADO PARA PROPRIEDADE ÚNICA =====
+  // ===== HOOKS =====
+  const router = useRouter(); // ✅ NOVO: Hook do router
   const { property: tenantProperty, loading: loadingProperty, error: propertyError } = useProperty();
   
   // ===== ESTADOS =====
@@ -601,7 +603,7 @@ export default function StandardReservationModal({
         };
       }
 
-      // Decidir qual endpoint usar
+      // ✅ MODIFICADO: Capturar retorno da API e redirecionar
       if (isEditing && reservation) {
         // Atualizar reserva existente
         await apiClient.updateReservation(reservation.id, finalReservationData);
@@ -609,24 +611,44 @@ export default function StandardReservationModal({
           title: "Sucesso",
           description: "Reserva atualizada com sucesso",
         });
-      } else if (data.guest_mode === 'new') {
-        // Criar reserva rápida (com novo hóspede)
-        await apiClient.createQuickReservation(finalReservationData);
-        toast({
-          title: "Sucesso",
-          description: "Reserva criada com sucesso",
-        });
+        
+        // Para edição, manter comportamento atual
+        onSuccess();
+        handleClose();
+        
       } else {
-        // Criar reserva completa (com hóspede existente)
-        await apiClient.createReservation(finalReservationData);
+        // ✅ NOVO: Criar reserva e redirecionar
+        let createdReservation;
+        
+        if (data.guest_mode === 'new') {
+          // Criar reserva rápida (com novo hóspede)
+          createdReservation = await apiClient.createQuickReservation(finalReservationData);
+        } else {
+          // Criar reserva completa (com hóspede existente)
+          createdReservation = await apiClient.createReservation(finalReservationData);
+        }
+
         toast({
           title: "Sucesso",
           description: "Reserva criada com sucesso",
         });
-      }
 
-      onSuccess();
-      handleClose();
+        // ✅ NOVO: Redirecionar para página de detalhes da reserva
+        if (createdReservation?.id) {
+          // Fechar modal primeiro
+          handleClose();
+          
+          // Chamar onSuccess para atualizar listas (se necessário)
+          onSuccess();
+          
+          // Redirecionar para página de detalhes
+          router.push(`/dashboard/reservations/${createdReservation.id}`);
+        } else {
+          // Fallback caso não tenha ID
+          onSuccess();
+          handleClose();
+        }
+      }
 
     } catch (error: any) {
       console.error('Erro ao salvar reserva:', error);

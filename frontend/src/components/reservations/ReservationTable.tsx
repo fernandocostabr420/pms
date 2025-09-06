@@ -48,6 +48,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ReservationResponseWithGuestDetails } from '@/types/reservation';
+import { formatReservationDate } from '@/lib/calendar-utils'; // ✅ IMPORT CORRETO
 
 interface SortConfig {
   key: string;
@@ -92,13 +93,7 @@ const formatCurrency = (value: number) => {
   }).format(value);
 };
 
-const formatDate = (dateString: string) => {
-  try {
-    return format(new Date(dateString), 'dd/MM/yyyy', { locale: ptBR });
-  } catch {
-    return dateString;
-  }
-};
+// ✅ FUNÇÃO REMOVIDA - Agora usa formatReservationDate do calendar-utils
 
 const formatShortDate = (dateString: string) => {
   try {
@@ -326,7 +321,6 @@ export default function ReservationTable({
 
   return (
     <div className="bg-white border rounded-lg shadow-sm card-container">
-      {/* ✅ MUDANÇA PRINCIPAL: Adicionar classe table-container */}
       <div className="table-container">
         <Table>
           <TableHeader>
@@ -429,7 +423,7 @@ export default function ReservationTable({
                     <div className="flex items-center text-sm">
                       <CalendarCheck className="h-4 w-4 mr-2 text-green-600" />
                       <div>
-                        <div className="font-medium">{formatDate(reservation.check_in_date)}</div>
+                        <div className="font-medium">{formatReservationDate(reservation.check_in_date)}</div>
                         <div className="text-xs text-gray-500">{formatShortDate(reservation.check_in_date)}</div>
                       </div>
                     </div>
@@ -439,7 +433,7 @@ export default function ReservationTable({
                     <div className="flex items-center text-sm">
                       <CalendarX className="h-4 w-4 mr-2 text-red-600" />
                       <div>
-                        <div className="font-medium">{formatDate(reservation.check_out_date)}</div>
+                        <div className="font-medium">{formatReservationDate(reservation.check_out_date)}</div>
                         <div className="text-xs text-gray-500">
                           {nights} {nights === 1 ? 'noite' : 'noites'}
                         </div>
@@ -486,7 +480,7 @@ export default function ReservationTable({
 
                   <TableCell>
                     <div className="text-sm text-gray-600">
-                      {formatDate(reservation.created_date)}
+                      {formatReservationDate(reservation.created_date)}
                     </div>
                   </TableCell>
 

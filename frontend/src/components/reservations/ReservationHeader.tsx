@@ -4,6 +4,7 @@ import { ReservationDetailedResponse } from '@/types/reservation-details';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { XCircle } from 'lucide-react';
+import { formatReservationDate } from '@/lib/calendar-utils'; // ✅ IMPORT ORIGINAL
 
 interface ReservationHeaderProps {
   data: ReservationDetailedResponse;
@@ -61,7 +62,7 @@ export function ReservationHeader({ data, onAction }: ReservationHeaderProps) {
                 Pagamento
               </Button>
             )}
-            {/* ✅ BOTÃO DE CANCELAMENTO */}
+            {/* Botão de cancelamento */}
             {data.actions.can_cancel && (
               <Button 
                 variant="destructive" 
@@ -80,11 +81,11 @@ export function ReservationHeader({ data, onAction }: ReservationHeaderProps) {
       <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
         <div>
           <p className="text-sm text-gray-500">Check-in</p>
-          <p className="font-medium">{format(new Date(data.check_in_date), 'PPP', { locale: ptBR })}</p>
+          <p className="font-medium">{formatReservationDate(data.check_in_date, 'PPP')}</p>
         </div>
         <div>
           <p className="text-sm text-gray-500">Check-out</p>
-          <p className="font-medium">{format(new Date(data.check_out_date), 'PPP', { locale: ptBR })}</p>
+          <p className="font-medium">{formatReservationDate(data.check_out_date, 'PPP')}</p>
         </div>
         <div>
           <p className="text-sm text-gray-500">Noites</p>

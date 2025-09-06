@@ -31,9 +31,10 @@ import {
   Hash,
   User
 } from 'lucide-react';
-import { format, formatDistanceToNow } from 'date-fns';
+import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { ReservationResponse } from '@/types/reservation';
+import { formatReservationDate } from '@/lib/calendar-utils'; // ✅ IMPORT CORRETO
 
 interface ReservationCardProps {
   reservation: ReservationResponse;
@@ -53,13 +54,7 @@ export default function ReservationCard({
   actionLoading
 }: ReservationCardProps) {
 
-  const formatDate = (dateStr: string) => {
-    try {
-      return format(new Date(dateStr), 'dd/MM/yyyy', { locale: ptBR });
-    } catch {
-      return dateStr;
-    }
-  };
+  // ✅ FUNÇÃO formatDate REMOVIDA - Agora usa formatReservationDate do calendar-utils
 
   const formatDateTime = (dateStr: string) => {
     try {
@@ -135,12 +130,12 @@ export default function ReservationCard({
               <div className="flex items-center gap-4 text-sm text-gray-600">
                 <span className="flex items-center gap-1">
                   <Calendar className="h-4 w-4" />
-                  Criada: {formatDate(reservation.created_date)}
+                  Criada: {formatReservationDate(reservation.created_date)}
                 </span>
                 {reservation.confirmed_date && (
                   <span className="flex items-center gap-1">
                     <CheckCircle className="h-4 w-4 text-green-500" />
-                    Confirmada: {formatDate(reservation.confirmed_date)}
+                    Confirmada: {formatReservationDate(reservation.confirmed_date)}
                   </span>
                 )}
               </div>
@@ -241,7 +236,7 @@ export default function ReservationCard({
             <div className="bg-blue-50 p-3 rounded-lg">
               <div className="text-xs font-medium text-blue-600 mb-1">CHECK-IN</div>
               <div className="font-semibold text-blue-900">
-                {formatDate(reservation.check_in_date)}
+                {formatReservationDate(reservation.check_in_date)}
               </div>
               {reservation.checked_in_date && (
                 <div className="text-xs text-blue-600 mt-1">
@@ -253,7 +248,7 @@ export default function ReservationCard({
             <div className="bg-orange-50 p-3 rounded-lg">
               <div className="text-xs font-medium text-orange-600 mb-1">CHECK-OUT</div>
               <div className="font-semibold text-orange-900">
-                {formatDate(reservation.check_out_date)}
+                {formatReservationDate(reservation.check_out_date)}
               </div>
               {reservation.checked_out_date && (
                 <div className="text-xs text-orange-600 mt-1">
