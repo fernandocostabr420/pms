@@ -1,4 +1,4 @@
-# backend/app/schemas/reservation.py - ARQUIVO COMPLETO COM TODAS AS MODIFICAÇÕES
+# backend/app/schemas/reservation.py - ARQUIVO COMPLETO COM MODIFICAÇÕES PARA CHECK-OUTS PENDENTES
 
 from pydantic import BaseModel, field_validator, Field
 from typing import Optional, List, Dict, Any
@@ -443,8 +443,37 @@ class ReservationSummary(BaseModel):
     revenue_per_night: Decimal
 
 
+# ===== ✅ SCHEMAS MODIFICADOS PARA DASHBOARD COM CHECK-OUTS PENDENTES =====
+
+class DashboardSummaryResponse(BaseModel):
+    """Schema para resumo do dashboard - ATUALIZADO"""
+    total_reservations: int
+    todays_checkins: int
+    pending_checkouts: int  # ✅ ALTERADO: era todays_checkouts
+    current_guests: int
+    total_revenue: Decimal
+    paid_revenue: Decimal
+    pending_revenue: Decimal
+    checked_in_with_pending_payment: int
+    summary_date: str
+    property_id: Optional[int] = None
+
+
+class TodaysReservationsResponse(BaseModel):
+    """Schema para reservas de hoje - ATUALIZADO"""
+    date: str
+    arrivals_count: int
+    pending_checkouts_count: int  # ✅ ALTERADO: era departures_count
+    current_guests_count: int
+    
+    # Dados detalhados (quando include_details=True)
+    arrivals: Optional[List[Dict[str, Any]]] = None
+    pending_checkouts: Optional[List[Dict[str, Any]]] = None  # ✅ ALTERADO: era departures
+    current_guests: Optional[List[Dict[str, Any]]] = None
+
+
 class DashboardStatsResponse(BaseModel):
-    """Schema para estatísticas do dashboard"""
+    """Schema para estatísticas do dashboard - ATUALIZADO"""
     # Estatísticas gerais
     total_reservations: int
     total_revenue: Decimal
@@ -453,13 +482,12 @@ class DashboardStatsResponse(BaseModel):
     
     # Estatísticas hoje
     today_arrivals: int
-    today_departures: int
+    pending_checkouts: int  # ✅ ALTERADO: era today_departures
     current_guests: int
     available_rooms_today: int
     
     # Pendências
     pending_checkins: int
-    pending_checkouts: int
     overdue_payments: int
     
     # Médias

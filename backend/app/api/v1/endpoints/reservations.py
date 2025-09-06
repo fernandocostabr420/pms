@@ -856,9 +856,9 @@ def get_todays_reservations_improved(
         
         # Saídas hoje
         departures = base_query.filter(
-            Reservation.check_out_date == today,
+            Reservation.check_out_date <= today,
             Reservation.status == 'checked_in'
-        ).order_by(asc(Reservation.id)).all()
+        ).order_by(asc(Reservation.check_out_date), asc(Reservation.id)).all()
         
         # Hóspedes atuais
         current_guests = base_query.filter(
@@ -871,7 +871,7 @@ def get_todays_reservations_improved(
         response_data = {
             "date": today.isoformat(),
             "arrivals_count": len(arrivals),
-            "departures_count": len(departures),
+            "pending_checkouts_count": len(departures),
             "current_guests_count": len(current_guests),
         }
         
@@ -1093,8 +1093,8 @@ def get_dashboard_summary(
         ).count()
         
         # Check-outs de hoje  
-        todays_checkouts = base_query.filter(
-            Reservation.check_out_date == today,
+        pending_checkouts = base_query.filter(
+            Reservation.check_out_date <= today,
             Reservation.status == 'checked_in'
         ).count()
         
@@ -1142,7 +1142,7 @@ def get_dashboard_summary(
         return {
             "total_reservations": total_reservations,
             "todays_checkins": todays_checkins,
-            "todays_checkouts": todays_checkouts,
+            "pending_checkouts": pending_checkouts,
             "current_guests": current_guests,
             "total_revenue": float(total_revenue),
             "paid_revenue": float(paid_revenue),
