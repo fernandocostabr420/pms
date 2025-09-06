@@ -19,6 +19,12 @@ import {
 } from '@/types/payment';
 import { useToast } from '@/hooks/use-toast';
 
+// ✅ NOVO: Interface para configuração de ordenação
+interface SortConfig {
+  key: string;
+  direction: 'asc' | 'desc';
+}
+
 interface UsePaymentsReturn {
   // Estado
   payments: PaymentResponse[];
@@ -42,6 +48,10 @@ interface UsePaymentsReturn {
   // ✅ NOVO: Estado para permissões e administração
   isAdmin: boolean;
   loadingPermissions: boolean;
+  
+  // ✅ NOVO: Estado para ordenação
+  sortConfig: SortConfig;
+  setSortConfig: (config: SortConfig) => void;
   
   // Ações
   loadPayments: () => Promise<void>;
@@ -89,6 +99,12 @@ export function usePayments(): UsePaymentsReturn {
   // ✅ NOVOS ESTADOS PARA ADMINISTRAÇÃO
   const [isAdmin, setIsAdmin] = useState(false);
   const [loadingPermissions, setLoadingPermissions] = useState(true);
+
+  // ✅ NOVO: Estado para ordenação
+  const [sortConfig, setSortConfigState] = useState<SortConfig>({
+    key: 'payment_date',
+    direction: 'desc'
+  });
 
   const { toast } = useToast();
 
@@ -185,6 +201,11 @@ export function usePayments(): UsePaymentsReturn {
   const clearFilters = useCallback(() => {
     setFiltersState(initialFilters);
     setCurrentPage(1);
+  }, []);
+
+  // ✅ NOVA FUNÇÃO: Configurar ordenação
+  const setSortConfig = useCallback((config: SortConfig) => {
+    setSortConfigState(config);
   }, []);
 
   // Operações específicas de pagamento
@@ -424,6 +445,10 @@ export function usePayments(): UsePaymentsReturn {
     // ✅ NOVOS RETORNOS ADMINISTRATIVOS
     isAdmin,
     loadingPermissions,
+    
+    // ✅ NOVO: Retorno da ordenação
+    sortConfig,
+    setSortConfig,
     
     loadPayments,
     refreshData,
