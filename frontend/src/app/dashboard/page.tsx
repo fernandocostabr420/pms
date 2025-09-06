@@ -21,7 +21,9 @@ import {
   ArrowUpIcon,
   ArrowDownIcon,
   Home,
-  RefreshCw
+  RefreshCw,
+  Globe,
+  Building2
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -66,6 +68,72 @@ const getStatusVariant = (status: string) => {
   return variantMap[status as keyof typeof variantMap] || 'default' as const;
 };
 
+// ✅ NOVA FUNÇÃO - Tradução da origem da reserva
+const getSourceLabel = (source?: string | null) => {
+  if (!source) return 'Não informado';
+  
+  const sourceMap = {
+    'direct': 'Direto',
+    'booking': 'Booking.com',
+    'airbnb': 'Airbnb',
+    'expedia': 'Expedia',
+    'hotels': 'Hotels.com',
+    'agoda': 'Agoda',
+    'phone': 'Telefone',
+    'email': 'Email',
+    'walk_in': 'Walk-in',
+    'website': 'Site',
+    'social_media': 'Redes Sociais',
+    'referral': 'Indicação'
+  };
+  
+  return sourceMap[source as keyof typeof sourceMap] || source;
+};
+
+// ✅ NOVA FUNÇÃO - Ícone da origem
+const getSourceIcon = (source?: string | null) => {
+  if (!source) return Globe;
+  
+  const iconMap = {
+    'direct': Building2,
+    'booking': Globe,
+    'airbnb': Home,
+    'expedia': Globe,
+    'hotels': Globe,
+    'agoda': Globe,
+    'phone': Users,
+    'email': Users,
+    'walk_in': Users,
+    'website': Globe,
+    'social_media': Users,
+    'referral': Users
+  };
+  
+  return iconMap[source as keyof typeof iconMap] || Globe;
+};
+
+// ✅ NOVA FUNÇÃO - Cor da origem
+const getSourceColor = (source?: string | null) => {
+  if (!source) return 'text-gray-500';
+  
+  const colorMap = {
+    'direct': 'text-green-600',
+    'booking': 'text-blue-600',
+    'airbnb': 'text-pink-600',
+    'expedia': 'text-yellow-600',
+    'hotels': 'text-red-600',
+    'agoda': 'text-purple-600',
+    'phone': 'text-orange-600',
+    'email': 'text-indigo-600',
+    'walk_in': 'text-teal-600',
+    'website': 'text-green-600',
+    'social_media': 'text-pink-600',
+    'referral': 'text-blue-600'
+  };
+  
+  return colorMap[source as keyof typeof colorMap] || 'text-gray-600';
+};
+
 // Estado para gerenciar todos os dados do dashboard
 interface DashboardData {
   summary: DashboardSummary | null;
@@ -92,6 +160,12 @@ export default function DashboardPage() {
   const { toast } = useToast();
   const router = useRouter();
 
+  // ✅ FUNÇÃO PARA FORMATAÇÃO DE DIÁRIAS
+  const formatNights = (nights: number) => {
+    if (nights === 1) return '1 diária';
+    return `${nights} diárias`;
+  };
+
   // Função para carregar todos os dados do dashboard
   const loadDashboardData = async (isRefresh = false) => {
     try {
@@ -104,9 +178,9 @@ export default function DashboardPage() {
       // Carregar todos os dados em paralelo
       const [summary, recentReservations, pendingPayments, todaysData] = await Promise.allSettled([
         apiClient.getDashboardSummary(),
-        apiClient.getRecentReservations(20), // ✅ ALTERADO: 5 → 20
+        apiClient.getRecentReservations(20),
         apiClient.getCheckedInPendingPayments(5),
-        apiClient.getTodaysReservationsImproved(undefined, false)
+        apiClient.getTodaysReservationsImproved(undefined, true)
       ]);
 
       // Processar resultados
@@ -211,8 +285,8 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {[...Array(3)].map((_, i) => (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {[...Array(2)].map((_, i) => (
             <Card key={i} className="animate-pulse">
               <CardContent className="p-6">
                 <div className="h-32 bg-gray-200 rounded"></div>
@@ -236,7 +310,7 @@ export default function DashboardPage() {
   return (
     <>
       <div className="space-y-6">
-        {/* Header */}
+        {/* ✅ HEADER COM BOTÕES */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
@@ -244,15 +318,27 @@ export default function DashboardPage() {
               Bem-vindo, {user?.full_name} · {today}
             </p>
           </div>
-          <Button 
-            onClick={handleRefresh}
-            disabled={refreshing}
-            variant="outline" 
-            size="sm"
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-            Atualizar
-          </Button>
+          
+          <div className="flex items-center gap-2">
+            <Button 
+              onClick={handleNewReservation}
+              variant="outline" 
+              size="sm"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Nova Reserva
+            </Button>
+            
+            <Button 
+              onClick={handleRefresh}
+              disabled={refreshing}
+              variant="outline" 
+              size="sm"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+              Atualizar
+            </Button>
+          </div>
         </div>
 
         {/* Stats Cards - Apenas os 3 solicitados */}
@@ -300,53 +386,79 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {/* Seção Principal - 3 Colunas */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* ✅ SEÇÃO PRINCIPAL - 2 COLUNAS (SEM AÇÕES RÁPIDAS) */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           
-          {/* Últimas Reservas */}
+          {/* Últimas Reservas - Melhorado */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
               <CardTitle className="text-sm font-medium">Últimas Reservas</CardTitle>
               <Calendar className="h-4 w-4 text-gray-600" />
             </CardHeader>
-            <CardContent className="space-y-3 max-h-80 overflow-y-auto"> {/* ✅ ALTERADO: Adicionado scroll */}
-              {recentReservations.length > 0 ? (
-                recentReservations.map((reservation) => (
-                  <div 
-                    key={reservation.id} 
-                    className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
-                    onClick={() => goToReservation(reservation.id)}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">
-                        {reservation.guest_name || 'Sem nome'}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {reservation.reservation_number}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {format(new Date(reservation.check_in_date + 'T00:00:00'), 'dd/MM/yyyy', { locale: ptBR })} - {reservation.nights}n
-                      </p>
-                    </div>
-                    <div className="flex flex-col items-end">
-                      <Badge 
-                        variant={getStatusVariant(reservation.status)}
-                        className="mb-1"
-                      >
-                        {getStatusLabel(reservation.status)}
-                      </Badge>
-                      <p className="text-xs font-medium text-gray-900">
-                        R$ {reservation.total_amount?.toLocaleString('pt-BR')}
-                      </p>
-                    </div>
+            <CardContent className="p-0">
+              <div className="max-h-80 overflow-y-auto">
+                {recentReservations.length > 0 ? (
+                  <div className="divide-y divide-gray-100">
+                    {recentReservations.map((reservation) => {
+                      const SourceIcon = getSourceIcon(reservation.source);
+                      return (
+                        <div 
+                          key={reservation.id} 
+                          className="flex items-center justify-between p-3 hover:bg-gray-50 transition-colors cursor-pointer group"
+                          onClick={() => goToReservation(reservation.id)}
+                        >
+                          <div className="flex-1 min-w-0 pr-3">
+                            {/* Nome e número da reserva na mesma linha */}
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="text-sm font-medium text-gray-900 truncate">
+                                {reservation.guest_name || 'Sem nome'}
+                              </p>
+                              <span className="text-xs text-gray-400 font-mono">
+                                #{reservation.reservation_number.slice(-4)}
+                              </span>
+                            </div>
+                            
+                            {/* Data e origem na mesma linha */}
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-gray-500">
+                                {format(new Date(reservation.check_in_date + 'T00:00:00'), 'dd/MM', { locale: ptBR })} • {reservation.nights}n
+                              </span>
+                              
+                              <div className="flex items-center gap-1">
+                                <SourceIcon className={`h-3 w-3 ${getSourceColor(reservation.source)}`} />
+                                <span className={`text-xs ${getSourceColor(reservation.source)} font-medium`}>
+                                  {getSourceLabel(reservation.source)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* Status e valor mais compactos */}
+                          <div className="flex flex-col items-end gap-1">
+                            <Badge 
+                              variant={getStatusVariant(reservation.status)}
+                              className="text-xs px-2 py-0 h-5"
+                            >
+                              {getStatusLabel(reservation.status)}
+                            </Badge>
+                            <span className="text-xs font-semibold text-gray-900">
+                              R$ {reservation.total_amount?.toLocaleString('pt-BR', { 
+                                minimumFractionDigits: 0,
+                                maximumFractionDigits: 0 
+                              })}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                ))
-              ) : (
-                <div className="text-center py-4">
-                  <Calendar className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-                  <p className="text-sm text-gray-500">Nenhuma reserva recente</p>
-                </div>
-              )}
+                ) : (
+                  <div className="text-center py-8">
+                    <Calendar className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                    <p className="text-sm text-gray-500">Nenhuma reserva recente</p>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
 
@@ -396,105 +508,155 @@ export default function DashboardPage() {
               )}
             </CardContent>
           </Card>
-
-          {/* Ações Rápidas */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Ações Rápidas</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Button 
-                onClick={handleNewReservation}
-                className="w-full justify-start h-auto p-4"
-                variant="outline"
-              >
-                <div className="flex items-center w-full">
-                  <Plus className="h-5 w-5 mr-3 text-blue-600" />
-                  <div className="text-left">
-                    <div className="font-medium text-sm">Nova Reserva</div>
-                    <div className="text-xs text-gray-500">Criar uma nova reserva</div>
-                  </div>
-                </div>
-              </Button>
-              
-              <Button 
-                onClick={handleNewGuest}
-                className="w-full justify-start h-auto p-4"
-                variant="outline"
-              >
-                <div className="flex items-center w-full">
-                  <UserPlus className="h-5 w-5 mr-3 text-green-600" />
-                  <div className="text-left">
-                    <div className="font-medium text-sm">Novo Hóspede</div>
-                    <div className="text-xs text-gray-500">Cadastrar hóspede</div>
-                  </div>
-                </div>
-              </Button>
-              
-              <Button 
-                onClick={handleViewRoomMap}
-                className="w-full justify-start h-auto p-4"
-                variant="outline"
-              >
-                <div className="flex items-center w-full">
-                  <Map className="h-5 w-5 mr-3 text-purple-600" />
-                  <div className="text-left">
-                    <div className="font-medium text-sm">Mapa de Quartos</div>
-                    <div className="text-xs text-gray-500">Visualizar ocupação</div>
-                  </div>
-                </div>
-              </Button>
-            </CardContent>
-          </Card>
         </div>
 
-        {/* Resumo do Dia (se houver movimento) */}
+        {/* Resumo do Dia - Listas de Reservas */}
         {(todaysData?.arrivals_count > 0 || todaysData?.departures_count > 0) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Chegadas de Hoje */}
+            {/* Chegadas de Hoje - Lista detalhada */}
             {todaysData.arrivals_count > 0 && (
               <Card>
-                <CardHeader>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                   <CardTitle className="text-sm font-medium flex items-center">
                     <ArrowDownIcon className="h-4 w-4 text-green-600 mr-2" />
                     Chegadas de Hoje ({todaysData.arrivals_count})
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-gray-600 mb-2">
-                    Reservas com check-in programado para hoje
-                  </p>
-                  <Button 
-                    onClick={() => router.push('/dashboard/reservations?filter=arrivals_today')}
-                    variant="outline" 
-                    size="sm"
-                  >
-                    Ver Detalhes
-                  </Button>
+                <CardContent className="p-0">
+                  <div className="max-h-64 overflow-y-auto">
+                    {todaysData.arrivals && todaysData.arrivals.length > 0 ? (
+                      <div className="divide-y divide-gray-100">
+                        {todaysData.arrivals.map((reservation: any) => {
+                          const SourceIcon = getSourceIcon(reservation.source);
+                          return (
+                            <div 
+                              key={reservation.id} 
+                              className="flex items-center justify-between p-3 hover:bg-gray-50 transition-colors cursor-pointer group"
+                              onClick={() => goToReservation(reservation.id)}
+                            >
+                              <div className="flex-1 min-w-0 pr-3">
+                                {/* Nome e número da reserva */}
+                                <div className="flex items-center gap-2 mb-1">
+                                  <p className="text-sm font-medium text-gray-900 truncate">
+                                    {reservation.guest?.full_name || reservation.guest_name || 'Sem nome'}
+                                  </p>
+                                  <span className="text-xs text-gray-400 font-mono">
+                                    #{reservation.reservation_number?.slice(-4)}
+                                  </span>
+                                </div>
+                                
+                                {/* Origem e noites */}
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-gray-500">
+                                    {formatNights(reservation.nights || 0)} • {reservation.adults || 0} adultos
+                                  </span>
+                                  
+                                  <div className="flex items-center gap-1">
+                                    <SourceIcon className={`h-3 w-3 ${getSourceColor(reservation.source)}`} />
+                                    <span className={`text-xs ${getSourceColor(reservation.source)} font-medium`}>
+                                      {getSourceLabel(reservation.source)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              {/* Status e valor */}
+                              <div className="flex flex-col items-end gap-1">
+                                <Badge 
+                                  variant={getStatusVariant(reservation.status)}
+                                  className="text-xs px-2 py-0 h-5"
+                                >
+                                  {getStatusLabel(reservation.status)}
+                                </Badge>
+                                <span className="text-xs font-semibold text-green-600">
+                                  Check-in
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-center py-6">
+                        <ArrowDownIcon className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                        <p className="text-sm text-gray-500">Nenhuma chegada hoje</p>
+                      </div>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             )}
 
-            {/* Saídas de Hoje */}
+            {/* Saídas de Hoje - Lista detalhada */}
             {todaysData.departures_count > 0 && (
               <Card>
-                <CardHeader>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                   <CardTitle className="text-sm font-medium flex items-center">
                     <ArrowUpIcon className="h-4 w-4 text-blue-600 mr-2" />
                     Saídas de Hoje ({todaysData.departures_count})
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-gray-600 mb-2">
-                    Check-outs programados para hoje
-                  </p>
-                  <Button 
-                    onClick={() => router.push('/dashboard/reservations?filter=departures_today')}
-                    variant="outline" 
-                    size="sm"
-                  >
-                    Ver Detalhes
-                  </Button>
+                <CardContent className="p-0">
+                  <div className="max-h-64 overflow-y-auto">
+                    {todaysData.departures && todaysData.departures.length > 0 ? (
+                      <div className="divide-y divide-gray-100">
+                        {todaysData.departures.map((reservation: any) => {
+                          const SourceIcon = getSourceIcon(reservation.source);
+                          return (
+                            <div 
+                              key={reservation.id} 
+                              className="flex items-center justify-between p-3 hover:bg-gray-50 transition-colors cursor-pointer group"
+                              onClick={() => goToReservation(reservation.id)}
+                            >
+                              <div className="flex-1 min-w-0 pr-3">
+                                {/* Nome e número da reserva */}
+                                <div className="flex items-center gap-2 mb-1">
+                                  <p className="text-sm font-medium text-gray-900 truncate">
+                                    {reservation.guest?.full_name || reservation.guest_name || 'Sem nome'}
+                                  </p>
+                                  <span className="text-xs text-gray-400 font-mono">
+                                    #{reservation.reservation_number?.slice(-4)}
+                                  </span>
+                                </div>
+                                
+                                {/* Origem e noites */}
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-gray-500">
+                                    {reservation.nights || 0}n • {reservation.adults || 0} adultos
+                                  </span>
+                                  
+                                  <div className="flex items-center gap-1">
+                                    <SourceIcon className={`h-3 w-3 ${getSourceColor(reservation.source)}`} />
+                                    <span className={`text-xs ${getSourceColor(reservation.source)} font-medium`}>
+                                      {getSourceLabel(reservation.source)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              {/* Status e valor */}
+                              <div className="flex flex-col items-end gap-1">
+                                <Badge 
+                                  variant={getStatusVariant(reservation.status)}
+                                  className="text-xs px-2 py-0 h-5"
+                                >
+                                  {getStatusLabel(reservation.status)}
+                                </Badge>
+                                <span className="text-xs font-semibold text-blue-600">
+                                  Check-out
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-center py-6">
+                        <ArrowUpIcon className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                        <p className="text-sm text-gray-500">Nenhuma saída hoje</p>
+                      </div>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             )}

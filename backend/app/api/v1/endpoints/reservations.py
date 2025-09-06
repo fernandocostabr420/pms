@@ -817,6 +817,9 @@ def get_reservations_detailed(
 
 # ===== RESERVAS DE HOJE ===== (DEVE VIR PRIMEIRO)
 
+# backend/app/api/v1/endpoints/reservations.py
+# SUBSTITUIR O ENDPOINT /today PELA VERSÃO CORRIGIDA
+
 @router.get("/today", response_model=Dict[str, Any])
 def get_todays_reservations_improved(
     db: Session = Depends(get_db),
@@ -845,17 +848,17 @@ def get_todays_reservations_improved(
         if property_id:
             base_query = base_query.filter(Reservation.property_id == property_id)
         
-        # Chegadas hoje (sem order_by por campos inexistentes)
+        # Chegadas hoje
         arrivals = base_query.filter(
             Reservation.check_in_date == today,
             Reservation.status.in_(['confirmed', 'pending'])
-        ).order_by(asc(Reservation.id)).all()  # ✅ Ordenar por ID
+        ).order_by(asc(Reservation.id)).all()
         
         # Saídas hoje
         departures = base_query.filter(
             Reservation.check_out_date == today,
             Reservation.status == 'checked_in'
-        ).order_by(asc(Reservation.id)).all()  # ✅ Ordenar por ID
+        ).order_by(asc(Reservation.id)).all()
         
         # Hóspedes atuais
         current_guests = base_query.filter(
@@ -873,19 +876,36 @@ def get_todays_reservations_improved(
         }
         
         if include_details:
+            # ✅ CORREÇÃO: Usar exatamente a mesma estrutura do /recent que funciona
+            def format_reservation_simple(reservation):
+                nights = (reservation.check_out_date - reservation.check_in_date).days
+                total_paid = float(reservation.total_paid) if reservation.total_paid else 0.0
+                balance_due = float(reservation.total_amount) - total_paid
+                
+                return {
+                    "id": reservation.id,
+                    "reservation_number": reservation.reservation_number,
+                    "guest_name": reservation.guest.full_name if reservation.guest else "Sem nome",
+                    "guest_email": reservation.guest.email if reservation.guest else None,
+                    "property_name": reservation.property_obj.name if reservation.property_obj else None,
+                    "check_in_date": reservation.check_in_date.isoformat(),
+                    "check_out_date": reservation.check_out_date.isoformat(),
+                    "status": reservation.status,
+                    "total_amount": float(reservation.total_amount),
+                    "paid_amount": total_paid,
+                    "balance_due": balance_due,
+                    "nights": nights,
+                    "source": reservation.source,
+                    "adults": reservation.adults,
+                    "children": reservation.children,
+                    "total_guests": reservation.total_guests,
+                    "created_at": reservation.created_at.isoformat() if reservation.created_at else None
+                }
+            
             response_data.update({
-                "arrivals": [
-                    ReservationResponseWithGuestDetails.model_validate(r).model_dump()
-                    for r in arrivals
-                ],
-                "departures": [
-                    ReservationResponseWithGuestDetails.model_validate(r).model_dump()
-                    for r in departures
-                ],
-                "current_guests": [
-                    ReservationResponseWithGuestDetails.model_validate(r).model_dump()
-                    for r in current_guests
-                ]
+                "arrivals": [format_reservation_simple(r) for r in arrivals],
+                "departures": [format_reservation_simple(r) for r in departures], 
+                "current_guests": [format_reservation_simple(r) for r in current_guests]
             })
         else:
             response_data.update({
@@ -902,6 +922,9 @@ def get_todays_reservations_improved(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao buscar reservas de hoje: {str(e)}"
         )
+
+# backend/app/api/v1/endpoints/reservations.py
+# LINHA: ~1220 (aproximadamente onde está o endpoint /recent)
 
 @router.get("/recent", response_model=List[Dict[str, Any]])
 def get_recent_reservations(
@@ -940,16 +963,17 @@ def get_recent_reservations(
             reservations_list.append({
                 "id": reservation.id,
                 "reservation_number": reservation.reservation_number,
-                "guest_name": reservation.guest.full_name if reservation.guest else "Sem nome",  # ✅ ACESSO DIRETO
+                "guest_name": reservation.guest.full_name if reservation.guest else "Sem nome",
                 "guest_email": reservation.guest.email if reservation.guest else None,
                 "property_name": reservation.property_obj.name if reservation.property_obj else None,
                 "check_in_date": reservation.check_in_date.isoformat(),
                 "check_out_date": reservation.check_out_date.isoformat(),
                 "status": reservation.status,
                 "total_amount": float(reservation.total_amount),
-                "paid_amount": total_paid,  # ✅ MUDANÇA AQUI
+                "paid_amount": total_paid,
                 "balance_due": balance_due,
                 "nights": nights,
+                "source": reservation.source,  # ✅ ADICIONADO - ESTE ERA O PROBLEMA!
                 "created_at": reservation.created_at.isoformat() if reservation.created_at else None
             })
         
