@@ -23,6 +23,8 @@ import {
   Home,
   RefreshCw
 } from 'lucide-react';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import apiClient from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/hooks/use-toast';
@@ -36,6 +38,33 @@ import {
 // IMPORTS - Componentes de Modal
 import StandardReservationModal from '@/components/reservations/StandardReservationModal';
 import GuestModal from '@/components/guests/GuestModal';
+
+// ✅ FUNÇÕES DE TRADUÇÃO DE STATUS
+const getStatusLabel = (status: string) => {
+  const statusMap = {
+    'pending': 'Pendente',
+    'confirmed': 'Confirmada', 
+    'checked_in': 'Check-in',
+    'checked_out': 'Check-out',
+    'cancelled': 'Cancelada',
+    'no_show': 'No-show'
+  };
+  
+  return statusMap[status as keyof typeof statusMap] || status;
+};
+
+const getStatusVariant = (status: string) => {
+  const variantMap = {
+    'pending': 'secondary' as const,
+    'confirmed': 'default' as const,
+    'checked_in': 'success' as const,
+    'checked_out': 'outline' as const,
+    'cancelled': 'destructive' as const,
+    'no_show': 'destructive' as const
+  };
+  
+  return variantMap[status as keyof typeof variantMap] || 'default' as const;
+};
 
 // Estado para gerenciar todos os dados do dashboard
 interface DashboardData {
@@ -75,7 +104,7 @@ export default function DashboardPage() {
       // Carregar todos os dados em paralelo
       const [summary, recentReservations, pendingPayments, todaysData] = await Promise.allSettled([
         apiClient.getDashboardSummary(),
-        apiClient.getRecentReservations(5),
+        apiClient.getRecentReservations(20), // ✅ ALTERADO: 5 → 20
         apiClient.getCheckedInPendingPayments(5),
         apiClient.getTodaysReservationsImproved(undefined, false)
       ]);
@@ -280,7 +309,7 @@ export default function DashboardPage() {
               <CardTitle className="text-sm font-medium">Últimas Reservas</CardTitle>
               <Calendar className="h-4 w-4 text-gray-600" />
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-3 max-h-80 overflow-y-auto"> {/* ✅ ALTERADO: Adicionado scroll */}
               {recentReservations.length > 0 ? (
                 recentReservations.map((reservation) => (
                   <div 
@@ -296,15 +325,15 @@ export default function DashboardPage() {
                         {reservation.reservation_number}
                       </p>
                       <p className="text-xs text-gray-500">
-                        {new Date(reservation.check_in_date).toLocaleDateString('pt-BR')} - {reservation.nights}n
+                        {format(new Date(reservation.check_in_date + 'T00:00:00'), 'dd/MM/yyyy', { locale: ptBR })} - {reservation.nights}n
                       </p>
                     </div>
                     <div className="flex flex-col items-end">
                       <Badge 
-                        variant={reservation.status === 'confirmed' ? 'default' : 'secondary'}
+                        variant={getStatusVariant(reservation.status)}
                         className="mb-1"
                       >
-                        {reservation.status}
+                        {getStatusLabel(reservation.status)}
                       </Badge>
                       <p className="text-xs font-medium text-gray-900">
                         R$ {reservation.total_amount?.toLocaleString('pt-BR')}
