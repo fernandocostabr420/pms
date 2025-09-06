@@ -90,6 +90,65 @@ class PaymentService:
         current_notes = payment_obj.internal_notes or ""
         payment_obj.internal_notes = f"{current_notes}\n{new_note}".strip()
 
+    def _auto_confirm_reservation_if_pending(
+        self,
+        reservation: Reservation,
+        payment_obj: Payment,
+        current_user: User,
+        request: Optional[Request] = None
+    ) -> bool:
+        """
+        Auto-confirma reserva pendente quando um pagamento é adicionado
+        Retorna True se a reserva foi confirmada, False caso contrário
+        """
+        if reservation.status != 'pending':
+            return False
+        
+        try:
+            # Import aqui para evitar circular import
+            from app.services.reservation_service import ReservationService
+            
+            reservation_service = ReservationService(self.db)
+            
+            # Confirmar a reserva
+            confirmed_reservation = reservation_service.confirm_reservation(
+                reservation_id=reservation.id,
+                tenant_id=reservation.tenant_id,
+                current_user=current_user,
+                request=request
+            )
+            
+            if confirmed_reservation:
+                # Adicionar nota específica sobre auto-confirmação
+                auto_confirm_note = (
+                    f"Reserva confirmada automaticamente devido ao pagamento "
+                    f"{payment_obj.payment_number} de R$ {payment_obj.amount}"
+                )
+                
+                current_notes = confirmed_reservation.internal_notes or ""
+                confirmed_reservation.internal_notes = f"{current_notes}\n{auto_confirm_note}".strip()
+                
+                # Commit das alterações na reserva
+                self.db.commit()
+                
+                # Log adicional de auditoria para a auto-confirmação
+                with AuditContext(self.db, current_user, request) as audit:
+                    audit.log_create(
+                        "reservations", 
+                        confirmed_reservation.id,
+                        {"auto_confirmation_trigger": f"payment_{payment_obj.id}"},
+                        f"Reserva '{confirmed_reservation.reservation_number}' confirmada automaticamente por pagamento {payment_obj.payment_number}"
+                    )
+                
+                return True
+            
+        except Exception as e:
+            # Se falhar na confirmação, logar mas não interromper o processo do pagamento
+            print(f"Erro na auto-confirmação da reserva {reservation.id}: {str(e)}")
+            return False
+        
+        return False
+
     def create_payment(
         self, 
         payment_data: PaymentCreate, 
@@ -97,7 +156,7 @@ class PaymentService:
         current_user: User,
         request: Optional[Request] = None
     ) -> Optional[Payment]:
-        """Cria novo pagamento - SEMPRE CONFIRMADO AUTOMATICAMENTE"""
+        """Cria novo pagamento - SEMPRE CONFIRMADO AUTOMATICAMENTE e AUTO-CONFIRMA RESERVA PENDENTE"""
         
         # Verificar se a reserva existe e pertence ao tenant
         reservation = self.db.query(Reservation).filter(
@@ -111,6 +170,9 @@ class PaymentService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Reserva não encontrada"
             )
+        
+        # Capturar status da reserva antes do pagamento
+        reservation_status_before = reservation.status
         
         # Gerar número do pagamento
         payment_number = Payment.generate_payment_number(tenant_id, self.db)
@@ -143,14 +205,34 @@ class PaymentService:
             self.db.commit()
             self.db.refresh(payment_obj)
             
-            # Registrar auditoria
+            # ✅ NOVA FUNCIONALIDADE: Auto-confirmar reserva pendente
+            reservation_was_confirmed = False
+            if reservation_status_before == 'pending':
+                reservation_was_confirmed = self._auto_confirm_reservation_if_pending(
+                    reservation=reservation,
+                    payment_obj=payment_obj,
+                    current_user=current_user,
+                    request=request
+                )
+            
+            # Registrar auditoria do pagamento
             new_values = _extract_model_data(payment_obj)
+            
+            # Mensagem de auditoria personalizada
+            audit_message = (
+                f"Pagamento criado e confirmado automaticamente para reserva "
+                f"'{reservation.reservation_number}' - {payment_obj.payment_method_display} R$ {payment_obj.amount}"
+            )
+            
+            if reservation_was_confirmed:
+                audit_message += f" [RESERVA CONFIRMADA AUTOMATICAMENTE]"
+            
             with AuditContext(self.db, current_user, request) as audit:
                 audit.log_create(
                     "payments", 
                     payment_obj.id,
                     new_values,
-                    f"Pagamento criado e confirmado automaticamente para reserva '{reservation.reservation_number}' - {payment_obj.payment_method_display} R$ {payment_obj.amount}"
+                    audit_message
                 )
             
             return payment_obj
