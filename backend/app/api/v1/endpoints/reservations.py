@@ -827,7 +827,7 @@ def get_todays_reservations_improved(
     property_id: Optional[int] = Query(None, description="Filtrar por propriedade"),
     include_details: bool = Query(True, description="Incluir detalhes dos hóspedes")
 ):
-    """Obtém reservas do dia atual (melhorado)"""
+    """Obtém reservas do dia atual com check-outs pendentes (melhorado)"""
     try:
         today = date.today()
         
@@ -854,7 +854,7 @@ def get_todays_reservations_improved(
             Reservation.status.in_(['confirmed', 'pending'])
         ).order_by(asc(Reservation.id)).all()
         
-        # Saídas hoje
+        # Check-outs pendentes (hoje e anteriores)
         departures = base_query.filter(
             Reservation.check_out_date <= today,
             Reservation.status == 'checked_in'
@@ -876,7 +876,7 @@ def get_todays_reservations_improved(
         }
         
         if include_details:
-            # ✅ CORREÇÃO: Usar exatamente a mesma estrutura do /recent que funciona
+            # Função para formatar reserva simples
             def format_reservation_simple(reservation):
                 nights = (reservation.check_out_date - reservation.check_in_date).days
                 total_paid = float(reservation.total_paid) if reservation.total_paid else 0.0
@@ -904,13 +904,13 @@ def get_todays_reservations_improved(
             
             response_data.update({
                 "arrivals": [format_reservation_simple(r) for r in arrivals],
-                "departures": [format_reservation_simple(r) for r in departures], 
+                "pending_checkouts": [format_reservation_simple(r) for r in departures], 
                 "current_guests": [format_reservation_simple(r) for r in current_guests]
             })
         else:
             response_data.update({
                 "arrivals": [{"id": r.id, "guest_name": r.guest.full_name if r.guest else "N/A"} for r in arrivals],
-                "departures": [{"id": r.id, "guest_name": r.guest.full_name if r.guest else "N/A"} for r in departures],
+                "pending_checkouts": [{"id": r.id, "guest_name": r.guest.full_name if r.guest else "N/A"} for r in departures],
                 "current_guests": [{"id": r.id, "guest_name": r.guest.full_name if r.guest else "N/A"} for r in current_guests]
             })
         

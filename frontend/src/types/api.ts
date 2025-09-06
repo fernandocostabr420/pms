@@ -219,10 +219,10 @@ export interface CalendarStatsResponse {
 export interface TodaysReservationsResponse {
   date: string;
   arrivals: ReservationResponse[];
-  departures: ReservationResponse[];
+  pending_checkouts: ReservationResponse[];  // ✅ ALTERADO: era departures
   current_guests: ReservationResponse[];
   arrivals_count: number;
-  departures_count: number;
+  pending_checkouts_count: number;  // ✅ ALTERADO: era departures_count
   current_guests_count: number;
 }
 

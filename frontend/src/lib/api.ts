@@ -133,7 +133,7 @@ export interface CheckedInPendingPayment {
 export interface DashboardSummary {
   total_reservations: number;
   todays_checkins: number;
-  todays_checkouts: number;
+  pending_checkouts: number;
   current_guests: number;
   total_revenue: number;
   paid_revenue: number;
@@ -146,10 +146,10 @@ export interface DashboardSummary {
 export interface TodaysReservationsImproved {
   date: string;
   arrivals_count: number;
-  departures_count: number;
+  pending_checkouts_count: number;
   current_guests_count: number;
   arrivals: any[];
-  departures: any[];
+  pending_checkouts: any[];
   current_guests: any[];
 }
 

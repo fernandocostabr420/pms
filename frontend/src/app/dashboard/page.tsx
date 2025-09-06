@@ -361,9 +361,9 @@ export default function DashboardPage() {
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-600">Check-outs Hoje</p>
+                  <p className="text-sm font-medium text-gray-600">Check-outs Pendentes</p>
                   <p className="text-2xl font-bold text-blue-600">
-                    {todaysData?.departures_count || 0}
+                    {todaysData?.pending_checkouts_count || 0}
                   </p>
                 </div>
                 <ArrowUpIcon className="h-5 w-5 text-blue-600" />
@@ -511,7 +511,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Resumo do Dia - Listas de Reservas */}
-        {(todaysData?.arrivals_count > 0 || todaysData?.departures_count > 0) && (
+        {(todaysData?.arrivals_count > 0 || todaysData?.pending_checkouts_count > 0) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Chegadas de Hoje - Lista detalhada */}
             {todaysData.arrivals_count > 0 && (
@@ -587,20 +587,20 @@ export default function DashboardPage() {
               </Card>
             )}
 
-            {/* Saídas de Hoje - Lista detalhada */}
-            {todaysData.departures_count > 0 && (
+            {/* Check-outs Pendentes - Lista detalhada */}
+            {todaysData.pending_checkouts_count > 0 && (
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                   <CardTitle className="text-sm font-medium flex items-center">
                     <ArrowUpIcon className="h-4 w-4 text-blue-600 mr-2" />
-                    Saídas de Hoje ({todaysData.departures_count})
+                    Check-outs Pendentes ({todaysData.pending_checkouts_count})
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0">
                   <div className="max-h-64 overflow-y-auto">
-                    {todaysData.departures && todaysData.departures.length > 0 ? (
+                    {todaysData.pending_checkouts && todaysData.pending_checkouts.length > 0 ? (
                       <div className="divide-y divide-gray-100">
-                        {todaysData.departures.map((reservation: any) => {
+                        {todaysData.pending_checkouts.map((reservation: any) => {
                           const SourceIcon = getSourceIcon(reservation.source);
                           return (
                             <div 
@@ -653,7 +653,7 @@ export default function DashboardPage() {
                     ) : (
                       <div className="text-center py-6">
                         <ArrowUpIcon className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-                        <p className="text-sm text-gray-500">Nenhuma saída hoje</p>
+                        <p className="text-sm text-gray-500">Nenhum check-out pendente</p>
                       </div>
                     )}
                   </div>
