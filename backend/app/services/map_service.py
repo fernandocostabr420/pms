@@ -443,10 +443,6 @@ class MapService:
     ) -> List[Reservation]:
         """
         ✅ CORRIGIDO: Busca reservas que se sobrepõem ao período
-        
-        A lógica anterior era muito restritiva e não capturava todas as reservas
-        que deveriam aparecer no mapa. A nova lógica usa uma abordagem mais simples
-        e correta para determinar sobreposição de intervalos.
         """
         query = self.db.query(Reservation).options(
             joinedload(Reservation.guest),
@@ -457,16 +453,11 @@ class MapService:
             # ✅ CORREÇÃO PRINCIPAL: Nova lógica de sobreposição
             or_(
                 # Caso 1: Reservas que se sobrepõem ao período (lógica matemática correta)
-                # Uma reserva se sobrepõe ao período SE:
-                # - Termina DEPOIS do início do período E
-                # - Começa ANTES do fim do período
                 and_(
-                    Reservation.check_out_date > start_date,  # Termina depois do início
+                    Reservation.check_out_date >= start_date,  # Termina depois do início
                     Reservation.check_in_date < end_date      # Começa antes do fim
                 ),
                 # Caso 2: Reservas checked-in sempre visíveis (independente do período)
-                # Reservas que já fizeram check-in devem continuar aparecendo 
-                # no mapa até que façam check-out
                 and_(
                     Reservation.status == 'checked_in',
                     or_(
@@ -486,7 +477,18 @@ class MapService:
         if not include_cancelled:
             query = query.filter(Reservation.status != 'cancelled')
         
-        return query.all()
+        # ✅ EXECUTAR A QUERY ANTES DO DEBUG
+        reservations = query.all()
+        
+        # 🔍 DEBUG TEMPORÁRIO - remover depois
+        print(f"DEBUG - Período: {start_date} a {end_date}")
+        print(f"DEBUG - Total reservas encontradas: {len(reservations)}")
+        for res in reservations:
+            if res.check_out_date == start_date:
+                print(f"DEBUG - Reserva check-out no start_date: {res.reservation_number}, status: {res.status}")
+        
+        return reservations
+
 
     def _map_reservations_by_room(
         self, 

@@ -282,7 +282,7 @@ export default function RoomMapGrid({
             // Se check-in é anterior ao período visível, começar do primeiro dia visível
             if (startIndex === -1) {
               const firstVisibleDate = new Date(dateHeaders[0].date + 'T00:00:00');
-              if (checkOut <= firstVisibleDate) {
+              if (checkOut < firstVisibleDate) {
                 return null; // Reserva já terminou antes do período visível
               }
               actualStartIndex = 0; // Começar do primeiro dia visível
@@ -312,12 +312,20 @@ export default function RoomMapGrid({
             
             if (actualStartIndex === actualEndIndex) {
               // Reserva em uma única célula
-              if (reservationStartsInPeriod) {
-                // Reserva começa na célula visível: do meio até o fim da célula
+              if (reservationStartsInPeriod && reservationEndsInPeriod) {
+                // ✅ CASO 1: Reserva começa E termina na mesma célula visível (check-in e check-out no mesmo dia do período)
                 blockLeft = actualStartIndex * cellWidth + cellWidth / 2;
                 blockWidth = cellWidth / 2;
+              } else if (reservationStartsInPeriod && !reservationEndsInPeriod) {
+                // ✅ CASO 2: Reserva começa na célula mas termina depois (do meio ao fim)
+                blockLeft = actualStartIndex * cellWidth + cellWidth / 2;
+                blockWidth = cellWidth / 2;
+              } else if (!reservationStartsInPeriod && reservationEndsInPeriod) {
+                // ✅ CASO 3: Reserva começou antes mas termina na célula (do início ao meio)
+                blockLeft = actualStartIndex * cellWidth;
+                blockWidth = cellWidth / 2;
               } else {
-                // Reserva já estava em andamento: ocupar a célula inteira
+                // ✅ CASO 4: Reserva atravessa toda a célula (do início ao fim)
                 blockLeft = actualStartIndex * cellWidth;
                 blockWidth = cellWidth;
               }
