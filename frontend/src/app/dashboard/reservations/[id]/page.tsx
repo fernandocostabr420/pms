@@ -89,7 +89,12 @@ const PaymentItem = ({
       return 'R$ 0,00';
     }
     const numValue = Number(value);
-    return `R$ ${numValue.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
+    return numValue.toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
   };
 
   const formatDate = (dateString: string) => {
@@ -161,7 +166,7 @@ const PaymentItem = ({
   );
 };
 
-// Componente de Pagamentos compacto
+// Componente de Pagamentos compacto - CORRIGIDO
 function PaymentsSection({ 
   reservationId, 
   reservationNumber,
@@ -355,18 +360,20 @@ function PaymentsSection({
           </div>
         </CardHeader>
 
-        <CardContent>
-          {/* Lista de pagamentos confirmados */}
-          <div className="space-y-3">
-            {confirmedPayments.map((payment) => (
-              <PaymentItem
-                key={payment.id}
-                payment={payment}
-                onEdit={handleEditPayment}
-                onCancel={handleCancelPayment}
-                actionLoading={actionLoading}
-              />
-            ))}
+        <CardContent className="p-4">
+          {/* Container com altura limitada e scroll - CORRIGIDO */}
+          <div className="max-h-72 overflow-y-auto overflow-x-hidden border border-gray-100 rounded-lg bg-gray-50">
+            <div className="space-y-3 p-3">
+              {confirmedPayments.map((payment) => (
+                <PaymentItem
+                  key={payment.id}
+                  payment={payment}
+                  onEdit={handleEditPayment}
+                  onCancel={handleCancelPayment}
+                  actionLoading={actionLoading}
+                />
+              ))}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -525,6 +532,21 @@ export default function ReservationDetailsPage() {
   const [checkInModalOpen, setCheckInModalOpen] = useState(false);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // Função para formatação correta de moeda brasileira - CORRIGIDO
+  const formatCurrency = (value: string | number | null | undefined): string => {
+    if (!value || isNaN(Number(value))) {
+      return 'R$ 0,00';
+    }
+    
+    const numValue = Number(value);
+    return numValue.toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  };
 
   const handleAction = async (action: string) => {
     switch (action) {
@@ -754,7 +776,7 @@ export default function ReservationDetailsPage() {
                   </div>
                   <div className="text-center p-3 bg-yellow-50 rounded-lg">
                     <p className="text-sm text-gray-600 mb-1">Total Gasto</p>
-                    <p className="font-bold text-yellow-600 text-xl">R$ {data.guest.total_spent}</p>
+                    <p className="font-bold text-yellow-600 text-xl">{formatCurrency(data.guest.total_spent)}</p>
                   </div>
                 </div>
               </div>
@@ -773,7 +795,7 @@ export default function ReservationDetailsPage() {
 
         {/* Sidebar - 1/3 */}
         <div className="space-y-6">
-          {/* Resumo Financeiro */}
+          {/* Resumo Financeiro - CORRIGIDO */}
           <Card className="border-l-4 border-l-green-500">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
@@ -785,11 +807,11 @@ export default function ReservationDetailsPage() {
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Total da Reserva</span>
-                  <span className="font-bold text-lg">R$ {data.payment.total_amount}</span>
+                  <span className="font-bold text-lg">{formatCurrency(data.payment.total_amount)}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Valor Pago</span>
-                  <span className="font-semibold text-green-600">R$ {data.payment.paid_amount}</span>
+                  <span className="font-semibold text-green-600">{formatCurrency(data.payment.paid_amount)}</span>
                 </div>
                 <div className="border-t pt-3">
                   <div className="flex justify-between items-center">
@@ -797,7 +819,7 @@ export default function ReservationDetailsPage() {
                     <span className={`font-bold text-lg ${
                       parseFloat(data.payment.balance_due) > 0 ? 'text-red-600' : 'text-green-600'
                     }`}>
-                      R$ {data.payment.balance_due}
+                      {formatCurrency(data.payment.balance_due)}
                     </span>
                   </div>
                 </div>

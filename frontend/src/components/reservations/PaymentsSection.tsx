@@ -289,6 +289,9 @@ export default function PaymentsSection({
 
   const { toast } = useToast();
 
+  // Filtrar apenas pagamentos confirmados
+  const confirmedPayments = payments.filter(payment => payment.status === 'confirmed');
+
   // Handlers para ações
   const handleAddPayment = () => {
     setSelectedPayment(null);
@@ -385,15 +388,6 @@ export default function PaymentsSection({
     return `R$ ${numValue.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
   };
 
-  // Cálculo de estatísticas
-  const paidAmount = payments
-    .filter(p => p.status === 'confirmed')
-    .reduce((sum, p) => sum + (p.amount || 0), 0);
-
-  const pendingAmount = payments
-    .filter(p => p.status === 'pending')
-    .reduce((sum, p) => sum + (p.amount || 0), 0);
-
   if (loading && payments.length === 0) {
     return (
       <Card>
@@ -441,7 +435,7 @@ export default function PaymentsSection({
     );
   }
 
-  if (payments.length === 0) {
+  if (confirmedPayments.length === 0) {
     return (
       <Card>
         <CardHeader className="pb-4">
@@ -505,16 +499,19 @@ export default function PaymentsSection({
         </CardHeader>
 
         <CardContent className="p-4">
-          {/* Container com altura fixa e scroll */}
-          <div className="h-96 overflow-y-auto overflow-x-hidden">
-            <div className="space-y-3 pr-2">
+          {/* Container com altura fixa e scroll - CORRIGIDO */}
+          <div className="h-80 overflow-y-auto overflow-x-hidden border border-gray-100 rounded-lg">
+            <div className="space-y-3 p-2">
               {confirmedPayments.map((payment) => (
                 <PaymentItem
                   key={payment.id}
                   payment={payment}
+                  onView={handleViewPayment}
                   onEdit={handleEditPayment}
                   onCancel={handleCancelPayment}
+                  onViewAuditLog={handleViewAuditLog}
                   actionLoading={actionLoading}
+                  isAdmin={true}
                 />
               ))}
             </div>
