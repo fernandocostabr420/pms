@@ -9,46 +9,34 @@ import CancelReservationModal from '@/components/reservations/CancelReservationM
 import EditReservationModal from '@/components/reservations/EditReservationModal';
 import CheckInModal from '@/components/reservations/CheckInModal';
 import PaymentModal from '@/components/reservations/PaymentModal';
+import { useReservationPayments } from '@/hooks/useReservationPayments';
+import PaymentEditModal from '@/components/payments/PaymentEditModal';
+import PaymentCancelModal from '@/components/payments/PaymentCancelModal';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   ArrowLeft, 
   Loader2, 
   User, 
   Bed, 
-  Plus, 
   Edit2, 
-  Trash2, 
-  CreditCard,
   DollarSign,
-  Calendar,
-  Receipt,
   TrendingUp,
   Clock,
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
-  ArrowUpDown
+  Receipt,
+  Plus,
+  RefreshCw,
+  AlertCircle,
+  CreditCard,
+  Calendar,
+  Ban
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import apiClient from '@/lib/api';
 import { formatReservationDate } from '@/lib/calendar-utils';
-
-// Mock data para pagamentos - substituir por dados reais
-const mockPayments = [
-  {
-    id: 1,
-    amount: 154.98,
-    payment_method: 'pix',
-    payment_date: '2025-09-06T14:30:00',
-    status: 'confirmed',
-    reference_number: 'PIX123456',
-    payer_name: 'Ruiter Melo',
-    notes: 'Entrada da reserva',
-    created_at: '2025-09-06T14:30:00'
-  }
-];
+import { PaymentResponse } from '@/types/payment';
 
 // Labels para métodos de pagamento
 const PAYMENT_METHOD_LABELS = {
@@ -61,35 +49,356 @@ const PAYMENT_METHOD_LABELS = {
   other: 'Outro'
 };
 
-// Labels para status
-const STATUS_LABELS = {
-  pending: 'Pendente',
-  confirmed: 'Confirmado',
-  cancelled: 'Cancelado',
-  failed: 'Falhou',
-  refunded: 'Estornado'
-};
-
-// Componente para badges de status
-const StatusBadge = ({ status }: { status: string }) => {
+// Componente para badge de método de pagamento
+const PaymentMethodBadge = ({ method }: { method: string }) => {
   const configs = {
-    pending: { icon: Clock, className: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
-    confirmed: { icon: CheckCircle, className: 'bg-green-100 text-green-800 border-green-200' },
-    cancelled: { icon: XCircle, className: 'bg-red-100 text-red-800 border-red-200' },
-    failed: { icon: AlertTriangle, className: 'bg-red-100 text-red-800 border-red-200' },
-    refunded: { icon: ArrowUpDown, className: 'bg-blue-100 text-blue-800 border-blue-200' }
+    credit_card: { icon: CreditCard, className: 'bg-blue-100 text-blue-800' },
+    debit_card: { icon: CreditCard, className: 'bg-green-100 text-green-800' },
+    pix: { icon: DollarSign, className: 'bg-purple-100 text-purple-800' },
+    bank_transfer: { icon: DollarSign, className: 'bg-gray-100 text-gray-800' },
+    cash: { icon: DollarSign, className: 'bg-green-100 text-green-800' },
+    check: { icon: DollarSign, className: 'bg-orange-100 text-orange-800' },
+    other: { icon: DollarSign, className: 'bg-gray-100 text-gray-800' }
   };
 
-  const config = configs[status as keyof typeof configs] || configs.pending;
+  const config = configs[method as keyof typeof configs] || configs.other;
   const Icon = config.icon;
 
   return (
     <Badge variant="outline" className={config.className}>
       <Icon className="w-3 h-3 mr-1" />
-      {STATUS_LABELS[status as keyof typeof STATUS_LABELS] || status}
+      {PAYMENT_METHOD_LABELS[method as keyof typeof PAYMENT_METHOD_LABELS] || method}
     </Badge>
   );
 };
+
+// Componente para item de pagamento - versão compacta
+const PaymentItem = ({ 
+  payment, 
+  onEdit, 
+  onCancel,
+  actionLoading
+}: {
+  payment: PaymentResponse;
+  onEdit: (payment: PaymentResponse) => void;
+  onCancel: (payment: PaymentResponse) => void;
+  actionLoading: string | null;
+}) => {
+  const formatCurrency = (value: number | null | undefined) => {
+    if (!value || isNaN(Number(value))) {
+      return 'R$ 0,00';
+    }
+    const numValue = Number(value);
+    return `R$ ${numValue.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('pt-BR');
+  };
+
+  return (
+    <div className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+      <div className="flex items-center gap-3">
+        <div className="p-1.5 bg-green-100 rounded">
+          <CreditCard className="h-4 w-4 text-green-600" />
+        </div>
+        
+        <div className="flex-1">
+          <div className="flex items-center gap-3">
+            <span className="font-semibold text-green-600">
+              {formatCurrency(payment.amount)}
+            </span>
+            <PaymentMethodBadge method={payment.payment_method} />
+            {payment.payment_number && (
+              <span className="text-sm text-gray-500 font-mono">
+                #{payment.payment_number}
+              </span>
+            )}
+          </div>
+          
+          <div className="flex items-center gap-4 text-sm text-gray-500 mt-1">
+            <span className="flex items-center gap-1">
+              <Calendar className="h-3 w-3" />
+              {formatDate(payment.payment_date)}
+            </span>
+            {payment.reference_number && (
+              <span>Ref: {payment.reference_number}</span>
+            )}
+            {payment.is_partial && (
+              <Badge variant="outline" className="bg-orange-100 text-orange-800 border-orange-200 text-xs">
+                Parcial
+              </Badge>
+            )}
+          </div>
+        </div>
+      </div>
+      
+      <div className="flex gap-1 ml-4">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => onEdit(payment)}
+          disabled={!!actionLoading}
+          title="Editar"
+          className="h-8 w-8 p-0"
+        >
+          <Edit2 className="h-3 w-3" />
+        </Button>
+        
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => onCancel(payment)}
+          disabled={!!actionLoading}
+          title="Cancelar"
+          className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+        >
+          <Ban className="h-3 w-3" />
+        </Button>
+      </div>
+    </div>
+  );
+};
+
+// Componente de Pagamentos compacto
+function PaymentsSection({ 
+  reservationId, 
+  reservationNumber,
+  totalAmount,
+  balanceDue,
+  onPaymentUpdate 
+}: {
+  reservationId: number;
+  reservationNumber: string;
+  totalAmount: number;
+  balanceDue: number;
+  onPaymentUpdate?: () => void;
+}) {
+  const {
+    payments,
+    loading,
+    error,
+    refreshPayments,
+  } = useReservationPayments(reservationId);
+
+  // Estados para modais
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState<PaymentResponse | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // Filtrar apenas pagamentos confirmados
+  const confirmedPayments = payments.filter(payment => payment.status === 'confirmed');
+
+  // Handlers para ações
+  const handleAddPayment = () => {
+    setSelectedPayment(null);
+    setIsCreateModalOpen(true);
+  };
+
+  const handleEditPayment = (payment: PaymentResponse) => {
+    setSelectedPayment(payment);
+    setIsEditModalOpen(true);
+  };
+
+  const handleCancelPayment = (payment: PaymentResponse) => {
+    setSelectedPayment(payment);
+    setIsCancelModalOpen(true);
+  };
+
+  const handleCreateSuccess = async () => {
+    setIsCreateModalOpen(false);
+    await refreshPayments();
+    onPaymentUpdate?.();
+    toast({
+      title: 'Pagamento Registrado',
+      description: 'Pagamento registrado com sucesso!',
+      variant: 'default',
+    });
+  };
+
+  const handleEditSuccess = async (updatedPayment?: PaymentResponse) => {
+    setIsEditModalOpen(false);
+    await refreshPayments();
+    onPaymentUpdate?.();
+    
+    if (updatedPayment) {
+      toast({
+        title: "Sucesso",
+        description: `Pagamento #${updatedPayment.payment_number} foi atualizado com sucesso.`,
+      });
+    }
+  };
+
+  const handleCancelSuccess = async (updatedPayment?: PaymentResponse) => {
+    setIsCancelModalOpen(false);
+    await refreshPayments();
+    onPaymentUpdate?.();
+    
+    if (updatedPayment) {
+      toast({
+        title: "Pagamento Cancelado",
+        description: `Pagamento #${updatedPayment.payment_number} foi cancelado com sucesso.`,
+      });
+    }
+  };
+
+  if (loading && payments.length === 0) {
+    return (
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Receipt className="h-5 w-5 text-green-600" />
+            Pagamentos
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <CardHeader className="pb-4">
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Receipt className="h-5 w-5 text-green-600" />
+            Pagamentos
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              {error}
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={refreshPayments}
+                className="ml-2"
+              >
+                Tentar Novamente
+              </Button>
+            </AlertDescription>
+          </Alert>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (confirmedPayments.length === 0) {
+    return (
+      <Card>
+        <CardHeader className="pb-4">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Receipt className="h-5 w-5 text-green-600" />
+              Pagamentos
+            </CardTitle>
+            <Button onClick={handleAddPayment} size="sm" className="bg-green-600 hover:bg-green-700">
+              <Plus className="h-4 w-4 mr-2" />
+              Adicionar
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-8 text-gray-500">
+            <Receipt className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+            <p className="mb-2">Nenhum pagamento confirmado</p>
+            <p className="text-sm text-gray-400 mb-4">
+              Registre os pagamentos desta reserva para controlar o saldo
+            </p>
+            <Button 
+              onClick={handleAddPayment} 
+              variant="outline" 
+              className="mt-3"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Registrar Primeiro Pagamento
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      <Card>
+        <CardHeader className="pb-4">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Receipt className="h-5 w-5 text-green-600" />
+              Pagamentos ({confirmedPayments.length})
+            </CardTitle>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={refreshPayments}
+                disabled={loading}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                Atualizar
+              </Button>
+              <Button onClick={handleAddPayment} size="sm" className="bg-green-600 hover:bg-green-700">
+                <Plus className="h-4 w-4 mr-2" />
+                Adicionar
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent>
+          {/* Lista de pagamentos confirmados */}
+          <div className="space-y-3">
+            {confirmedPayments.map((payment) => (
+              <PaymentItem
+                key={payment.id}
+                payment={payment}
+                onEdit={handleEditPayment}
+                onCancel={handleCancelPayment}
+                actionLoading={actionLoading}
+              />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Modais */}
+      <PaymentModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSuccess={handleCreateSuccess}
+        reservationId={reservationId}
+        reservationNumber={reservationNumber}
+        totalAmount={totalAmount}
+        balanceDue={balanceDue}
+      />
+
+      <PaymentEditModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        payment={selectedPayment}
+        onSuccess={handleEditSuccess}
+        isAdmin={true}
+      />
+
+      <PaymentCancelModal
+        isOpen={isCancelModalOpen}
+        onClose={() => setIsCancelModalOpen(false)}
+        payment={selectedPayment}
+        onSuccess={handleCancelSuccess}
+      />
+    </>
+  );
+}
 
 // Componente Header melhorado
 function ImprovedReservationHeader({ data, onAction }: { data: any; onAction: (action: string) => void }) {
@@ -205,137 +514,6 @@ function ImprovedReservationHeader({ data, onAction }: { data: any; onAction: (a
   );
 }
 
-// Componente de Pagamentos
-function PaymentsSection({ reservationId, onAddPayment }: { reservationId: number; onAddPayment: () => void }) {
-  const [payments] = useState(mockPayments); // Substituir por hook real
-  const [editingPayment, setEditingPayment] = useState<any>(null);
-
-  const handleEditPayment = (payment: any) => {
-    setEditingPayment(payment);
-    // Abrir modal de edição
-  };
-
-  const handleDeletePayment = async (paymentId: number) => {
-    // Implementar exclusão
-    toast({
-      title: 'Pagamento Excluído',
-      description: 'O pagamento foi excluído com sucesso.',
-      variant: 'default',
-    });
-  };
-
-  if (payments.length === 0) {
-    return (
-      <Card>
-        <CardHeader className="pb-4">
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Receipt className="h-5 w-5 text-green-600" />
-              Pagamentos
-            </CardTitle>
-            <Button onClick={onAddPayment} size="sm" className="bg-green-600 hover:bg-green-700">
-              <Plus className="h-4 w-4 mr-2" />
-              Adicionar
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center py-8 text-gray-500">
-            <Receipt className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-            <p>Nenhum pagamento registrado</p>
-            <Button 
-              onClick={onAddPayment} 
-              variant="outline" 
-              className="mt-3"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Registrar Primeiro Pagamento
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader className="pb-4">
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Receipt className="h-5 w-5 text-green-600" />
-            Pagamentos ({payments.length})
-          </CardTitle>
-          <Button onClick={onAddPayment} size="sm" className="bg-green-600 hover:bg-green-700">
-            <Plus className="h-4 w-4 mr-2" />
-            Adicionar
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {payments.map((payment) => (
-          <div key={payment.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50">
-            <div className="flex-1">
-              <div className="flex items-center gap-3 mb-2">
-                <div className="p-1.5 bg-green-100 rounded">
-                  <CreditCard className="h-4 w-4 text-green-600" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-lg text-green-600">
-                      R$ {payment.amount.toFixed(2)}
-                    </span>
-                    <StatusBadge status={payment.status} />
-                  </div>
-                  <p className="text-sm text-gray-600">
-                    {PAYMENT_METHOD_LABELS[payment.payment_method as keyof typeof PAYMENT_METHOD_LABELS]}
-                    {payment.reference_number && ` • ${payment.reference_number}`}
-                  </p>
-                </div>
-              </div>
-              
-              <div className="flex items-center gap-4 text-sm text-gray-500">
-                <span className="flex items-center gap-1">
-                  <Calendar className="h-3 w-3" />
-                  {format(new Date(payment.payment_date), 'dd/MM/yyyy HH:mm')}
-                </span>
-                {payment.payer_name && (
-                  <span className="flex items-center gap-1">
-                    <User className="h-3 w-3" />
-                    {payment.payer_name}
-                  </span>
-                )}
-              </div>
-              
-              {payment.notes && (
-                <p className="text-sm text-gray-600 mt-2 italic">{payment.notes}</p>
-              )}
-            </div>
-            
-            <div className="flex gap-2 ml-4">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => handleEditPayment(payment)}
-                className="h-8 w-8 p-0"
-              >
-                <Edit2 className="h-3 w-3" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => handleDeletePayment(payment.id)}
-                className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-              >
-                <Trash2 className="h-3 w-3" />
-              </Button>
-            </div>
-          </div>
-        ))}
-      </CardContent>
-    </Card>
-  );
-}
-
 export default function ReservationDetailsPage() {
   const params = useParams();
   const router = useRouter();
@@ -402,6 +580,11 @@ export default function ReservationDetailsPage() {
       description: 'Pagamento registrado com sucesso!',
       variant: 'default',
     });
+  };
+
+  // Handler para quando um pagamento é atualizado no novo componente
+  const handlePaymentUpdate = async () => {
+    await refresh(); // Atualiza dados da reserva para manter sincronizado
   };
 
   const handleCancelConfirm = async (cancelData: {
@@ -578,10 +761,13 @@ export default function ReservationDetailsPage() {
             </CardContent>
           </Card>
 
-          {/* Seção de Pagamentos */}
+          {/* Nova Seção de Pagamentos - Compacta e apenas confirmados */}
           <PaymentsSection 
-            reservationId={reservationId} 
-            onAddPayment={() => setPaymentModalOpen(true)} 
+            reservationId={reservationId}
+            reservationNumber={data.reservation_number}
+            totalAmount={parseFloat(data.payment.total_amount) || 0}
+            balanceDue={parseFloat(data.payment.balance_due) || 0}
+            onPaymentUpdate={handlePaymentUpdate}
           />
         </div>
 
@@ -734,7 +920,7 @@ export default function ReservationDetailsPage() {
         </CardHeader>
         <CardContent>
           {data.audit_history && data.audit_history.length > 0 ? (
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-96 overflow-y-auto">
               {data.audit_history.map((audit) => (
                 <div key={audit.id} className="flex gap-4 p-4 bg-gray-50 rounded-lg">
                   <div className="flex-1">
@@ -800,6 +986,7 @@ export default function ReservationDetailsPage() {
         existingGuestData={getExistingGuestData()}
       />
 
+      {/* Modal antigo do PaymentModal - mantido para compatibilidade com o botão do header */}
       <PaymentModal
         isOpen={paymentModalOpen}
         onClose={() => setPaymentModalOpen(false)}

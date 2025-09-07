@@ -1,59 +1,119 @@
-// frontend/src/hooks/useReservationPayments.ts
-'use client';
-
+// hooks/useReservationPayments.ts
 import { useState, useEffect, useCallback } from 'react';
 import apiClient from '@/lib/api';
-import { ReservationPaymentSummary } from '@/types/payment';
-import { useToast } from '@/hooks/use-toast';
+import { PaymentResponse } from '@/types/payment';
 
 interface UseReservationPaymentsReturn {
-  summary: ReservationPaymentSummary | null;
+  payments: PaymentResponse[];
   loading: boolean;
   error: string | null;
-  loadSummary: () => Promise<void>;
-  refreshSummary: () => Promise<void>;
+  refreshPayments: () => Promise<void>;
+  createPayment: (paymentData: any) => Promise<PaymentResponse>;
+  updatePayment: (id: number, paymentData: any) => Promise<PaymentResponse>;
+  cancelPayment: (id: number, reason?: string) => Promise<PaymentResponse>;
+  getPaymentAuditLog: (id: number) => Promise<any[]>;
 }
 
-export function useReservationPayments(reservationId: number): UseReservationPaymentsReturn {
-  const [summary, setSummary] = useState<ReservationPaymentSummary | null>(null);
-  const [loading, setLoading] = useState(false);
+export const useReservationPayments = (reservationId: number): UseReservationPaymentsReturn => {
+  const [payments, setPayments] = useState<PaymentResponse[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const { toast } = useToast();
-
-  const loadSummary = useCallback(async () => {
+  const loadPayments = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       
-      const response = await apiClient.getReservationPaymentSummary(reservationId);
-      setSummary(response);
+      // Buscar pagamentos específicos da reserva
+      const response = await apiClient.getPayments({
+        reservation_id: reservationId,
+        per_page: 100 // Buscar todos os pagamentos da reserva
+      });
       
+      setPayments(response.payments || []);
     } catch (err: any) {
-      console.error('Erro ao carregar resumo de pagamentos:', err);
-      setError(err.response?.data?.detail || 'Erro ao carregar resumo de pagamentos');
-      setSummary(null);
+      console.error('Erro ao carregar pagamentos da reserva:', err);
+      setError(err.response?.data?.detail || 'Erro ao carregar pagamentos');
+      setPayments([]);
     } finally {
       setLoading(false);
     }
   }, [reservationId]);
 
-  const refreshSummary = useCallback(async () => {
-    await loadSummary();
-  }, [loadSummary]);
+  const refreshPayments = useCallback(async () => {
+    await loadPayments();
+  }, [loadPayments]);
 
-  // Carregar dados inicial
+  const createPayment = useCallback(async (paymentData: any): Promise<PaymentResponse> => {
+    try {
+      const response = await apiClient.createPayment({
+        ...paymentData,
+        reservation_id: reservationId
+      });
+      
+      // Atualizar lista local
+      await refreshPayments();
+      
+      return response;
+    } catch (error: any) {
+      console.error('Erro ao criar pagamento:', error);
+      throw error;
+    }
+  }, [reservationId, refreshPayments]);
+
+  const updatePayment = useCallback(async (id: number, paymentData: any): Promise<PaymentResponse> => {
+    try {
+      const response = await apiClient.updatePayment(id, paymentData);
+      
+      // Atualizar lista local
+      await refreshPayments();
+      
+      return response;
+    } catch (error: any) {
+      console.error('Erro ao atualizar pagamento:', error);
+      throw error;
+    }
+  }, [refreshPayments]);
+
+  const cancelPayment = useCallback(async (id: number, reason?: string): Promise<PaymentResponse> => {
+    try {
+      const response = await apiClient.cancelPayment(id, { reason });
+      
+      // Atualizar lista local
+      await refreshPayments();
+      
+      return response;
+    } catch (error: any) {
+      console.error('Erro ao cancelar pagamento:', error);
+      throw error;
+    }
+  }, [refreshPayments]);
+
+  const getPaymentAuditLog = useCallback(async (id: number): Promise<any[]> => {
+    try {
+      const response = await apiClient.getPaymentAuditLog(id);
+      return response.audit_logs || [];
+    } catch (error: any) {
+      console.error('Erro ao carregar audit log:', error);
+      throw error;
+    }
+  }, []);
+
+  // Carregar pagamentos na inicialização
   useEffect(() => {
     if (reservationId) {
-      loadSummary();
+      loadPayments();
     }
-  }, [reservationId, loadSummary]);
+  }, [reservationId, loadPayments]);
 
   return {
-    summary,
+    payments,
     loading,
     error,
-    loadSummary,
-    refreshSummary,
+    refreshPayments,
+    createPayment,
+    updatePayment,
+    cancelPayment,
+    getPaymentAuditLog,
   };
-}
+};
