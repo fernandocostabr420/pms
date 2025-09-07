@@ -1,0 +1,56 @@
+// frontend/src/lib/timezone-utils.ts
+
+import { format, parseISO, formatInTimeZone } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+
+// Timezone de São Paulo
+export const SP_TIMEZONE = 'America/Sao_Paulo';
+
+/**
+ * Formata data sempre no timezone de São Paulo
+ */
+export function formatDateSP(
+  date: Date | string, 
+  formatStr: string = 'dd/MM/yyyy'
+): string {
+  const dateObj = typeof date === 'string' ? parseISO(date) : date;
+  return formatInTimeZone(dateObj, SP_TIMEZONE, formatStr, { locale: ptBR });
+}
+
+/**
+ * Formata datetime completo no timezone de São Paulo
+ */
+export function formatDateTimeSP(
+  date: Date | string, 
+  formatStr: string = 'dd/MM/yyyy \'às\' HH:mm'
+): string {
+  const dateObj = typeof date === 'string' ? parseISO(date) : date;
+  return formatInTimeZone(dateObj, SP_TIMEZONE, formatStr, { locale: ptBR });
+}
+
+/**
+ * Converte data local para string no formato correto para API
+ */
+export function dateToAPIString(date: Date): string {
+  // Formatar como string de data simples (YYYY-MM-DD)
+  return formatInTimeZone(date, SP_TIMEZONE, 'yyyy-MM-dd');
+}
+
+/**
+ * Converte datetime local para string no formato correto para API
+ */
+export function dateTimeToAPIString(date: Date): string {
+  // Formatar como ISO string no timezone de SP
+  return formatInTimeZone(date, SP_TIMEZONE, "yyyy-MM-dd'T'HH:mm:ssXXX");
+}
+
+/**
+ * Parse de string de data da API considerando timezone SP
+ */
+export function parseAPIDate(dateString: string): Date {
+  // Se a string não tem timezone, adiciona o de SP
+  if (!dateString.includes('T')) {
+    dateString += 'T00:00:00-03:00'; // Adiciona timezone de SP
+  }
+  return parseISO(dateString);
+}

@@ -4,8 +4,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from starlette.middleware.base import BaseHTTPMiddleware
 import logging
 import traceback
+import os
 
 from app.core.config import settings
 from app.core.database import check_db_connection
@@ -13,6 +15,19 @@ from app.core.database import check_db_connection
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ✅ MIDDLEWARE DE TIMEZONE
+class TimezoneMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        # Definir timezone para a sessão
+        os.environ['TZ'] = 'America/Sao_Paulo'
+        
+        response = await call_next(request)
+        
+        # Adicionar header com timezone
+        response.headers["X-Timezone"] = "America/Sao_Paulo"
+        
+        return response
 
 # Criar instância da aplicação
 app = FastAPI(
@@ -22,6 +37,9 @@ app = FastAPI(
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
 )
+
+# ✅ ADICIONAR MIDDLEWARE DE TIMEZONE (ANTES DO CORS)
+app.add_middleware(TimezoneMiddleware)
 
 # Configurar CORS - Mais permissivo para desenvolvimento
 cors_origins = settings.CORS_ORIGINS.split(",")
@@ -93,7 +111,8 @@ async def root():
         "debug": settings.DEBUG,
         "api_loaded": api_loaded,
         "cors_origins": cors_origins[:5],  # Primeiras 5 para não sobrecarregar
-        "docs": "/docs" if settings.DEBUG else "Documentação não disponível em produção"
+        "docs": "/docs" if settings.DEBUG else "Documentação não disponível em produção",
+        "timezone": "America/Sao_Paulo"  # ✅ ADICIONAR INFO DE TIMEZONE
     }
 
 @app.get("/health")
@@ -110,7 +129,8 @@ async def health_check():
         "database": "connected" if db_status else "disconnected",
         "api_loaded": api_loaded,
         "version": settings.VERSION,
-        "environment": settings.ENVIRONMENT
+        "environment": settings.ENVIRONMENT,
+        "timezone": "America/Sao_Paulo"  # ✅ ADICIONAR INFO DE TIMEZONE
     }
 
 # Event handlers
@@ -122,6 +142,7 @@ async def startup_event():
     logger.info(f"🔍 Debug: {settings.DEBUG}")
     logger.info(f"🌐 CORS configurado para: {len(cors_origins)} origens")
     logger.info(f"📡 API carregada: {api_loaded}")
+    logger.info(f"🕐 Timezone: America/Sao_Paulo")  # ✅ LOG DE TIMEZONE
 
 @app.on_event("shutdown") 
 async def shutdown_event():

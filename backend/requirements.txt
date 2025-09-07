@@ -31,3 +31,5 @@ structlog==23.2.0
 # Utilitários
 email-validator==2.1.0
 python-dotenv==1.0.0
+
+pytz==2023.3

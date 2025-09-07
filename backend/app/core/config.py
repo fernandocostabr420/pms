@@ -3,6 +3,7 @@
 import os
 from typing import Optional
 from pydantic_settings import BaseSettings
+import pytz
 
 
 class Settings(BaseSettings):
@@ -13,6 +14,9 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     DEBUG: bool = False
     ENVIRONMENT: str = "development"
+    
+    # ✅ NOVO - Configuração de Timezone
+    TIMEZONE: str = "America/Sao_Paulo"
     
     # Segurança
     SECRET_KEY: str
@@ -34,6 +38,17 @@ class Settings(BaseSettings):
     SMTP_PORT: int = 587
     SMTP_USER: Optional[str] = None
     SMTP_PASSWORD: Optional[str] = None
+    
+    # ✅ NOVO - Property para timezone object
+    @property
+    def tz(self):
+        """Retorna objeto timezone configurado"""
+        return pytz.timezone(self.TIMEZONE)
+    
+    @property
+    def cors_origins_list(self):
+        """Retorna lista de origens CORS"""
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
     
     class Config:
         env_file = ".env"
