@@ -8,6 +8,7 @@ import { useReservationDetails } from '@/hooks/useReservationDetails';
 import CancelReservationModal from '@/components/reservations/CancelReservationModal';
 import EditReservationModal from '@/components/reservations/EditReservationModal';
 import CheckInModal from '@/components/reservations/CheckInModal';
+import CheckOutModal from '@/components/reservations/CheckOutModal'; // ✅ NOVO IMPORT
 import PaymentModal from '@/components/reservations/PaymentModal';
 import { useReservationPayments } from '@/hooks/useReservationPayments';
 import PaymentEditModal from '@/components/payments/PaymentEditModal';
@@ -530,6 +531,7 @@ export default function ReservationDetailsPage() {
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [checkInModalOpen, setCheckInModalOpen] = useState(false);
+  const [checkOutModalOpen, setCheckOutModalOpen] = useState(false); // ✅ NOVO ESTADO
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -559,12 +561,8 @@ export default function ReservationDetailsPage() {
       case 'checkin':
         setCheckInModalOpen(true);
         break;
-      case 'checkout':
-        toast({
-          title: 'Em desenvolvimento',
-          description: 'Funcionalidade de check-out será implementada em breve.',
-          variant: 'default',
-        });
+      case 'checkout': // ✅ MODIFICADO
+        setCheckOutModalOpen(true);
         break;
       case 'payment':
         setPaymentModalOpen(true);
@@ -590,6 +588,17 @@ export default function ReservationDetailsPage() {
     toast({
       title: 'Check-in Realizado',
       description: 'Check-in realizado com sucesso!',
+      variant: 'default',
+    });
+  };
+
+  // ✅ NOVO HANDLER
+  const handleCheckOutSuccess = async () => {
+    setCheckOutModalOpen(false);
+    await refresh();
+    toast({
+      title: 'Check-out Realizado',
+      description: 'Check-out realizado com sucesso!',
       variant: 'default',
     });
   };
@@ -1006,6 +1015,17 @@ export default function ReservationDetailsPage() {
         onSuccess={handleCheckInSuccess}
         reservationId={data.id.toString()}
         existingGuestData={getExistingGuestData()}
+      />
+
+      {/* ✅ NOVO MODAL DE CHECK-OUT */}
+      <CheckOutModal
+        isOpen={checkOutModalOpen}
+        onClose={() => setCheckOutModalOpen(false)}
+        onSuccess={handleCheckOutSuccess}
+        reservationId={data.id}
+        reservationNumber={data.reservation_number}
+        balanceDue={parseFloat(data.payment.balance_due) || 0}
+        totalAmount={parseFloat(data.payment.total_amount) || 0}
       />
 
       {/* Modal antigo do PaymentModal - mantido para compatibilidade com o botão do header */}
