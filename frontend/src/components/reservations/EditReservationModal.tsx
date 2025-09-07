@@ -1,8 +1,8 @@
-// frontend/src/components/reservations/EditReservationModal.tsx - VERSÃO CORRIGIDA
+// frontend/src/components/reservations/EditReservationModal.tsx - VERSÃO COM INPUT MONETÁRIO AUTOMÁTICO
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -78,6 +78,268 @@ import {
 import apiClient from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
+// ===== UTILITÁRIOS FINANCEIROS COM ENTRADA AUTOMÁTICA =====
+
+/**
+ * Classe para manipulação de valores monetários com entrada automática
+ * Implementa entrada de números inteiros com posicionamento automático da vírgula
+ */
+class AutoCurrencyUtils {
+  
+  /**
+   * Converte centavos para reais
+   * 25050 -> 250.50
+   */
+  static centsToReais(cents: number): number {
+    return Math.round(cents) / 100;
+  }
+  
+  /**
+   * Converte reais para centavos (evita problemas de float)
+   * 250.50 -> 25050
+   */
+  static reaisToCents(reais: number): number {
+    return Math.round(reais * 100);
+  }
+  
+  /**
+   * Formata valor numérico para exibição brasileira
+   * 1234.56 -> "1.234,56"
+   */
+  static formatForDisplay(value: number): string {
+    if (isNaN(value) || value === null || value === undefined) return '';
+    
+    return value.toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+  
+  /**
+   * Formata com símbolo de moeda
+   * 1234.56 -> "R$ 1.234,56"
+   */
+  static formatWithSymbol(value: number): string {
+    if (isNaN(value) || value === null || value === undefined) return 'R$ 0,00';
+    
+    return value.toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+  
+  /**
+   * Formata centavos para exibição automática
+   * 1234 -> "12,34"
+   * 123 -> "1,23"  
+   * 12 -> "0,12"
+   * 1 -> "0,01"
+   * 0 -> "0,00"
+   */
+  static formatCentsToDisplay(cents: number): string {
+    if (isNaN(cents) || cents < 0) return '0,00';
+    
+    // Limita o valor máximo em centavos (R$ 999.999,99 = 99999999 centavos)
+    const maxCents = 99999999;
+    const limitedCents = Math.min(cents, maxCents);
+    
+    // Converte para string e garante pelo menos 3 dígitos (para incluir os centavos)
+    const centsStr = limitedCents.toString().padStart(3, '0');
+    
+    // Separa parte inteira dos centavos
+    const centavos = centsStr.slice(-2);
+    const reaisStr = centsStr.slice(0, -2);
+    
+    // Formata a parte dos reais com separadores de milhares
+    const reaisFormatted = reaisStr ? parseInt(reaisStr).toLocaleString('pt-BR') : '0';
+    
+    return `${reaisFormatted},${centavos}`;
+  }
+  
+  /**
+   * Remove caracteres não numéricos e retorna apenas dígitos
+   * "123abc456" -> "123456"
+   */
+  static extractDigits(value: string): string {
+    return value.replace(/\D/g, '');
+  }
+  
+  /**
+   * Converte string de dígitos para centavos
+   * "1234" -> 1234 centavos (R$ 12,34)
+   */
+  static digitsToCents(digits: string): number {
+    if (!digits) return 0;
+    return parseInt(digits) || 0;
+  }
+  
+  /**
+   * Converte centavos para valor decimal
+   * 1234 centavos -> 12.34
+   */
+  static centsToDecimal(cents: number): number {
+    return Math.round(cents) / 100;
+  }
+  
+  /**
+   * Valida se o valor está dentro dos limites financeiros
+   */
+  static validate(value: number, min: number = 0, max: number = 999999.99): boolean {
+    return value >= min && value <= max && !isNaN(value);
+  }
+}
+
+// ===== COMPONENTE DE INPUT MONETÁRIO AUTOMÁTICO =====
+
+interface AutoCurrencyInputProps {
+  value: number | undefined;
+  onChange: (value: number) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
+  maxValue?: number;
+  label?: string;
+  error?: string;
+}
+
+const AutoCurrencyInput: React.FC<AutoCurrencyInputProps> = ({
+  value,
+  onChange,
+  placeholder = "0,00",
+  disabled = false,
+  className = "",
+  maxValue = 999999.99,
+  label,
+  error
+}) => {
+  // Estado interno em centavos para evitar problemas de precisão
+  const [internalCents, setInternalCents] = useState<number>(0);
+  const [displayValue, setDisplayValue] = useState<string>('0,00');
+  const [isFocused, setIsFocused] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  
+  // Sincroniza valor externo com estado interno
+  useEffect(() => {
+    if (!isFocused && value !== undefined && value !== null) {
+      const cents = AutoCurrencyUtils.reaisToCents(value);
+      setInternalCents(cents);
+      setDisplayValue(AutoCurrencyUtils.formatCentsToDisplay(cents));
+    }
+  }, [value, isFocused]);
+  
+  // Inicializa valores quando componente monta
+  useEffect(() => {
+    if (value !== undefined && value !== null) {
+      const cents = AutoCurrencyUtils.reaisToCents(value);
+      setInternalCents(cents);
+      setDisplayValue(AutoCurrencyUtils.formatCentsToDisplay(cents));
+    }
+  }, []);
+  
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    
+    // Extrai apenas dígitos
+    const digits = AutoCurrencyUtils.extractDigits(rawValue);
+    
+    // Converte para centavos
+    const cents = AutoCurrencyUtils.digitsToCents(digits);
+    
+    // Verifica limite máximo
+    const maxCents = AutoCurrencyUtils.reaisToCents(maxValue);
+    const limitedCents = Math.min(cents, maxCents);
+    
+    // Atualiza estado interno
+    setInternalCents(limitedCents);
+    
+    // Atualiza display
+    const formattedDisplay = AutoCurrencyUtils.formatCentsToDisplay(limitedCents);
+    setDisplayValue(formattedDisplay);
+    
+    // Notifica mudança em valor decimal
+    const decimalValue = AutoCurrencyUtils.centsToDecimal(limitedCents);
+    onChange(decimalValue);
+  };
+  
+  const handleFocus = () => {
+    setIsFocused(true);
+    
+    // Posiciona cursor no final
+    setTimeout(() => {
+      if (inputRef.current) {
+        const length = inputRef.current.value.length;
+        inputRef.current.setSelectionRange(length, length);
+      }
+    }, 0);
+  };
+  
+  const handleBlur = () => {
+    setIsFocused(false);
+    
+    // Reformata para garantir exibição consistente
+    const formattedDisplay = AutoCurrencyUtils.formatCentsToDisplay(internalCents);
+    setDisplayValue(formattedDisplay);
+  };
+  
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Permite: Backspace, Delete, Tab, Escape, Enter, setas
+    if ([8, 9, 27, 13, 46, 37, 38, 39, 40].includes(e.keyCode)) {
+      return;
+    }
+    
+    // Permite: Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+Z
+    if ((e.keyCode === 65 || e.keyCode === 67 || e.keyCode === 86 || e.keyCode === 88 || e.keyCode === 90) && e.ctrlKey) {
+      return;
+    }
+    
+    // Bloqueia tudo exceto números
+    if (!/[0-9]/.test(e.key)) {
+      e.preventDefault();
+    }
+  };
+  
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    
+    // Obtém dados colados e extrai apenas dígitos
+    const pastedData = e.clipboardData.getData('text');
+    const digits = AutoCurrencyUtils.extractDigits(pastedData);
+    
+    if (digits) {
+      // Simula entrada de dígitos
+      const newEvent = {
+        target: { value: digits }
+      } as React.ChangeEvent<HTMLInputElement>;
+      
+      handleChange(newEvent);
+    }
+  };
+  
+  return (
+    <div>
+      {label && <Label className="text-sm font-medium mb-1 block">{label}</Label>}
+      <Input
+        ref={inputRef}
+        type="text"
+        value={displayValue}
+        onChange={handleChange}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        placeholder={placeholder}
+        disabled={disabled}
+        className={`text-right font-mono ${className}`}
+        inputMode="numeric"
+        autoComplete="off"
+      />
+      {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+    </div>
+  );
+};
+
 // ===== SCHEMA PARA EDIÇÃO =====
 const editReservationSchema = z.object({
   property_id: z.number().min(1, 'Propriedade é obrigatória'),
@@ -86,8 +348,8 @@ const editReservationSchema = z.object({
   adults: z.number().min(1, 'Mínimo 1 adulto').max(10, 'Máximo 10 adultos'),
   children: z.number().min(0, 'Mínimo 0 crianças').max(10, 'Máximo 10 crianças'),
   selected_rooms: z.array(z.number()).min(1, 'Selecione pelo menos 1 quarto'),
-  total_amount: z.number().min(0, 'Valor deve ser positivo').optional(),
-  room_rate_override: z.number().min(0, 'Taxa deve ser positiva').optional(),
+  total_amount: z.number().min(0, 'Valor deve ser positivo').max(999999.99, 'Valor muito alto').optional(),
+  room_rate_override: z.number().min(0, 'Taxa deve ser positiva').max(99999.99, 'Taxa muito alta').optional(),
   guest_requests: z.string().optional(),
   internal_notes: z.string().optional(),
   source: z.string().optional(),
@@ -190,7 +452,7 @@ export default function EditReservationModal({
 
   // ===== FUNÇÕES =====
 
-  // 🆕 NOVA FUNÇÃO: Carregar reserva completa
+  // Carregar reserva completa
   const loadFullReservation = async () => {
     try {
       setLoading(true);
@@ -226,7 +488,7 @@ export default function EditReservationModal({
     
     console.log('📝 Inicializando formulário com dados da reserva:', reservationData);
     
-    // 🔧 CORREÇÃO: Múltiplas estratégias para obter room_id
+    // Múltiplas estratégias para obter room_id
     let roomIds: number[] = [];
     
     // Estratégia 1: Campo rooms direto
@@ -298,7 +560,7 @@ export default function EditReservationModal({
         exclude_reservation_id: fullReservation?.id
       });
       
-      // 🆕 NOVA CHAMADA - Com exclude_reservation_id
+      // Com exclude_reservation_id
       const response = await apiClient.checkAvailability({
         property_id: tenantProperty.id,
         check_in_date: watchedValues.check_in_date,
@@ -312,11 +574,11 @@ export default function EditReservationModal({
       
       const roomsAvailable = response.available_rooms || [];
       
-      // 🔧 OBTER QUARTOS ATUAIS DA RESERVA (com fallback robusto)
+      // Obter quartos atuais da reserva
       const currentRoomIds = getValues('selected_rooms') || [];
       console.log('🔍 Quartos selecionados no formulário:', currentRoomIds);
       
-      // 🆕 MARCAR QUARTOS ATUAIS COMO DISPONÍVEIS (forçar inclusão)
+      // Marcar quartos atuais como disponíveis (forçar inclusão)
       const enhancedRooms = [...roomsAvailable];
       
       // Se temos quartos selecionados que não estão na lista, incluí-los
@@ -363,7 +625,7 @@ export default function EditReservationModal({
       console.log('🏠 Quartos disponíveis (incluindo atuais):', enhancedRooms);
       setAvailableRooms(enhancedRooms);
       
-      // 🆕 GARANTIR SELEÇÃO DOS QUARTOS ATUAIS
+      // Garantir seleção dos quartos atuais
       if (currentRoomIds.length > 0) {
         console.log('🎯 Garantindo seleção dos quartos atuais:', currentRoomIds);
         setValue('selected_rooms', currentRoomIds);
@@ -378,7 +640,7 @@ export default function EditReservationModal({
     } catch (error: any) {
       console.error('❌ Erro ao verificar disponibilidade:', error);
       
-      // 🆕 FALLBACK: Carregar quartos da propriedade sem verificação de disponibilidade
+      // Fallback: Carregar quartos da propriedade sem verificação de disponibilidade
       try {
         console.log('🔄 Tentando fallback - carregando todos os quartos da propriedade...');
         const roomsResponse = await apiClient.getRooms({ 
@@ -386,6 +648,7 @@ export default function EditReservationModal({
           per_page: 100 
         });
         
+        const currentRoomIds = getValues('selected_rooms') || [];
         const allRooms = roomsResponse.rooms.map(room => ({
           id: room.id,
           room_number: room.room_number,
@@ -437,16 +700,17 @@ export default function EditReservationModal({
     return total;
   };
 
-  const handleTotalAmountChange = (value: string) => {
-    const numValue = parseFloat(value) || 0;
-    setValue('total_amount', numValue);
+  // ===== HANDLERS FINANCEIROS COM ENTRADA AUTOMÁTICA =====
+  
+  const handleTotalAmountChange = (value: number) => {
+    setValue('total_amount', value);
     
-    if (numValue > 0) {
+    if (value > 0) {
       const nights = calculateNights();
       const numRooms = watchedValues.selected_rooms.length;
       
       if (nights > 0 && numRooms > 0) {
-        const ratePerNight = numValue / (nights * numRooms);
+        const ratePerNight = value / (nights * numRooms);
         setValue('room_rate_override', Math.round(ratePerNight * 100) / 100);
       }
     } else {
@@ -454,16 +718,15 @@ export default function EditReservationModal({
     }
   };
 
-  const handleRoomRateChange = (value: string) => {
-    const numValue = parseFloat(value) || 0;
-    setValue('room_rate_override', numValue);
+  const handleRoomRateChange = (value: number) => {
+    setValue('room_rate_override', value);
     
-    if (numValue > 0) {
+    if (value > 0) {
       const nights = calculateNights();
       const numRooms = watchedValues.selected_rooms.length;
       
       if (nights > 0 && numRooms > 0) {
-        const totalAmount = numValue * nights * numRooms;
+        const totalAmount = value * nights * numRooms;
         setValue('total_amount', Math.round(totalAmount * 100) / 100);
       }
     } else {
@@ -491,15 +754,31 @@ export default function EditReservationModal({
     } else {
       setValue('check_out_date', dateString);
     }
-    
-    // Reset seleção de quartos para recarregar
-    // setValue('selected_rooms', []); // Comentado para manter seleção
   };
 
   const onSubmit = async (data: EditReservationFormData) => {
     try {
       setLoading(true);
       console.log('💾 Salvando reserva com dados:', data);
+
+      // Validação financeira adicional
+      if (data.total_amount && !AutoCurrencyUtils.validate(data.total_amount, 0, 999999.99)) {
+        toast({
+          title: "Erro",
+          description: "Valor total inválido",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (data.room_rate_override && !AutoCurrencyUtils.validate(data.room_rate_override, 0, 99999.99)) {
+        toast({
+          title: "Erro",
+          description: "Taxa por noite inválida",
+          variant: "destructive",
+        });
+        return;
+      }
 
       const reservationData = {
         property_id: data.property_id,
@@ -775,7 +1054,7 @@ export default function EditReservationModal({
                       {availableRooms.map((room: any) => (
                         <option key={`room-${room.id}`} value={room.id}>
                           Quarto {room.room_number} - {room.room_type_name || 'Quarto'} (até {room.max_occupancy} pessoas)
-                          {room.rate_per_night ? ` - R$ ${room.rate_per_night}/noite` : ''}
+                          {room.rate_per_night ? ` - ${AutoCurrencyUtils.formatWithSymbol(room.rate_per_night)}/noite` : ''}
                           {room.isCurrentReservation ? ' [ATUAL]' : ''}
                         </option>
                       ))}
@@ -821,45 +1100,45 @@ export default function EditReservationModal({
                         <span className="font-medium">{(watchedValues.adults || 0) + (watchedValues.children || 0)}</span>
                       </div>
                       <div className="flex justify-between font-medium text-sm border-t pt-2 mt-2">
-                        <span>Total:</span>
-                        <span className="text-green-600">R$ {estimatedTotal.toFixed(2)}</span>
+                        <span>Total Estimado:</span>
+                        <span className="text-green-600">{AutoCurrencyUtils.formatWithSymbol(estimatedTotal)}</span>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Campos de Valor */}
+                {/* Campos de Valor - ENTRADA AUTOMÁTICA */}
                 <div className="space-y-3">
-                  <div>
-                    <Label htmlFor="total_amount" className="text-sm font-medium">Valor Total (R$)</Label>
-                    <div className="mt-1 p-1">
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder={estimatedTotal.toFixed(2)}
-                        disabled={loading}
-                        value={watchedValues.total_amount || ''}
-                        onChange={(e) => handleTotalAmountChange(e.target.value)}
-                        className="text-sm h-9"
-                      />
-                    </div>
+                  <div className="mt-1 p-1">
+                    <AutoCurrencyInput
+                      label="Valor Total (R$)"
+                      value={watchedValues.total_amount}
+                      onChange={handleTotalAmountChange}
+                      placeholder="0,00"
+                      disabled={loading}
+                      maxValue={999999.99}
+                      className="text-sm h-9"
+                      error={errors.total_amount?.message}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Digite apenas números. Ex: 12500 = R$ 125,00
+                    </p>
                   </div>
 
-                  <div>
-                    <Label htmlFor="room_rate_override" className="text-sm font-medium">Taxa/Noite (R$)</Label>
-                    <div className="mt-1 p-1">
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="Personalizar"
-                        disabled={loading}
-                        value={watchedValues.room_rate_override || ''}
-                        onChange={(e) => handleRoomRateChange(e.target.value)}
-                        className="text-sm h-9"
-                      />
-                    </div>
+                  <div className="mt-1 p-1">
+                    <AutoCurrencyInput
+                      label="Taxa/Noite (R$)"
+                      value={watchedValues.room_rate_override}
+                      onChange={handleRoomRateChange}
+                      placeholder="0,00"
+                      disabled={loading}
+                      maxValue={99999.99}
+                      className="text-sm h-9"
+                      error={errors.room_rate_override?.message}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Digite apenas números. Ex: 8500 = R$ 85,00
+                    </p>
                   </div>
                 </div>
               </div>

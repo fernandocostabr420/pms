@@ -1,7 +1,7 @@
 // frontend/src/components/reservations/StandardReservationModal.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation'; // ✅ NOVO: Import do router
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -117,6 +117,268 @@ import {
 import { cn } from '@/lib/utils';
 import apiClient from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+
+// ===== UTILITÁRIOS FINANCEIROS COM ENTRADA AUTOMÁTICA =====
+
+/**
+ * Classe para manipulação de valores monetários com entrada automática
+ * Implementa entrada de números inteiros com posicionamento automático da vírgula
+ */
+class AutoCurrencyUtils {
+  
+  /**
+   * Converte centavos para reais
+   * 25050 -> 250.50
+   */
+  static centsToReais(cents: number): number {
+    return Math.round(cents) / 100;
+  }
+  
+  /**
+   * Converte reais para centavos (evita problemas de float)
+   * 250.50 -> 25050
+   */
+  static reaisToCents(reais: number): number {
+    return Math.round(reais * 100);
+  }
+  
+  /**
+   * Formata valor numérico para exibição brasileira
+   * 1234.56 -> "1.234,56"
+   */
+  static formatForDisplay(value: number): string {
+    if (isNaN(value) || value === null || value === undefined) return '';
+    
+    return value.toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+  
+  /**
+   * Formata com símbolo de moeda
+   * 1234.56 -> "R$ 1.234,56"
+   */
+  static formatWithSymbol(value: number): string {
+    if (isNaN(value) || value === null || value === undefined) return 'R$ 0,00';
+    
+    return value.toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+  
+  /**
+   * Formata centavos para exibição automática
+   * 1234 -> "12,34"
+   * 123 -> "1,23"  
+   * 12 -> "0,12"
+   * 1 -> "0,01"
+   * 0 -> "0,00"
+   */
+  static formatCentsToDisplay(cents: number): string {
+    if (isNaN(cents) || cents < 0) return '0,00';
+    
+    // Limita o valor máximo em centavos (R$ 999.999,99 = 99999999 centavos)
+    const maxCents = 99999999;
+    const limitedCents = Math.min(cents, maxCents);
+    
+    // Converte para string e garante pelo menos 3 dígitos (para incluir os centavos)
+    const centsStr = limitedCents.toString().padStart(3, '0');
+    
+    // Separa parte inteira dos centavos
+    const centavos = centsStr.slice(-2);
+    const reaisStr = centsStr.slice(0, -2);
+    
+    // Formata a parte dos reais com separadores de milhares
+    const reaisFormatted = reaisStr ? parseInt(reaisStr).toLocaleString('pt-BR') : '0';
+    
+    return `${reaisFormatted},${centavos}`;
+  }
+  
+  /**
+   * Remove caracteres não numéricos e retorna apenas dígitos
+   * "123abc456" -> "123456"
+   */
+  static extractDigits(value: string): string {
+    return value.replace(/\D/g, '');
+  }
+  
+  /**
+   * Converte string de dígitos para centavos
+   * "1234" -> 1234 centavos (R$ 12,34)
+   */
+  static digitsToCents(digits: string): number {
+    if (!digits) return 0;
+    return parseInt(digits) || 0;
+  }
+  
+  /**
+   * Converte centavos para valor decimal
+   * 1234 centavos -> 12.34
+   */
+  static centsToDecimal(cents: number): number {
+    return Math.round(cents) / 100;
+  }
+  
+  /**
+   * Valida se o valor está dentro dos limites financeiros
+   */
+  static validate(value: number, min: number = 0, max: number = 999999.99): boolean {
+    return value >= min && value <= max && !isNaN(value);
+  }
+}
+
+// ===== COMPONENTE DE INPUT MONETÁRIO AUTOMÁTICO =====
+
+interface AutoCurrencyInputProps {
+  value: number | undefined;
+  onChange: (value: number) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
+  maxValue?: number;
+  label?: string;
+  error?: string;
+}
+
+const AutoCurrencyInput: React.FC<AutoCurrencyInputProps> = ({
+  value,
+  onChange,
+  placeholder = "0,00",
+  disabled = false,
+  className = "",
+  maxValue = 999999.99,
+  label,
+  error
+}) => {
+  // Estado interno em centavos para evitar problemas de precisão
+  const [internalCents, setInternalCents] = useState<number>(0);
+  const [displayValue, setDisplayValue] = useState<string>('0,00');
+  const [isFocused, setIsFocused] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  
+  // Sincroniza valor externo com estado interno
+  useEffect(() => {
+    if (!isFocused && value !== undefined && value !== null) {
+      const cents = AutoCurrencyUtils.reaisToCents(value);
+      setInternalCents(cents);
+      setDisplayValue(AutoCurrencyUtils.formatCentsToDisplay(cents));
+    }
+  }, [value, isFocused]);
+  
+  // Inicializa valores quando componente monta
+  useEffect(() => {
+    if (value !== undefined && value !== null) {
+      const cents = AutoCurrencyUtils.reaisToCents(value);
+      setInternalCents(cents);
+      setDisplayValue(AutoCurrencyUtils.formatCentsToDisplay(cents));
+    }
+  }, []);
+  
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = e.target.value;
+    
+    // Extrai apenas dígitos
+    const digits = AutoCurrencyUtils.extractDigits(rawValue);
+    
+    // Converte para centavos
+    const cents = AutoCurrencyUtils.digitsToCents(digits);
+    
+    // Verifica limite máximo
+    const maxCents = AutoCurrencyUtils.reaisToCents(maxValue);
+    const limitedCents = Math.min(cents, maxCents);
+    
+    // Atualiza estado interno
+    setInternalCents(limitedCents);
+    
+    // Atualiza display
+    const formattedDisplay = AutoCurrencyUtils.formatCentsToDisplay(limitedCents);
+    setDisplayValue(formattedDisplay);
+    
+    // Notifica mudança em valor decimal
+    const decimalValue = AutoCurrencyUtils.centsToDecimal(limitedCents);
+    onChange(decimalValue);
+  };
+  
+  const handleFocus = () => {
+    setIsFocused(true);
+    
+    // Posiciona cursor no final
+    setTimeout(() => {
+      if (inputRef.current) {
+        const length = inputRef.current.value.length;
+        inputRef.current.setSelectionRange(length, length);
+      }
+    }, 0);
+  };
+  
+  const handleBlur = () => {
+    setIsFocused(false);
+    
+    // Reformata para garantir exibição consistente
+    const formattedDisplay = AutoCurrencyUtils.formatCentsToDisplay(internalCents);
+    setDisplayValue(formattedDisplay);
+  };
+  
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // Permite: Backspace, Delete, Tab, Escape, Enter, setas
+    if ([8, 9, 27, 13, 46, 37, 38, 39, 40].includes(e.keyCode)) {
+      return;
+    }
+    
+    // Permite: Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X, Ctrl+Z
+    if ((e.keyCode === 65 || e.keyCode === 67 || e.keyCode === 86 || e.keyCode === 88 || e.keyCode === 90) && e.ctrlKey) {
+      return;
+    }
+    
+    // Bloqueia tudo exceto números
+    if (!/[0-9]/.test(e.key)) {
+      e.preventDefault();
+    }
+  };
+  
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    
+    // Obtém dados colados e extrai apenas dígitos
+    const pastedData = e.clipboardData.getData('text');
+    const digits = AutoCurrencyUtils.extractDigits(pastedData);
+    
+    if (digits) {
+      // Simula entrada de dígitos
+      const newEvent = {
+        target: { value: digits }
+      } as React.ChangeEvent<HTMLInputElement>;
+      
+      handleChange(newEvent);
+    }
+  };
+  
+  return (
+    <div>
+      {label && <Label className="text-sm font-medium mb-1 block">{label}</Label>}
+      <Input
+        ref={inputRef}
+        type="text"
+        value={displayValue}
+        onChange={handleChange}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        placeholder={placeholder}
+        disabled={disabled}
+        className={`text-right font-mono ${className}`}
+        inputMode="numeric"
+        autoComplete="off"
+      />
+      {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+    </div>
+  );
+};
 
 // ===== SCHEMA UNIFICADO =====
 const standardReservationSchema = z.object({
@@ -245,7 +507,7 @@ export default function StandardReservationModal({
       allowGuestSelection: true,
       allowMultipleRooms: true,
       showAdvancedFields: true,
-      defaultGuestMode: 'existing' as const
+      defaultGuestMode: 'new' as const
     },
     quick: {
       title: 'Reserva Rápida',
@@ -323,19 +585,18 @@ export default function StandardReservationModal({
     }
   }, [checkInDate, checkOutDate, tenantProperty, watchedAdults, watchedChildren]);
 
-  // ===== FUNÇÕES DE CÁLCULO DE PREÇOS =====
+  // ===== FUNÇÕES DE CÁLCULO DE PREÇOS COM ENTRADA AUTOMÁTICA =====
   
-  const handleTotalAmountChange = (value: string) => {
-    const numValue = parseFloat(value) || 0;
-    setValue('total_amount', numValue);
+  const handleTotalAmountChange = (value: number) => {
+    setValue('total_amount', value);
     
     // Calcular taxa por noite automaticamente
-    if (numValue > 0) {
+    if (value > 0) {
       const nights = calculateNights();
       const numRooms = watchedRooms.length;
       
       if (nights > 0 && numRooms > 0) {
-        const ratePerNight = numValue / (nights * numRooms);
+        const ratePerNight = value / (nights * numRooms);
         setValue('room_rate_override', Math.round(ratePerNight * 100) / 100);
       }
     } else {
@@ -343,17 +604,16 @@ export default function StandardReservationModal({
     }
   };
 
-  const handleRoomRateChange = (value: string) => {
-    const numValue = parseFloat(value) || 0;
-    setValue('room_rate_override', numValue);
+  const handleRoomRateChange = (value: number) => {
+    setValue('room_rate_override', value);
     
     // Calcular valor total automaticamente
-    if (numValue > 0) {
+    if (value > 0) {
       const nights = calculateNights();
       const numRooms = watchedRooms.length;
       
       if (nights > 0 && numRooms > 0) {
-        const totalAmount = numValue * nights * numRooms;
+        const totalAmount = value * nights * numRooms;
         setValue('total_amount', Math.round(totalAmount * 100) / 100);
       }
     } else {
@@ -813,20 +1073,94 @@ export default function StandardReservationModal({
               {/* Campos baseados no modo do hóspede */}
               {watchedGuestMode === 'existing' ? (
                 <div className="px-2">
-                  <Label htmlFor="guest_id" className="text-sm font-medium">Hóspede *</Label>
-                  <div className="mt-1 p-1">
-                    <select
-                      value={watch('guest_id')?.toString() || ''}
-                      onChange={(e) => setValue('guest_id', parseInt(e.target.value))}
-                      className="w-full p-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                    >
-                      <option value="">Selecione o hóspede</option>
-                      {guests.map((guest) => (
-                        <option key={guest.id} value={guest.id.toString()}>
-                          {guest.full_name} {guest.email && `- ${guest.email}`}
-                        </option>
-                      ))}
-                    </select>
+                  <Label htmlFor="guest_search" className="text-sm font-medium">Hóspede *</Label>
+                  <div className="mt-1 p-1 relative">
+                    <div className="relative">
+                      <Input
+                        id="guest_search"
+                        type="text"
+                        placeholder="Digite o nome do hóspede para pesquisar..."
+                        value={guestSearch}
+                        onChange={(e) => setGuestSearch(e.target.value)}
+                        onFocus={() => setGuestSearch(guestSearch || '')}
+                        disabled={loading || watch('guest_id')}
+                        className="text-sm h-9 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all pr-8"
+                      />
+                      <Search className="absolute right-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    </div>
+                    
+                    {/* Dropdown de resultados - só mostra se há pesquisa E não há hóspede selecionado */}
+                    {guestSearch && !watch('guest_id') && (
+                      <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                        {guests
+                          .filter(guest => 
+                            guest.full_name.toLowerCase().includes(guestSearch.toLowerCase()) ||
+                            (guest.email && guest.email.toLowerCase().includes(guestSearch.toLowerCase()))
+                          )
+                          .map((guest) => (
+                            <div
+                              key={guest.id}
+                              className="p-3 hover:bg-gray-50 cursor-pointer border-b last:border-b-0 transition-colors"
+                              onClick={() => {
+                                setValue('guest_id', guest.id);
+                                setGuestSearch(''); // Limpar campo de pesquisa após seleção
+                              }}
+                            >
+                              <div className="flex flex-col">
+                                <span className="font-medium text-sm text-gray-900">
+                                  {guest.full_name}
+                                </span>
+                                {guest.email && (
+                                  <span className="text-xs text-gray-500 mt-1">
+                                    {guest.email}
+                                  </span>
+                                )}
+                                {guest.phone && (
+                                  <span className="text-xs text-gray-500">
+                                    {guest.phone}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        
+                        {/* Caso não encontre resultados */}
+                        {guests.filter(guest => 
+                          guest.full_name.toLowerCase().includes(guestSearch.toLowerCase()) ||
+                          (guest.email && guest.email.toLowerCase().includes(guestSearch.toLowerCase()))
+                        ).length === 0 && (
+                          <div className="p-3 text-center text-gray-500 text-sm">
+                            Nenhum hóspede encontrado com "{guestSearch}"
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* Hóspede selecionado */}
+                    {watch('guest_id') && (
+                      <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded-md">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <User className="h-4 w-4 text-green-600" />
+                            <span className="text-sm text-green-800 font-medium">
+                              Hóspede selecionado
+                            </span>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setValue('guest_id', undefined);
+                              setGuestSearch('');
+                            }}
+                            className="h-6 w-6 p-0 text-green-600 hover:text-green-800"
+                          >
+                            ✕
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   {errors.guest_id && (
                     <p className="text-xs text-red-600 mt-1 px-1">{errors.guest_id.message}</p>
@@ -1059,44 +1393,44 @@ export default function StandardReservationModal({
                         </div>
                         <div className="flex justify-between font-medium text-sm border-t pt-2 mt-2">
                           <span>Total:</span>
-                          <span className="text-green-600">R$ {estimatedTotal.toFixed(2)}</span>
+                          <span className="text-green-600">{AutoCurrencyUtils.formatWithSymbol(estimatedTotal)}</span>
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Campos de Valor */}
+                  {/* Campos de Valor - ENTRADA AUTOMÁTICA */}
                   <div className="space-y-3">
-                    <div>
-                      <Label htmlFor="total_amount" className="text-sm font-medium">Valor Total (R$)</Label>
-                      <div className="mt-1 p-1">
-                        <Input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          placeholder={estimatedTotal.toFixed(2)}
-                          disabled={loading}
-                          value={watch('total_amount') || ''}
-                          onChange={(e) => handleTotalAmountChange(e.target.value)}
-                          className="text-sm h-9 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                        />
-                      </div>
+                    <div className="mt-1 p-1">
+                      <AutoCurrencyInput
+                        label="Valor Total (R$)"
+                        value={watchedValues.total_amount}
+                        onChange={handleTotalAmountChange}
+                        placeholder={AutoCurrencyUtils.formatForDisplay(estimatedTotal)}
+                        disabled={loading}
+                        maxValue={999999.99}
+                        className="text-sm h-9"
+                        error={errors.total_amount?.message}
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Digite apenas números. Ex: 12500 = R$ 125,00
+                      </p>
                     </div>
 
-                    <div>
-                      <Label htmlFor="room_rate_override" className="text-sm font-medium">Taxa/Noite (R$)</Label>
-                      <div className="mt-1 p-1">
-                        <Input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          placeholder="Personalizar"
-                          disabled={loading}
-                          value={watch('room_rate_override') || ''}
-                          onChange={(e) => handleRoomRateChange(e.target.value)}
-                          className="text-sm h-9 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                        />
-                      </div>
+                    <div className="mt-1 p-1">
+                      <AutoCurrencyInput
+                        label="Taxa/Noite (R$)"
+                        value={watchedValues.room_rate_override}
+                        onChange={handleRoomRateChange}
+                        placeholder="Personalizar"
+                        disabled={loading}
+                        maxValue={99999.99}
+                        className="text-sm h-9"
+                        error={errors.room_rate_override?.message}
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Digite apenas números. Ex: 8500 = R$ 85,00
+                      </p>
                     </div>
                   </div>
                 </div>
