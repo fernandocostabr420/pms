@@ -112,6 +112,10 @@ class ReservationUpdate(BaseModel):
     discount: Optional[Decimal] = Field(None, ge=0)
     taxes: Optional[Decimal] = Field(None, ge=0)
     
+    # ✅ ADICIONADO: Campos de origem que estavam faltando
+    source: Optional[str] = Field(None, max_length=100, description="Canal de origem")
+    source_reference: Optional[str] = Field(None, max_length=200, description="Referência no canal")
+    
     # Observações
     guest_requests: Optional[str] = Field(None, max_length=1000)
     internal_notes: Optional[str] = Field(None, max_length=1000)
@@ -131,7 +135,7 @@ class ReservationUpdate(BaseModel):
     @classmethod
     def validate_checkout_date(cls, v, info):
         check_in = info.data.get('check_in_date')
-        if check_in and v and v <= check_in:
+        if check_in and v <= check_in:
             raise ValueError('Check-out deve ser posterior ao check-in')
         return v
 

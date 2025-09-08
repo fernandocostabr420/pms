@@ -434,7 +434,7 @@ class ReservationService:
                 detail="Erro ao criar reserva - dados duplicados ou conflito"
             )
 
-    # ✅ MÉTODO UPDATE_RESERVATION COM AUDITORIA AUTOMÁTICA
+    # ✅ MÉTODO UPDATE_RESERVATION COM AUDITORIA AUTOMÁTICA - CORRIGIDO COMPLETO
     @auto_audit_update("reservations", "Reserva atualizada")
     def update_reservation(
         self, 
@@ -463,10 +463,9 @@ class ReservationService:
                 detail="Não é possível modificar reservas finalizadas ou canceladas"
             )
 
-        # ✅ REMOÇÃO: Auditoria manual removida - o decorador faz automaticamente
-        
         # Verificar dados que serão atualizados
         update_data = reservation_data.dict(exclude_unset=True)
+        print(f"🔄 Dados recebidos para atualização: {update_data}")
 
         # Validações específicas para update
         if 'guest_id' in update_data:
@@ -500,19 +499,71 @@ class ReservationService:
                     detail=f"Quartos não disponíveis no novo período: {unavailable_rooms}"
                 )
 
+        # ✅ PROCESSAR ATUALIZAÇÃO DE QUARTOS ANTES DOS CAMPOS BÁSICOS
+        rooms_updated = False
+        if 'rooms' in update_data and update_data['rooms'] is not None:
+            print(f"🔄 Atualizando quartos da reserva {reservation_id}")
+            print(f"📊 Quartos atuais: {[rr.room_id for rr in reservation_obj.reservation_rooms]}")
+            print(f"📊 Novos quartos: {[r['room_id'] for r in update_data['rooms']]}")
+            
+            # Verificar disponibilidade dos novos quartos
+            new_room_ids = [room_data['room_id'] for room_data in update_data['rooms']]
+            check_in_date = update_data.get('check_in_date', reservation_obj.check_in_date)
+            check_out_date = update_data.get('check_out_date', reservation_obj.check_out_date)
+            
+            availability = self.check_room_availability(
+                new_room_ids, check_in_date, check_out_date, tenant_id, reservation_id
+            )
+            
+            unavailable_rooms = [room_id for room_id, available in availability.items() if not available]
+            if unavailable_rooms:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Novos quartos não disponíveis no período: {unavailable_rooms}"
+                )
+            
+            # Remover quartos existentes
+            for existing_room in reservation_obj.reservation_rooms:
+                self.db.delete(existing_room)
+            
+            # Criar novos vínculos de quartos
+            for room_data in update_data['rooms']:
+                reservation_room = ReservationRoom(
+                    reservation_id=reservation_obj.id,
+                    room_id=room_data['room_id'],
+                    check_in_date=room_data.get('check_in_date', check_in_date),
+                    check_out_date=room_data.get('check_out_date', check_out_date),
+                    rate_per_night=room_data.get('rate_per_night'),
+                    notes=room_data.get('notes')
+                )
+                
+                # Calcular total_amount do quarto se rate_per_night fornecido
+                if room_data.get('rate_per_night'):
+                    nights = (reservation_room.check_out_date - reservation_room.check_in_date).days
+                    reservation_room.total_amount = room_data['rate_per_night'] * nights
+                
+                self.db.add(reservation_room)
+            
+            rooms_updated = True
+            print(f"✅ Quartos atualizados: {[r['room_id'] for r in update_data['rooms']]}")
+            
+            # ✅ IMPORTANTE: Remover 'rooms' do update_data para não processar no loop básico
+            del update_data['rooms']
+
         # Atualizar campos de hóspedes se necessário
         if 'adults' in update_data or 'children' in update_data:
             adults = update_data.get('adults', reservation_obj.adults)
             children = update_data.get('children', reservation_obj.children)
             update_data['total_guests'] = adults + children
 
-        # Aplicar alterações apenas nos campos fornecidos
+        # ✅ APLICAR ALTERAÇÕES APENAS NOS CAMPOS BÁSICOS DA RESERVA
         for field, value in update_data.items():
             if hasattr(reservation_obj, field):
+                print(f"📝 Atualizando campo {field}: {getattr(reservation_obj, field)} → {value}")
                 setattr(reservation_obj, field, value)
 
-        # Atualizar datas dos quartos se as datas da reserva mudaram
-        if dates_changed:
+        # Atualizar datas dos quartos se as datas da reserva mudaram (apenas se não atualizamos os quartos)
+        if dates_changed and not rooms_updated:
             for reservation_room in reservation_obj.reservation_rooms:
                 reservation_room.check_in_date = reservation_obj.check_in_date
                 reservation_room.check_out_date = reservation_obj.check_out_date
@@ -522,7 +573,11 @@ class ReservationService:
             self.db.refresh(reservation_obj)
             
             # ✅ AUDITORIA AUTOMÁTICA PELO DECORADOR
-            # Vai mostrar: "Total: R$ 150,00 → R$ 180,00", "Check-in: 15/09 → 16/09", etc.
+            # Vai mostrar: "Total: R$ 150,00 → R$ 180,00", "Check-in: 15/09 → 16/09", "Quartos: [1] → [2]", etc.
+            
+            print(f"✅ Reserva {reservation_id} atualizada com sucesso")
+            if rooms_updated:
+                print(f"✅ Quartos da reserva também foram atualizados")
             
             return reservation_obj
             

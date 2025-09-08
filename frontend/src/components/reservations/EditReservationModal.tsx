@@ -519,9 +519,11 @@ export default function EditReservationModal({
     }
     
     // Obter taxa atual
-    const currentRatePerNight = reservationData.rooms?.[0]?.rate_per_night || 
-                               reservationData.reservation_rooms?.[0]?.rate_per_night || 
-                               0;
+    const currentRatePerNight = parseFloat(
+  reservationData.rooms?.[0]?.rate_per_night || 
+  reservationData.reservation_rooms?.[0]?.rate_per_night || 
+  0
+) || 0;
     
     // Preencher formulário
     const formData: EditReservationFormData = {
