@@ -1,4 +1,4 @@
-# app/services/payment_service.py
+# backend/app/services/payment_service.py
 
 from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.orm import Session, joinedload
@@ -19,14 +19,25 @@ from app.schemas.payment import (
     PaymentReport, PaymentBulkOperation, PaymentConfirmedUpdate
 )
 from app.services.audit_service import AuditService
-from app.utils.decorators import _extract_model_data, AuditContext
+
+# ✅ NOVOS IMPORTS PARA AUDITORIA AUTOMÁTICA
+from app.utils.decorators import (
+    audit_operation, 
+    auto_audit_update, 
+    AuditContext, 
+    _extract_model_data,
+    create_audit_log
+)
+from app.services.audit_formatting_service import AuditFormattingService
 
 
 class PaymentService:
-    """Serviço para operações com pagamentos"""
+    """Serviço para operações com pagamentos - COM AUDITORIA COMPLETA"""
     
     def __init__(self, db: Session):
         self.db = db
+        # ✅ ADICIONADO: Serviço de formatação de auditoria
+        self.audit_formatter = AuditFormattingService()
 
     def get_payment_by_id(self, payment_id: int, tenant_id: int) -> Optional[Payment]:
         """Busca pagamento por ID dentro do tenant"""
@@ -79,7 +90,7 @@ class PaymentService:
             "user_id": current_user.id,
             "user_email": current_user.email,
             "timestamp": datetime.utcnow().isoformat(),
-            "ip_address": request.client.host if request else None,
+            "ip_address": request.client.host if request and request.client else None,
             "user_agent": request.headers.get("user-agent") if request else None
         }
         
@@ -149,6 +160,8 @@ class PaymentService:
         
         return False
 
+    # ✅ MÉTODO CREATE_PAYMENT COM AUDITORIA AUTOMÁTICA
+    @audit_operation("payments", "CREATE", "Novo pagamento registrado")
     def create_payment(
         self, 
         payment_data: PaymentCreate, 
@@ -156,7 +169,10 @@ class PaymentService:
         current_user: User,
         request: Optional[Request] = None
     ) -> Optional[Payment]:
-        """Cria novo pagamento - SEMPRE CONFIRMADO AUTOMATICAMENTE e AUTO-CONFIRMA RESERVA PENDENTE"""
+        """
+        Cria novo pagamento com auditoria automática.
+        O decorador @audit_operation captura automaticamente todos os dados do pagamento criado.
+        """
         
         # Verificar se a reserva existe e pertence ao tenant
         reservation = self.db.query(Reservation).filter(
@@ -205,7 +221,7 @@ class PaymentService:
             self.db.commit()
             self.db.refresh(payment_obj)
             
-            # ✅ NOVA FUNCIONALIDADE: Auto-confirmar reserva pendente
+            # ✅ FUNCIONALIDADE MANTIDA: Auto-confirmar reserva pendente
             reservation_was_confirmed = False
             if reservation_status_before == 'pending':
                 reservation_was_confirmed = self._auto_confirm_reservation_if_pending(
@@ -215,32 +231,21 @@ class PaymentService:
                     request=request
                 )
             
-            # Registrar auditoria do pagamento
-            new_values = _extract_model_data(payment_obj)
-            
-            # Mensagem de auditoria personalizada
-            audit_message = (
-                f"Pagamento criado e confirmado automaticamente para reserva "
-                f"'{reservation.reservation_number}' - {payment_obj.payment_method_display} R$ {payment_obj.amount}"
-            )
-            
-            if reservation_was_confirmed:
-                audit_message += f" [RESERVA CONFIRMADA AUTOMATICAMENTE]"
-            
-            with AuditContext(self.db, current_user, request) as audit:
-                audit.log_create(
-                    "payments", 
-                    payment_obj.id,
-                    new_values,
-                    audit_message
-                )
+            # ✅ AUDITORIA AUTOMÁTICA PELO DECORADOR
+            # Vai registrar automaticamente: amount, payment_method, payment_date, status='confirmed', etc.
+            # A descrição personalizada será: "💰 Pagamento registrado"
             
             return payment_obj
             
         except IntegrityError:
             self.db.rollback()
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Erro ao criar pagamento - dados duplicados ou conflito"
+            )
 
+    # ✅ MÉTODO UPDATE_PAYMENT COM AUDITORIA AUTOMÁTICA
+    @auto_audit_update("payments", "Pagamento atualizado")
     def update_payment(
         self, 
         payment_id: int, 
@@ -249,16 +254,21 @@ class PaymentService:
         current_user: User,
         request: Optional[Request] = None
     ) -> Optional[Payment]:
-        """Atualiza pagamento - PERMITE edição de pagamentos confirmados com validações"""
+        """
+        Atualiza pagamento com auditoria automática.
+        O decorador @auto_audit_update captura valores antes/depois automaticamente.
+        """
         
         payment_obj = self.get_payment_by_id(payment_id, tenant_id)
         if not payment_obj:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Pagamento não encontrado"
+            )
         
-        old_values = _extract_model_data(payment_obj)
         old_status = payment_obj.status
         
-        # ✅ NOVA LÓGICA: Permitir edição de pagamentos confirmados com validações
+        # ✅ FUNCIONALIDADE MANTIDA: Permitir edição de pagamentos confirmados com validações
         if payment_obj.status in ["confirmed", "refunded"]:
             # Validar permissão de administrador
             self._validate_admin_permission(current_user, "editar")
@@ -283,6 +293,7 @@ class PaymentService:
                     request
                 )
         
+        # ✅ ALTERAÇÕES CAPTURADAS AUTOMATICAMENTE PELO DECORADOR
         # Atualizar campos se fornecidos
         if payment_data.amount is not None:
             payment_obj.amount = payment_data.amount
@@ -307,28 +318,20 @@ class PaymentService:
             self.db.commit()
             self.db.refresh(payment_obj)
             
-            # Registrar auditoria detalhada
-            new_values = _extract_model_data(payment_obj)
-            audit_message = f"Pagamento atualizado - {payment_obj.payment_number}"
-            
-            if old_status in ["confirmed", "refunded"]:
-                audit_message += f" [EDIÇÃO ADMINISTRATIVA por {current_user.email}]"
-            
-            with AuditContext(self.db, current_user, request) as audit:
-                audit.log_update(
-                    "payments", 
-                    payment_obj.id, 
-                    old_values, 
-                    new_values,
-                    audit_message
-                )
+            # ✅ AUDITORIA AUTOMÁTICA PELO DECORADOR
+            # Vai mostrar: "Valor: R$ 150,00 → R$ 180,00", "Forma: PIX → Cartão", etc.
             
             return payment_obj
             
         except IntegrityError:
             self.db.rollback()
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Erro ao atualizar pagamento"
+            )
 
+    # ✅ MÉTODO UPDATE_CONFIRMED_PAYMENT COM AUDITORIA AUTOMÁTICA
+    @auto_audit_update("payments", "Pagamento confirmado atualizado administrativamente")
     def update_confirmed_payment(
         self, 
         payment_id: int, 
@@ -337,11 +340,17 @@ class PaymentService:
         current_user: User,
         request: Optional[Request] = None
     ) -> Optional[Payment]:
-        """Método específico para atualização de pagamentos confirmados com justificativa obrigatória"""
+        """
+        Método específico para atualização de pagamentos confirmados com justificativa obrigatória.
+        Auditoria automática + log específico de operação sensível.
+        """
         
         payment_obj = self.get_payment_by_id(payment_id, tenant_id)
         if not payment_obj:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Pagamento não encontrado"
+            )
         
         # Validar que o pagamento está confirmado
         if payment_obj.status != "confirmed":
@@ -360,9 +369,7 @@ class PaymentService:
                 detail="Justificativa detalhada (mínimo 10 caracteres) é obrigatória para editar pagamentos confirmados"
             )
         
-        old_values = _extract_model_data(payment_obj)
-        
-        # Log da operação sensível
+        # ✅ FUNCIONALIDADE MANTIDA: Log da operação sensível
         self._log_sensitive_operation(
             payment_obj, 
             "EDIÇÃO CONFIRMADO", 
@@ -371,6 +378,7 @@ class PaymentService:
             request
         )
         
+        # ✅ ALTERAÇÕES CAPTURADAS AUTOMATICAMENTE PELO DECORADOR
         # Atualizar campos permitidos
         if payment_data.amount is not None:
             payment_obj.amount = payment_data.amount
@@ -392,23 +400,20 @@ class PaymentService:
             self.db.commit()
             self.db.refresh(payment_obj)
             
-            # Registrar auditoria
-            new_values = _extract_model_data(payment_obj)
-            with AuditContext(self.db, current_user, request) as audit:
-                audit.log_update(
-                    "payments", 
-                    payment_obj.id, 
-                    old_values, 
-                    new_values,
-                    f"EDIÇÃO ADMINISTRATIVA de pagamento confirmado - {payment_obj.payment_number} por {current_user.email}. Motivo: {payment_data.admin_reason}"
-                )
+            # ✅ AUDITORIA AUTOMÁTICA PELO DECORADOR
+            # Vai capturar todas as mudanças + contexto administrativo no internal_notes
             
             return payment_obj
             
         except IntegrityError:
             self.db.rollback()
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Erro ao atualizar pagamento confirmado"
+            )
 
+    # ✅ MÉTODO UPDATE_PAYMENT_STATUS COM AUDITORIA AUTOMÁTICA
+    @auto_audit_update("payments", "Status do pagamento alterado")
     def update_payment_status(
         self, 
         payment_id: int, 
@@ -417,15 +422,21 @@ class PaymentService:
         current_user: User,
         request: Optional[Request] = None
     ) -> Optional[Payment]:
-        """Atualiza status do pagamento"""
+        """
+        Atualiza status do pagamento com auditoria automática.
+        Vai capturar mudanças como: "Status: pending → confirmed"
+        """
         
         payment_obj = self.get_payment_by_id(payment_id, tenant_id)
         if not payment_obj:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Pagamento não encontrado"
+            )
         
-        old_values = _extract_model_data(payment_obj)
         old_status = payment_obj.status
         
+        # ✅ ALTERAÇÕES CAPTURADAS AUTOMATICAMENTE PELO DECORADOR
         # Atualizar status
         payment_obj.status = status_data.status
         
@@ -444,22 +455,17 @@ class PaymentService:
             self.db.commit()
             self.db.refresh(payment_obj)
             
-            # Registrar auditoria
-            new_values = _extract_model_data(payment_obj)
-            with AuditContext(self.db, current_user, request) as audit:
-                audit.log_update(
-                    "payments", 
-                    payment_obj.id, 
-                    old_values, 
-                    new_values,
-                    f"Status do pagamento alterado de '{old_status}' para '{status_data.status}'"
-                )
+            # ✅ AUDITORIA AUTOMÁTICA PELO DECORADOR
+            # Vai mostrar: "Status: Pendente → Confirmado", "Data de Confirmação: null → 08/09/2025"
             
             return payment_obj
             
-        except Exception:
+        except Exception as e:
             self.db.rollback()
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro ao atualizar status do pagamento"
+            )
 
     def get_payments(
         self, 
@@ -670,6 +676,8 @@ class PaymentService:
             daily_totals=daily_totals
         )
 
+    # ✅ MÉTODO DELETE_PAYMENT COM AUDITORIA AUTOMÁTICA
+    @auto_audit_update("payments", "Pagamento excluído")
     def delete_payment(
         self, 
         payment_id: int, 
@@ -678,13 +686,19 @@ class PaymentService:
         admin_reason: Optional[str] = None,
         request: Optional[Request] = None
     ) -> bool:
-        """Marca pagamento como inativo (soft delete) - PERMITE exclusão de pagamentos confirmados"""
+        """
+        Marca pagamento como inativo (soft delete) com auditoria automática.
+        Permite exclusão de pagamentos confirmados com validações.
+        """
         
         payment_obj = self.get_payment_by_id(payment_id, tenant_id)
         if not payment_obj:
-            return False
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Pagamento não encontrado"
+            )
         
-        # ✅ NOVA LÓGICA: Permitir exclusão de pagamentos confirmados com validações
+        # ✅ FUNCIONALIDADE MANTIDA: Permitir exclusão de pagamentos confirmados com validações
         if payment_obj.status == "confirmed":
             # Validar permissão de administrador
             self._validate_admin_permission(current_user, "excluir")
@@ -705,28 +719,116 @@ class PaymentService:
                 request
             )
         
-        old_values = _extract_model_data(payment_obj)
+        # ✅ ALTERAÇÃO CAPTURADA AUTOMATICAMENTE PELO DECORADOR
         payment_obj.is_active = False
         
         try:
             self.db.commit()
             
-            # Registrar auditoria detalhada
-            audit_message = f"Pagamento excluído - {payment_obj.payment_number}"
-            
-            if payment_obj.status == "confirmed":
-                audit_message += f" [EXCLUSÃO ADMINISTRATIVA por {current_user.email}. Motivo: {admin_reason}]"
-            
-            with AuditContext(self.db, current_user, request) as audit:
-                audit.log_delete(
-                    "payments", 
-                    payment_obj.id, 
-                    old_values,
-                    audit_message
-                )
+            # ✅ AUDITORIA AUTOMÁTICA PELO DECORADOR
+            # Vai registrar: is_active: True → False + contexto administrativo se aplicável
             
             return True
             
-        except Exception:
+        except Exception as e:
             self.db.rollback()
-            return False
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro ao excluir pagamento"
+            )
+
+    # ✅ NOVO MÉTODO: GET_PAYMENT_AUDIT_HISTORY
+    def get_payment_audit_history(
+        self,
+        payment_id: int,
+        tenant_id: int,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Busca histórico de auditoria formatado para um pagamento específico.
+        Retorna lista de entradas formatadas pelo AuditFormattingService.
+        """
+        from app.models.audit_log import AuditLog
+        from sqlalchemy.orm import joinedload
+        
+        # Verificar se o pagamento existe e pertence ao tenant
+        payment = self.get_payment_by_id(payment_id, tenant_id)
+        if not payment:
+            return []
+        
+        # Buscar logs de auditoria do pagamento
+        audit_logs = self.db.query(AuditLog).options(
+            joinedload(AuditLog.user)
+        ).filter(
+            AuditLog.table_name == 'payments',
+            AuditLog.record_id == payment_id,
+            AuditLog.tenant_id == tenant_id
+        ).order_by(desc(AuditLog.created_at)).limit(limit).all()
+        
+        # Formatar entradas usando o serviço de formatação
+        formatted_history = []
+        for log in audit_logs:
+            formatted_entry = self.audit_formatter.format_audit_entry(log)
+            formatted_history.append(formatted_entry)
+        
+        return formatted_history
+
+    # ✅ NOVO MÉTODO: BULK_OPERATIONS COM AUDITORIA
+    def bulk_confirm_payments(
+        self,
+        payment_ids: List[int],
+        tenant_id: int,
+        current_user: User,
+        request: Optional[Request] = None
+    ) -> Dict[str, Any]:
+        """
+        Confirma múltiplos pagamentos em lote com auditoria individual.
+        """
+        results = {
+            "confirmed_count": 0,
+            "failed_count": 0,
+            "errors": []
+        }
+        
+        with AuditContext(self.db, current_user, request) as audit:
+            for payment_id in payment_ids:
+                try:
+                    payment = self.get_payment_by_id(payment_id, tenant_id)
+                    if not payment:
+                        results["failed_count"] += 1
+                        results["errors"].append(f"Pagamento {payment_id} não encontrado")
+                        continue
+                    
+                    if payment.status == "confirmed":
+                        results["failed_count"] += 1
+                        results["errors"].append(f"Pagamento {payment.payment_number} já está confirmado")
+                        continue
+                    
+                    old_values = _extract_model_data(payment)
+                    
+                    payment.status = "confirmed"
+                    payment.confirmed_date = datetime.utcnow()
+                    
+                    new_values = _extract_model_data(payment)
+                    
+                    # Registrar auditoria individual
+                    audit.log_update(
+                        table_name="payments",
+                        record_id=payment.id,
+                        old_values=old_values,
+                        new_values=new_values,
+                        description=f"Pagamento {payment.payment_number} confirmado em lote"
+                    )
+                    
+                    results["confirmed_count"] += 1
+                    
+                except Exception as e:
+                    results["failed_count"] += 1
+                    results["errors"].append(f"Erro no pagamento {payment_id}: {str(e)}")
+            
+            if results["confirmed_count"] > 0:
+                self.db.commit()
+            else:
+                self.db.rollback()
+        
+        return results

@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import and_, or_, func, not_, desc
-from fastapi import Request
+from fastapi import Request, HTTPException, status
 from datetime import datetime, date
 from decimal import Decimal
 
@@ -20,20 +20,30 @@ from app.schemas.reservation import (
     CheckInRequest, CheckOutRequest, CancelReservationRequest,
     AvailabilityRequest, AvailabilityResponse
 )
-# ✅ NOVO IMPORT - Para atualizar dados do hóspede
 from app.services.guest_service import GuestService
 from app.schemas.guest import GuestCheckInData, GuestUpdate
 
 from app.services.audit_service import AuditService
-from app.utils.decorators import _extract_model_data, AuditContext
 from app.schemas.reservation import ReservationDetailedResponse
+
+# ✅ NOVOS IMPORTS PARA AUDITORIA AUTOMÁTICA
+from app.utils.decorators import (
+    audit_operation, 
+    auto_audit_update, 
+    AuditContext, 
+    _extract_model_data,
+    create_audit_log
+)
+from app.services.audit_formatting_service import AuditFormattingService
 
 
 class ReservationService:
-    """Serviço para operações com reservas"""
+    """Serviço para operações com reservas - COM AUDITORIA COMPLETA"""
     
     def __init__(self, db: Session):
         self.db = db
+        # ✅ ADICIONADO: Serviço de formatação de auditoria
+        self.audit_formatter = AuditFormattingService()
 
     def generate_reservation_number(self, tenant_id: int) -> str:
         """Gera número único de reserva"""
@@ -300,6 +310,8 @@ class ReservationService:
         
         return query.scalar()
 
+    # ✅ MÉTODO CREATE_RESERVATION COM AUDITORIA AUTOMÁTICA
+    @audit_operation("reservations", "CREATE", "Nova reserva criada")
     def create_reservation(
         self, 
         reservation_data: ReservationCreate, 
@@ -307,7 +319,10 @@ class ReservationService:
         current_user: User,
         request: Optional[Request] = None
     ) -> Reservation:
-        """Cria nova reserva com auditoria automática"""
+        """
+        Cria nova reserva com auditoria automática.
+        O decorador @audit_operation captura automaticamente todos os dados da reserva criada.
+        """
         
         # Validar se guest existe no tenant
         guest = self.db.query(Guest).filter(
@@ -317,7 +332,10 @@ class ReservationService:
         ).first()
         
         if not guest:
-            raise ValueError("Hóspede não encontrado neste tenant")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Hóspede não encontrado neste tenant"
+            )
 
         # Validar se propriedade existe no tenant
         property_obj = self.db.query(Property).filter(
@@ -327,7 +345,10 @@ class ReservationService:
         ).first()
         
         if not property_obj:
-            raise ValueError("Propriedade não encontrada neste tenant")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Propriedade não encontrada neste tenant"
+            )
 
         # Verificar disponibilidade dos quartos
         room_ids = [room.room_id for room in reservation_data.rooms]
@@ -340,7 +361,10 @@ class ReservationService:
         
         unavailable_rooms = [room_id for room_id, available in availability.items() if not available]
         if unavailable_rooms:
-            raise ValueError(f"Quartos não disponíveis no período: {unavailable_rooms}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Quartos não disponíveis no período: {unavailable_rooms}"
+            )
 
         # Gerar número da reserva
         reservation_number = self.generate_reservation_number(tenant_id)
@@ -398,22 +422,20 @@ class ReservationService:
             self.db.commit()
             self.db.refresh(db_reservation)
             
-            # Registrar auditoria
-            with AuditContext(self.db, current_user, request) as audit:
-                new_values = _extract_model_data(db_reservation)
-                audit.log_create(
-                    "reservations", 
-                    db_reservation.id, 
-                    new_values, 
-                    f"Reserva '{db_reservation.reservation_number}' criada para {guest.full_name}"
-                )
+            # ✅ AUDITORIA AUTOMÁTICA PELO DECORADOR
+            # Vai registrar: guest_id, property_id, dates, amounts, status='pending', etc.
             
             return db_reservation
             
         except IntegrityError:
             self.db.rollback()
-            raise ValueError("Erro ao criar reserva - dados duplicados ou conflito")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Erro ao criar reserva - dados duplicados ou conflito"
+            )
 
+    # ✅ MÉTODO UPDATE_RESERVATION COM AUDITORIA AUTOMÁTICA
+    @auto_audit_update("reservations", "Reserva atualizada")
     def update_reservation(
         self, 
         reservation_id: int, 
@@ -422,19 +444,27 @@ class ReservationService:
         current_user: User,
         request: Optional[Request] = None
     ) -> Optional[Reservation]:
-        """Atualiza reserva com auditoria automática"""
+        """
+        Atualiza reserva com auditoria automática.
+        O decorador @auto_audit_update captura valores antes/depois automaticamente.
+        """
         
         reservation_obj = self.get_reservation_by_id(reservation_id, tenant_id)
         if not reservation_obj:
-            return None
-
-        # Capturar valores antigos para auditoria
-        old_values = _extract_model_data(reservation_obj)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Reserva não encontrada"
+            )
 
         # Verificar se reserva pode ser modificada
         if reservation_obj.status in ['checked_out', 'cancelled']:
-            raise ValueError("Não é possível modificar reservas finalizadas ou canceladas")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Não é possível modificar reservas finalizadas ou canceladas"
+            )
 
+        # ✅ REMOÇÃO: Auditoria manual removida - o decorador faz automaticamente
+        
         # Verificar dados que serão atualizados
         update_data = reservation_data.dict(exclude_unset=True)
 
@@ -446,7 +476,10 @@ class ReservationService:
                 Guest.is_active == True
             ).first()
             if not guest:
-                raise ValueError("Hóspede não encontrado")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Hóspede não encontrado"
+                )
 
         # Se as datas mudaram, verificar disponibilidade
         dates_changed = 'check_in_date' in update_data or 'check_out_date' in update_data
@@ -462,7 +495,10 @@ class ReservationService:
             
             unavailable_rooms = [room_id for room_id, available in availability.items() if not available]
             if unavailable_rooms:
-                raise ValueError(f"Quartos não disponíveis no novo período: {unavailable_rooms}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Quartos não disponíveis no novo período: {unavailable_rooms}"
+                )
 
         # Atualizar campos de hóspedes se necessário
         if 'adults' in update_data or 'children' in update_data:
@@ -485,23 +521,20 @@ class ReservationService:
             self.db.commit()
             self.db.refresh(reservation_obj)
             
-            # Registrar auditoria
-            new_values = _extract_model_data(reservation_obj)
-            with AuditContext(self.db, current_user, request) as audit:
-                audit.log_update(
-                    "reservations", 
-                    reservation_obj.id, 
-                    old_values, 
-                    new_values,
-                    f"Reserva '{reservation_obj.reservation_number}' atualizada"
-                )
+            # ✅ AUDITORIA AUTOMÁTICA PELO DECORADOR
+            # Vai mostrar: "Total: R$ 150,00 → R$ 180,00", "Check-in: 15/09 → 16/09", etc.
             
             return reservation_obj
             
         except IntegrityError:
             self.db.rollback()
-            raise ValueError("Erro ao atualizar reserva")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Erro ao atualizar reserva"
+            )
 
+    # ✅ MÉTODO CONFIRM_RESERVATION COM AUDITORIA AUTOMÁTICA
+    @auto_audit_update("reservations", "Reserva confirmada")
     def confirm_reservation(
         self, 
         reservation_id: int, 
@@ -509,17 +542,25 @@ class ReservationService:
         current_user: User,
         request: Optional[Request] = None
     ) -> Optional[Reservation]:
-        """Confirma uma reserva pendente"""
+        """
+        Confirma uma reserva pendente.
+        Auditoria automática vai capturar: Status: "pending" → "confirmed"
+        """
         
         reservation_obj = self.get_reservation_by_id(reservation_id, tenant_id)
         if not reservation_obj:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Reserva não encontrada"
+            )
 
         if reservation_obj.status != 'pending':
-            raise ValueError("Apenas reservas pendentes podem ser confirmadas")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Apenas reservas pendentes podem ser confirmadas"
+            )
 
-        old_values = _extract_model_data(reservation_obj)
-        
+        # ✅ ALTERAÇÕES CAPTURADAS AUTOMATICAMENTE PELO DECORADOR
         reservation_obj.status = 'confirmed'
         reservation_obj.confirmed_date = datetime.utcnow()
         
@@ -527,23 +568,18 @@ class ReservationService:
             self.db.commit()
             self.db.refresh(reservation_obj)
             
-            # Registrar auditoria
-            new_values = _extract_model_data(reservation_obj)
-            with AuditContext(self.db, current_user, request) as audit:
-                audit.log_update(
-                    "reservations", 
-                    reservation_obj.id, 
-                    old_values, 
-                    new_values,
-                    f"Reserva '{reservation_obj.reservation_number}' confirmada"
-                )
-            
+            # ✅ AUDITORIA AUTOMÁTICA: "✅ Reserva confirmada"
             return reservation_obj
             
-        except Exception:
+        except Exception as e:
             self.db.rollback()
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro ao confirmar reserva"
+            )
 
+    # ✅ MÉTODO CHECK_IN COM AUDITORIA AUTOMÁTICA E MANUAL
+    @auto_audit_update("reservations", "Check-in realizado")
     def check_in_reservation(
         self, 
         reservation_id: int, 
@@ -552,16 +588,25 @@ class ReservationService:
         current_user: User,
         request: Optional[Request] = None
     ) -> Optional[Reservation]:
-        """Realiza check-in da reserva - MODIFICADO PARA INCLUIR DADOS DO HÓSPEDE"""
+        """
+        Realiza check-in da reserva com atualização de dados do hóspede.
+        Auditoria automática para reserva + manual para dados do hóspede.
+        """
         
         reservation_obj = self.get_reservation_by_id(reservation_id, tenant_id)
         if not reservation_obj:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Reserva não encontrada"
+            )
 
         if not reservation_obj.can_check_in:
-            raise ValueError("Check-in não permitido para esta reserva")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Check-in não permitido para esta reserva"
+            )
 
-        # ✅ NOVA LÓGICA - Processar dados do hóspede se fornecidos
+        # ✅ PROCESSAR DADOS DO HÓSPEDE SE FORNECIDOS
         guest_updated = False
         if check_in_request.guest_data:
             try:
@@ -574,12 +619,12 @@ class ReservationService:
                 )
             except Exception as e:
                 # Se falhar na atualização do hóspede, abortar check-in
-                raise ValueError(f"Erro ao atualizar dados do hóspede: {str(e)}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Erro ao atualizar dados do hóspede: {str(e)}"
+                )
 
-        # Capturar valores antigos da reserva para auditoria
-        old_values = _extract_model_data(reservation_obj)
-        
-        # Realizar check-in
+        # ✅ ALTERAÇÕES NA RESERVA CAPTURADAS AUTOMATICAMENTE
         reservation_obj.status = 'checked_in'
         reservation_obj.checked_in_date = check_in_request.actual_check_in_time or datetime.utcnow()
         
@@ -604,26 +649,17 @@ class ReservationService:
             self.db.commit()
             self.db.refresh(reservation_obj)
             
-            # Registrar auditoria
-            new_values = _extract_model_data(reservation_obj)
-            with AuditContext(self.db, current_user, request) as audit:
-                description = f"Check-in realizado para reserva '{reservation_obj.reservation_number}'"
-                if guest_updated:
-                    description += " com atualização de dados do hóspede"
-                
-                audit.log_update(
-                    "reservations", 
-                    reservation_obj.id, 
-                    old_values, 
-                    new_values,
-                    description
-                )
+            # ✅ AUDITORIA AUTOMÁTICA: "🏨 Check-in realizado"
+            # Vai capturar: Status: "confirmed" → "checked_in", checked_in_date, internal_notes
             
             return reservation_obj
             
-        except Exception:
+        except Exception as e:
             self.db.rollback()
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro ao realizar check-in"
+            )
 
     def _process_guest_checkin_data(
         self,
@@ -723,21 +759,38 @@ class ReservationService:
         
         # ✅ ATUALIZAR APENAS SE NECESSÁRIO
         if needs_update:
-            updated_guest = guest_service.update_guest(
-                guest_id=guest_id,
-                tenant_id=tenant_id,
-                guest_data=update_data,
-                current_user=current_user,
-                request=request
-            )
-            
-            if not updated_guest:
-                raise ValueError("Falha ao atualizar dados do hóspede")
+            # ✅ USAR AUDITORIA MANUAL PARA DADOS DO HÓSPEDE
+            with AuditContext(self.db, current_user, request) as audit:
+                old_guest_data = _extract_model_data(guest)
+                
+                updated_guest = guest_service.update_guest(
+                    guest_id=guest_id,
+                    tenant_id=tenant_id,
+                    guest_data=update_data,
+                    current_user=current_user,
+                    request=request
+                )
+                
+                if not updated_guest:
+                    raise ValueError("Falha ao atualizar dados do hóspede")
+                
+                new_guest_data = _extract_model_data(updated_guest)
+                
+                # Registrar auditoria específica para o check-in
+                audit.log_update(
+                    table_name="guests",
+                    record_id=guest_id,
+                    old_values=old_guest_data,
+                    new_values=new_guest_data,
+                    description="Dados do hóspede atualizados durante check-in"
+                )
             
             return True
         
         return False
 
+    # ✅ MÉTODO CHECK_OUT COM AUDITORIA AUTOMÁTICA
+    @auto_audit_update("reservations", "Check-out realizado")
     def check_out_reservation(
         self, 
         reservation_id: int, 
@@ -746,17 +799,25 @@ class ReservationService:
         current_user: User,
         request: Optional[Request] = None
     ) -> Optional[Reservation]:
-        """Realiza check-out da reserva"""
+        """
+        Realiza check-out da reserva.
+        Auditoria automática vai capturar mudanças de status, datas e valores.
+        """
         
         reservation_obj = self.get_reservation_by_id(reservation_id, tenant_id)
         if not reservation_obj:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Reserva não encontrada"
+            )
 
         if not reservation_obj.can_check_out:
-            raise ValueError("Check-out não permitido para esta reserva")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Check-out não permitido para esta reserva"
+            )
 
-        old_values = _extract_model_data(reservation_obj)
-        
+        # ✅ ALTERAÇÕES CAPTURADAS AUTOMATICAMENTE
         reservation_obj.status = 'checked_out'
         reservation_obj.checked_out_date = check_out_request.actual_check_out_time or datetime.utcnow()
         
@@ -777,23 +838,20 @@ class ReservationService:
             self.db.commit()
             self.db.refresh(reservation_obj)
             
-            # Registrar auditoria
-            new_values = _extract_model_data(reservation_obj)
-            with AuditContext(self.db, current_user, request) as audit:
-                audit.log_update(
-                    "reservations", 
-                    reservation_obj.id, 
-                    old_values, 
-                    new_values,
-                    f"Check-out realizado para reserva '{reservation_obj.reservation_number}'"
-                )
+            # ✅ AUDITORIA AUTOMÁTICA: "🚪 Check-out realizado"
+            # Vai capturar: Status, checked_out_date, total_amount (se mudou), internal_notes
             
             return reservation_obj
             
-        except Exception:
+        except Exception as e:
             self.db.rollback()
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro ao realizar check-out"
+            )
 
+    # ✅ MÉTODO CANCEL_RESERVATION COM AUDITORIA AUTOMÁTICA
+    @auto_audit_update("reservations", "Reserva cancelada")
     def cancel_reservation(
         self, 
         reservation_id: int, 
@@ -802,17 +860,25 @@ class ReservationService:
         current_user: User,
         request: Optional[Request] = None
     ) -> Optional[Reservation]:
-        """Cancela uma reserva"""
+        """
+        Cancela uma reserva.
+        Auditoria automática vai capturar cancelamento e motivos.
+        """
         
         reservation_obj = self.get_reservation_by_id(reservation_id, tenant_id)
         if not reservation_obj:
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Reserva não encontrada"
+            )
 
         if not reservation_obj.can_cancel:
-            raise ValueError("Esta reserva não pode ser cancelada")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Esta reserva não pode ser cancelada"
+            )
 
-        old_values = _extract_model_data(reservation_obj)
-        
+        # ✅ ALTERAÇÕES CAPTURADAS AUTOMATICAMENTE
         reservation_obj.status = 'cancelled'
         reservation_obj.cancelled_date = datetime.utcnow()
         reservation_obj.cancellation_reason = cancel_request.cancellation_reason
@@ -836,22 +902,17 @@ class ReservationService:
             self.db.commit()
             self.db.refresh(reservation_obj)
             
-            # Registrar auditoria
-            new_values = _extract_model_data(reservation_obj)
-            with AuditContext(self.db, current_user, request) as audit:
-                audit.log_update(
-                    "reservations", 
-                    reservation_obj.id, 
-                    old_values, 
-                    new_values,
-                    f"Reserva '{reservation_obj.reservation_number}' cancelada: {cancel_request.cancellation_reason}"
-                )
+            # ✅ AUDITORIA AUTOMÁTICA: "❌ Reserva cancelada"
+            # Vai capturar: Status, cancelled_date, cancellation_reason, paid_amount (se mudou)
             
             return reservation_obj
             
-        except Exception:
+        except Exception as e:
             self.db.rollback()
-            return None
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro ao cancelar reserva"
+            )
 
     def get_reservations_by_date_range(
         self, 
@@ -934,14 +995,14 @@ class ReservationService:
     def get_reservation_detailed(self, reservation_id: int, tenant_id: int) -> Optional[Dict[str, Any]]:
         """
         Busca reserva com todos os detalhes para página individual
-        Inclui dados expandidos do hóspede, propriedade, quartos, pagamentos e auditoria
+        Inclui dados expandidos do hóspede, propriedade, quartos, pagamentos e auditoria FORMATADA
         """
         # Buscar reserva com relacionamentos
         reservation = self.db.query(Reservation).options(
             joinedload(Reservation.guest),
             joinedload(Reservation.property_obj),
             selectinload(Reservation.reservation_rooms).joinedload(ReservationRoom.room),
-            selectinload(Reservation.payments)  # ✅ ADICIONADO: carregar pagamentos
+            selectinload(Reservation.payments)
         ).filter(
             Reservation.id == reservation_id,
             Reservation.tenant_id == tenant_id,
@@ -951,8 +1012,7 @@ class ReservationService:
         if not reservation:
             return None
         
-# === 1. DADOS DO HÓSPEDE EXPANDIDOS ===
-        # Query básica de estatísticas (sem cálculo de nights por enquanto)
+        # === 1. DADOS DO HÓSPEDE EXPANDIDOS ===
         guest_stats = self.db.query(
             func.count(Reservation.id).label('total_reservations'),
             func.sum(Reservation.total_amount).label('total_spent'),
@@ -978,7 +1038,7 @@ class ReservationService:
             Reservation.is_active == True
         ).scalar() or 0
         
-        # Calcular total de noites manualmente (mais seguro)
+        # Calcular total de noites manualmente
         guest_reservations = self.db.query(Reservation.check_in_date, Reservation.check_out_date).filter(
             Reservation.guest_id == reservation.guest_id,
             Reservation.tenant_id == tenant_id,
@@ -990,7 +1050,7 @@ class ReservationService:
             if res.check_in_date and res.check_out_date:
                 total_nights += (res.check_out_date - res.check_in_date).days
         
-        # Endereço completo do hóspede (construído)
+        # Endereço completo do hóspede
         guest_address_parts = [
             reservation.guest.address_line1,
             reservation.guest.address_line2,
@@ -1033,7 +1093,6 @@ class ReservationService:
         }
         
         # === 2. DADOS DA PROPRIEDADE EXPANDIDOS ===
-        # Endereço completo da propriedade (construído)
         property_address_parts = [
             reservation.property_obj.address_line1,
             reservation.property_obj.address_line2,
@@ -1043,7 +1102,6 @@ class ReservationService:
         ]
         property_full_address = ', '.join([part for part in property_address_parts if part])
         
-        # Estatísticas da propriedade
         property_stats = self.db.query(
             func.count(func.distinct(Room.id)).label('total_rooms'),
             func.count(Reservation.id).label('total_reservations')
@@ -1080,7 +1138,6 @@ class ReservationService:
             room = res_room.room
             nights = (res_room.check_out_date - res_room.check_in_date).days
             
-            # Buscar tipo de quarto se disponível
             room_type_name = None
             if room and hasattr(room, 'room_type') and room.room_type:
                 room_type_name = room.room_type.name
@@ -1107,7 +1164,7 @@ class ReservationService:
         balance_due = reservation.balance_due
         deposit_amount = None
         if reservation.requires_deposit and reservation.total_amount:
-            deposit_amount = reservation.total_amount * Decimal('0.30')  # 30% como depósito padrão
+            deposit_amount = reservation.total_amount * Decimal('0.30')
         
         payment_data = {
             'total_amount': float(reservation.total_amount or Decimal('0.00')),
@@ -1118,9 +1175,9 @@ class ReservationService:
             'deposit_required': reservation.requires_deposit,
             'deposit_amount': float(deposit_amount) if deposit_amount else None,
             'deposit_paid': (reservation.total_paid >= deposit_amount) if deposit_amount else False,
-            'last_payment_date': None,  # TODO: Implementar quando tiver tabela de pagamentos
-            'payment_method_last': None,  # TODO: Implementar quando tiver tabela de pagamentos
-            'total_payments': 1 if reservation.paid_amount > 0 else 0,  # TODO: Implementar quando tiver tabela de pagamentos
+            'last_payment_date': None,
+            'payment_method_last': None,
+            'total_payments': 1 if reservation.paid_amount > 0 else 0,
             'is_overdue': balance_due > 0 and reservation.check_in_date < date.today(),
             'payment_status': reservation.payment_status,
         }
@@ -1145,92 +1202,27 @@ class ReservationService:
             'cancel_blocked_reason': None if current_status in ['pending', 'confirmed'] else f'Não é possível cancelar reservas com status: {current_status}',
         }
         
-        # === 6. HISTÓRICO DE AUDITORIA ===
-        # ✅ CORRIGIDO: Buscar IDs dos pagamentos da reserva
+        # === 6. HISTÓRICO DE AUDITORIA MELHORADO ===
+        # ✅ MODIFICADO: Usar o novo serviço de formatação
         payment_ids = [p.id for p in reservation.payments] if reservation.payments else []
         
         audit_logs = self.db.query(AuditLog).options(
             joinedload(AuditLog.user)
         ).filter(
-            AuditLog.table_name.in_(['reservations', 'reservation_rooms', 'payments']),  # ✅ ADICIONADO: payments
+            AuditLog.table_name.in_(['reservations', 'reservation_rooms', 'payments']),
             or_(
                 and_(AuditLog.table_name == 'reservations', AuditLog.record_id == reservation.id),
                 and_(AuditLog.table_name == 'reservation_rooms', AuditLog.record_id.in_([rr.id for rr in reservation.reservation_rooms])),
-                and_(AuditLog.table_name == 'payments', AuditLog.record_id.in_(payment_ids))  # ✅ ADICIONADO: condição para payments
+                and_(AuditLog.table_name == 'payments', AuditLog.record_id.in_(payment_ids))
             ),
             AuditLog.tenant_id == tenant_id
         ).order_by(desc(AuditLog.created_at)).limit(50).all()
         
+        # ✅ NOVO: Usar o serviço de formatação para processar cada log
         audit_history = []
         for log in audit_logs:
-            # Mapear ações para descrições mais legíveis
-            action_descriptions = {
-                'CREATE': 'Criação',
-                'UPDATE': 'Atualização', 
-                'DELETE': 'Exclusão',
-            }
-            
-            # Descrição mais específica baseada nos campos alterados
-            description = action_descriptions.get(log.action, log.action)
-            if log.action == 'UPDATE' and log.changed_fields:
-                if 'status' in log.changed_fields:
-                    if log.new_values and log.new_values.get('status'):
-                        new_status = log.new_values.get('status', '')
-                        if new_status == 'confirmed':
-                            description = 'Reserva confirmada'
-                        elif new_status == 'checked_in':
-                            description = 'Check-in realizado'
-                        elif new_status == 'checked_out':
-                            description = 'Check-out realizado'
-                        elif new_status == 'cancelled':
-                            description = 'Reserva cancelada'
-                elif 'paid_amount' in log.changed_fields:
-                    description = 'Pagamento adicionado'
-                elif any(field in log.changed_fields for field in ['check_in_date', 'check_out_date']):
-                    description = 'Datas alteradas'
-            
-            # ✅ ADICIONADO: Lógica específica para tabela payments
-            if log.table_name == 'payments':
-                if log.action == 'CREATE':
-                    description = 'Pagamento registrado'
-                elif log.action == 'UPDATE' and log.changed_fields:
-                    if 'status' in log.changed_fields:
-                        if log.new_values and log.new_values.get('status') == 'confirmed':
-                            description = 'Pagamento confirmado'
-                        elif log.new_values and log.new_values.get('status') == 'cancelled':
-                            description = 'Pagamento cancelado'
-                        else:
-                            description = 'Status do pagamento alterado'
-                    elif 'amount' in log.changed_fields:
-                        description = 'Valor do pagamento alterado'
-                    else:
-                        description = 'Pagamento atualizado'
-                elif log.action == 'DELETE':
-                    description = 'Pagamento removido'
-            
-            user_data = None
-            if log.user:
-                user_data = {
-                    'id': log.user.id,
-                    'name': log.user.full_name,
-                    'email': log.user.email,
-                    'role': getattr(log.user, 'role', None)
-                }
-            
-            audit_entry = {
-                'id': log.id,
-                'timestamp': log.created_at,
-                'user': user_data,
-                'action': log.action.lower(),
-                'description': description,
-                'table_name': log.table_name,
-                'record_id': log.record_id,
-                'old_values': log.old_values,
-                'new_values': log.new_values,
-                'ip_address': log.ip_address,
-                'user_agent': log.user_agent,
-            }
-            audit_history.append(audit_entry)
+            formatted_entry = self.audit_formatter.format_audit_entry(log)
+            audit_history.append(formatted_entry)
         
         # === 7. CAMPOS COMPUTADOS ===
         nights = (reservation.check_out_date - reservation.check_in_date).days
@@ -1291,7 +1283,7 @@ class ReservationService:
             'rooms': rooms_data,
             'payment': payment_data,
             'actions': actions,
-            'audit_history': audit_history,
+            'audit_history': audit_history,  # ✅ AGORA COM FORMATAÇÃO RICA
             
             # Campos computados
             'status_display': status_map.get(reservation.status, reservation.status),
