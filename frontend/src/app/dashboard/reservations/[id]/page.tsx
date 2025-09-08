@@ -2,13 +2,13 @@
 
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useReservationDetails } from '@/hooks/useReservationDetails';
 import CancelReservationModal from '@/components/reservations/CancelReservationModal';
 import EditReservationModal from '@/components/reservations/EditReservationModal';
 import CheckInModal from '@/components/reservations/CheckInModal';
-import CheckOutModal from '@/components/reservations/CheckOutModal'; // ✅ NOVO IMPORT
+import CheckOutModal from '@/components/reservations/CheckOutModal';
 import PaymentModal from '@/components/reservations/PaymentModal';
 import { useReservationPayments } from '@/hooks/useReservationPayments';
 import PaymentEditModal from '@/components/payments/PaymentEditModal';
@@ -32,7 +32,16 @@ import {
   AlertCircle,
   CreditCard,
   Calendar,
-  Ban
+  Ban,
+  ChevronDown,
+  ChevronRight,
+  CheckCircle,
+  LogOut,
+  LogIn,
+  UserCheck,
+  FileText,
+  Settings,
+  AlertTriangle
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import apiClient from '@/lib/api';
@@ -48,6 +57,304 @@ const PAYMENT_METHOD_LABELS = {
   cash: 'Dinheiro',
   check: 'Cheque',
   other: 'Outro'
+};
+
+// ===== UTILITÁRIOS PARA HISTÓRICO DE AUDITORIA =====
+
+// Função para obter ícone baseado na descrição/ação
+const getAuditIcon = (description: string, action: string, tableName: string) => {
+  const desc = description.toLowerCase();
+  
+  // Ícones específicos por conteúdo da descrição
+  if (desc.includes('check-in')) return { icon: LogIn, color: 'text-green-600' };
+  if (desc.includes('check-out')) return { icon: LogOut, color: 'text-blue-600' };
+  if (desc.includes('pagamento')) return { icon: CreditCard, color: 'text-green-600' };
+  if (desc.includes('cancelad')) return { icon: Ban, color: 'text-red-600' };
+  if (desc.includes('confirmad')) return { icon: CheckCircle, color: 'text-blue-600' };
+  if (desc.includes('hóspede') || desc.includes('guest')) return { icon: UserCheck, color: 'text-purple-600' };
+  
+  // Ícones por tabela
+  if (tableName === 'payments') return { icon: CreditCard, color: 'text-green-600' };
+  if (tableName === 'guests') return { icon: User, color: 'text-purple-600' };
+  if (tableName === 'reservations') return { icon: Calendar, color: 'text-blue-600' };
+  
+  // Ícones por ação
+  if (action === 'CREATE') return { icon: Plus, color: 'text-green-600' };
+  if (action === 'UPDATE') return { icon: Edit2, color: 'text-orange-600' };
+  if (action === 'DELETE') return { icon: Ban, color: 'text-red-600' };
+  
+  // Padrão
+  return { icon: FileText, color: 'text-gray-600' };
+};
+
+// Função para obter badge de tipo de operação
+const getOperationBadge = (description: string, tableName: string) => {
+  const desc = description.toLowerCase();
+  
+  if (desc.includes('check-in')) {
+    return { label: 'Check-in', className: 'bg-green-100 text-green-800 border-green-200' };
+  }
+  if (desc.includes('check-out')) {
+    return { label: 'Check-out', className: 'bg-blue-100 text-blue-800 border-blue-200' };
+  }
+  if (desc.includes('pagamento')) {
+    return { label: 'Pagamento', className: 'bg-emerald-100 text-emerald-800 border-emerald-200' };
+  }
+  if (desc.includes('cancelad')) {
+    return { label: 'Cancelamento', className: 'bg-red-100 text-red-800 border-red-200' };
+  }
+  if (desc.includes('administrativa')) {
+    return { label: 'Admin', className: 'bg-orange-100 text-orange-800 border-orange-200' };
+  }
+  
+  if (tableName === 'payments') {
+    return { label: 'Financeiro', className: 'bg-green-100 text-green-800 border-green-200' };
+  }
+  if (tableName === 'guests') {
+    return { label: 'Hóspede', className: 'bg-purple-100 text-purple-800 border-purple-200' };
+  }
+  
+  return { label: 'Atualização', className: 'bg-gray-100 text-gray-800 border-gray-200' };
+};
+
+// Função para timestamp relativo
+const getRelativeTime = (timestamp: string) => {
+  try {
+    return formatDistanceToNow(new Date(timestamp), { 
+      addSuffix: true, 
+      locale: ptBR 
+    });
+  } catch {
+    return 'Data inválida';
+  }
+};
+
+// Função para obter nome legível do campo
+const getFieldLabel = (key: string) => {
+  const labels: Record<string, string> = {
+    'room_id': 'Quarto',
+    'adults': 'Adultos',
+    'children': 'Crianças',
+    'total_guests': 'Total de Hóspedes',
+    'check_in_date': 'Data Check-in',
+    'check_out_date': 'Data Check-out',
+    'total_amount': 'Valor Total',
+    'room_rate': 'Tarifa do Quarto',
+    'status': 'Status',
+    'guest_requests': 'Solicitações',
+    'internal_notes': 'Observações Internas',
+    'payment_method': 'Método de Pagamento',
+    'amount': 'Valor',
+    'reference_number': 'Referência',
+    'payment_date': 'Data do Pagamento',
+    'confirmed_date': 'Data de Confirmação',
+    'checked_in_date': 'Data do Check-in',
+    'checked_out_date': 'Data do Check-out'
+  };
+  
+  return labels[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+};
+
+// Função para formatar valores de mudança
+const formatChangeValue = (key: string, value: any) => {
+  if (value === null || value === undefined) return 'N/A';
+  
+  // Valores monetários
+  if (key.includes('amount') || key.includes('value') || key.includes('price')) {
+    const num = parseFloat(value);
+    if (!isNaN(num)) {
+      return num.toLocaleString('pt-BR', {
+        style: 'currency',
+        currency: 'BRL'
+      });
+    }
+  }
+  
+  // Datas
+  if (key.includes('date') || key.includes('_at')) {
+    try {
+      return format(new Date(value), 'dd/MM/yyyy HH:mm', { locale: ptBR });
+    } catch {
+      return value;
+    }
+  }
+  
+  // Booleanos
+  if (typeof value === 'boolean') {
+    return value ? 'Sim' : 'Não';
+  }
+  
+  return String(value);
+};
+
+// Componente para entrada individual do histórico
+const AuditTimelineEntry = ({ audit, onRefresh }: { audit: any; onRefresh: () => void }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const { icon: Icon, color } = getAuditIcon(audit.description, audit.action, audit.table_name, audit.old_values, audit.new_values);
+  const badge = getOperationBadge(audit.description, audit.table_name, audit.old_values, audit.new_values);
+  
+  const hasDetails = audit.old_values || audit.new_values;
+  const relativeTime = getRelativeTime(audit.timestamp);
+  const exactTime = format(new Date(audit.timestamp), 'dd/MM/yyyy HH:mm', { locale: ptBR });
+
+  // Detectar mudanças específicas importantes
+  const significantChanges = [];
+  if (audit.old_values && audit.new_values) {
+    for (const key of Object.keys(audit.new_values)) {
+      const oldValue = audit.old_values[key];
+      const newValue = audit.new_values[key];
+      
+      if (oldValue !== newValue && oldValue !== null && oldValue !== undefined) {
+        significantChanges.push({
+          field: key,
+          fieldLabel: getFieldLabel(key),
+          oldValue: formatChangeValue(key, oldValue),
+          newValue: formatChangeValue(key, newValue)
+        });
+      }
+    }
+  }
+
+  return (
+    <div className="relative">
+      {/* Linha da timeline */}
+      <div className="absolute left-6 top-12 bottom-0 w-px bg-gray-200" />
+      
+      <div className="flex gap-4 pb-6">
+        {/* Ícone da timeline */}
+        <div className={`flex-shrink-0 w-12 h-12 rounded-full bg-white border-2 border-gray-200 flex items-center justify-center z-10 ${color}`}>
+          <Icon className="h-5 w-5" />
+        </div>
+        
+        {/* Conteúdo */}
+        <div className="flex-1 min-w-0">
+          <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
+            {/* Header da entrada */}
+            <div className="flex items-start justify-between mb-2">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <p className="font-semibold text-gray-900 flex-1">
+                    {audit.description}
+                  </p>
+                  <Badge variant="outline" className={badge.className}>
+                    {badge.label}
+                  </Badge>
+                </div>
+                
+                <div className="flex items-center gap-2 text-sm text-gray-600">
+                  <span>por {audit.user?.name || 'Sistema'}</span>
+                  <span>•</span>
+                  <span title={exactTime}>{relativeTime}</span>
+                </div>
+                
+                {/* Mostrar mudanças importantes diretamente */}
+                {significantChanges.length > 0 && significantChanges.length <= 2 && (
+                  <div className="mt-2 text-sm text-gray-700">
+                    {significantChanges.map((change, index) => (
+                      <div key={index} className="flex items-center gap-2">
+                        <span className="font-medium">{change.fieldLabel}:</span>
+                        <span className="text-gray-500 line-through">{change.oldValue}</span>
+                        <span>→</span>
+                        <span className="font-medium text-gray-900">{change.newValue}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Botão para expandir detalhes */}
+            {hasDetails && (
+              <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 mt-2 transition-colors"
+              >
+                {isExpanded ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+                {isExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}
+              </button>
+            )}
+            
+            {/* Detalhes expandidos */}
+            {isExpanded && hasDetails && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <div className="space-y-4">
+                  {/* Mudanças específicas */}
+                  {significantChanges.length > 0 && (
+                    <div>
+                      <h5 className="font-medium text-gray-900 mb-3">Alterações Realizadas</h5>
+                      <div className="space-y-2">
+                        {significantChanges.map((change, index) => (
+                          <div key={index} className="grid grid-cols-3 gap-4 text-sm p-2 bg-gray-50 rounded">
+                            <div className="font-medium text-gray-700">
+                              {change.fieldLabel}
+                            </div>
+                            <div className="text-gray-500">
+                              <span className="line-through">{change.oldValue}</span>
+                            </div>
+                            <div className="text-gray-900 font-medium">
+                              {change.newValue}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Apenas novos valores (para criações) */}
+                  {!audit.old_values && audit.new_values && (
+                    <div>
+                      <h5 className="font-medium text-gray-900 mb-3">Dados Criados</h5>
+                      <div className="space-y-2">
+                        {Object.entries(audit.new_values).map(([key, value]) => (
+                          <div key={key} className="grid grid-cols-2 gap-4 text-sm p-2 bg-green-50 rounded">
+                            <div className="font-medium text-gray-700">
+                              {getFieldLabel(key)}
+                            </div>
+                            <div className="text-gray-900 font-medium">
+                              {formatChangeValue(key, value)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Dados técnicos (em formato JSON colapsado) */}
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-gray-500 hover:text-gray-700">
+                      Dados técnicos
+                    </summary>
+                    <div className="mt-2 p-3 bg-gray-50 rounded border">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {audit.old_values && (
+                          <div>
+                            <p className="font-medium mb-1 text-gray-700">Valores Anteriores:</p>
+                            <pre className="whitespace-pre-wrap text-gray-600 text-xs overflow-auto max-h-32">
+                              {JSON.stringify(audit.old_values, null, 2)}
+                            </pre>
+                          </div>
+                        )}
+                        <div>
+                          <p className="font-medium mb-1 text-gray-700">Novos Valores:</p>
+                          <pre className="whitespace-pre-wrap text-gray-600 text-xs overflow-auto max-h-32">
+                            {JSON.stringify(audit.new_values, null, 2)}
+                          </pre>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // Componente para badge de método de pagamento
@@ -167,7 +474,7 @@ const PaymentItem = ({
   );
 };
 
-// Componente de Pagamentos compacto - CORRIGIDO
+// Componente de Pagamentos compacto
 function PaymentsSection({ 
   reservationId, 
   reservationNumber,
@@ -362,7 +669,6 @@ function PaymentsSection({
         </CardHeader>
 
         <CardContent className="p-4">
-          {/* Container com altura limitada e scroll - CORRIGIDO */}
           <div className="max-h-72 overflow-y-auto overflow-x-hidden border border-gray-100 rounded-lg bg-gray-50">
             <div className="space-y-3 p-3">
               {confirmedPayments.map((payment) => (
@@ -531,11 +837,12 @@ export default function ReservationDetailsPage() {
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [checkInModalOpen, setCheckInModalOpen] = useState(false);
-  const [checkOutModalOpen, setCheckOutModalOpen] = useState(false); // ✅ NOVO ESTADO
+  const [checkOutModalOpen, setCheckOutModalOpen] = useState(false);
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [auditLoading, setAuditLoading] = useState(false);
 
-  // Função para formatação correta de moeda brasileira - CORRIGIDO
+  // Função para formatação correta de moeda brasileira
   const formatCurrency = (value: string | number | null | undefined): string => {
     if (!value || isNaN(Number(value))) {
       return 'R$ 0,00';
@@ -561,7 +868,7 @@ export default function ReservationDetailsPage() {
       case 'checkin':
         setCheckInModalOpen(true);
         break;
-      case 'checkout': // ✅ MODIFICADO
+      case 'checkout':
         setCheckOutModalOpen(true);
         break;
       case 'payment':
@@ -592,7 +899,6 @@ export default function ReservationDetailsPage() {
     });
   };
 
-  // ✅ NOVO HANDLER
   const handleCheckOutSuccess = async () => {
     setCheckOutModalOpen(false);
     await refresh();
@@ -656,6 +962,27 @@ export default function ReservationDetailsPage() {
       document_number: data.guest.document_number || '',
       country: data.guest.nationality || 'Brasil',
     };
+  };
+
+  // Handler para atualizar histórico
+  const handleRefreshAudit = async () => {
+    setAuditLoading(true);
+    try {
+      await refresh();
+      toast({
+        title: 'Histórico Atualizado',
+        description: 'Histórico de alterações foi atualizado com sucesso.',
+        variant: 'default',
+      });
+    } catch (error) {
+      toast({
+        title: 'Erro',
+        description: 'Erro ao atualizar histórico de alterações.',
+        variant: 'destructive',
+      });
+    } finally {
+      setAuditLoading(false);
+    }
   };
 
   if (loading) {
@@ -804,7 +1131,7 @@ export default function ReservationDetailsPage() {
 
         {/* Sidebar - 1/3 */}
         <div className="space-y-6">
-          {/* Resumo Financeiro - CORRIGIDO */}
+          {/* Resumo Financeiro */}
           <Card className="border-l-4 border-l-green-500">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
@@ -941,53 +1268,45 @@ export default function ReservationDetailsPage() {
         </div>
       </div>
 
-      {/* Histórico de Auditoria */}
+      {/* ===== HISTÓRICO DE ALTERAÇÕES MELHORADO ===== */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Clock className="h-5 w-5 text-gray-600" />
-            Histórico de Alterações
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="h-5 w-5 text-gray-600" />
+              Histórico de Alterações
+            </CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefreshAudit}
+              disabled={auditLoading}
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${auditLoading ? 'animate-spin' : ''}`} />
+              Atualizar
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {data.audit_history && data.audit_history.length > 0 ? (
-            <div className="space-y-4 max-h-96 overflow-y-auto">
-              {data.audit_history.map((audit) => (
-                <div key={audit.id} className="flex gap-4 p-4 bg-gray-50 rounded-lg">
-                  <div className="flex-1">
-                    <div className="flex justify-between items-start mb-2">
-                      <p className="font-semibold">{audit.description}</p>
-                      <p className="text-sm text-gray-500">
-                        {format(new Date(audit.timestamp), 'PPp', { locale: ptBR })}
-                      </p>
-                    </div>
-                    <p className="text-sm text-gray-600">por {audit.user.name}</p>
-                    
-                    {audit.old_values && audit.new_values && (
-                      <details className="mt-2 cursor-pointer">
-                        <summary className="text-sm text-blue-600 hover:text-blue-700">Ver detalhes</summary>
-                        <div className="mt-2 p-3 bg-white rounded border text-xs">
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <p className="font-medium mb-1">Antes:</p>
-                              <pre className="whitespace-pre-wrap text-gray-600">{JSON.stringify(audit.old_values, null, 2)}</pre>
-                            </div>
-                            <div>
-                              <p className="font-medium mb-1">Depois:</p>
-                              <pre className="whitespace-pre-wrap text-gray-600">{JSON.stringify(audit.new_values, null, 2)}</pre>
-                            </div>
-                          </div>
-                        </div>
-                      </details>
-                    )}
-                  </div>
-                </div>
-              ))}
+            <div className="max-h-[600px] overflow-y-auto">
+              <div className="space-y-0">
+                {data.audit_history.map((audit, index) => (
+                  <AuditTimelineEntry
+                    key={audit.id}
+                    audit={audit}
+                    onRefresh={handleRefreshAudit}
+                  />
+                ))}
+              </div>
             </div>
           ) : (
-            <div className="text-center py-8 text-gray-500">
-              <Clock className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-              <p>Nenhum histórico de alterações disponível</p>
+            <div className="text-center py-12 text-gray-500">
+              <Clock className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+              <p className="text-lg font-medium mb-2">Nenhum histórico disponível</p>
+              <p className="text-sm text-gray-400">
+                As alterações feitas nesta reserva aparecerão aqui
+              </p>
             </div>
           )}
         </CardContent>
@@ -1017,7 +1336,6 @@ export default function ReservationDetailsPage() {
         existingGuestData={getExistingGuestData()}
       />
 
-      {/* ✅ NOVO MODAL DE CHECK-OUT */}
       <CheckOutModal
         isOpen={checkOutModalOpen}
         onClose={() => setCheckOutModalOpen(false)}
@@ -1028,7 +1346,6 @@ export default function ReservationDetailsPage() {
         totalAmount={parseFloat(data.payment.total_amount) || 0}
       />
 
-      {/* Modal antigo do PaymentModal - mantido para compatibilidade com o botão do header */}
       <PaymentModal
         isOpen={paymentModalOpen}
         onClose={() => setPaymentModalOpen(false)}
