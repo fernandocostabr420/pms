@@ -38,6 +38,9 @@ class AuditFormattingService:
         'cancelled_by': 'Cancelado por',
         'cancellation_reason': 'Motivo do Cancelamento',
         
+        # ✅ ADICIONADO: Campo para alterações de quartos
+        'quartos': 'Quartos da Reserva',
+        
         # Campos de pagamento
         'payment_number': 'Número do Pagamento',
         'amount': 'Valor',
@@ -277,8 +280,14 @@ class AuditFormattingService:
             description = "📝 Reserva atualizada"
             
             if log.changed_fields and log.old_values and log.new_values:
-                # Tratamento especial para mudanças de status
-                if 'status' in log.changed_fields:
+                # ✅ ADICIONADO: Tratamento especial para mudanças de quartos
+                if 'quartos' in log.changed_fields:
+                    # Usar a descrição já formatada do log (que vem do nosso código)
+                    if log.description and ('🔄' in log.description or '🏨' in log.description):
+                        description = log.description  # Usar nossa descrição personalizada
+                
+                # Tratamento especial para mudanças de status (código existente)
+                elif 'status' in log.changed_fields:
                     new_status = log.new_values.get('status')
                     if new_status == 'confirmed':
                         description = "✅ Reserva confirmada"
@@ -425,6 +434,12 @@ class AuditFormattingService:
                 old_formatted = f"Quarto {old_value}" if old_value else None
                 new_formatted = f"Quarto {new_value}" if new_value else None
                 field_type = 'room'
+                
+            # ✅ ADICIONADO: Tratamento especial para alterações de quartos
+            elif field == 'quartos':
+                old_formatted = old_value if old_value else "Nenhum"
+                new_formatted = new_value if new_value else "Nenhum"
+                field_type = 'rooms'
                 
             else:
                 old_formatted = str(old_value) if old_value is not None else None
@@ -579,7 +594,7 @@ class AuditFormattingService:
                 groups['financial'].append(change)
             elif 'guest' in field or field in ['adults_count', 'children_count', 'infants_count']:
                 groups['guests'].append(change)
-            elif change_type == 'room' or 'room' in field:
+            elif change_type in ['room', 'rooms'] or 'room' in field or field == 'quartos':
                 groups['rooms'].append(change)
             else:
                 groups['other'].append(change)

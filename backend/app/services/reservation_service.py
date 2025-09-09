@@ -434,7 +434,7 @@ class ReservationService:
                 detail="Erro ao criar reserva - dados duplicados ou conflito"
             )
 
-    # ✅ MÉTODO UPDATE_RESERVATION COM AUDITORIA AUTOMÁTICA - CORRIGIDO COMPLETO
+# ✅ MÉTODO UPDATE_RESERVATION COM AUDITORIA AUTOMÁTICA - SOLUÇÃO DEFINITIVA
     @auto_audit_update("reservations", "Reserva atualizada")
     def update_reservation(
         self, 
@@ -499,12 +499,33 @@ class ReservationService:
                     detail=f"Quartos não disponíveis no novo período: {unavailable_rooms}"
                 )
 
-        # ✅ PROCESSAR ATUALIZAÇÃO DE QUARTOS ANTES DOS CAMPOS BÁSICOS
+        # ✅ PROCESSAR ATUALIZAÇÃO DE QUARTOS - SOLUÇÃO DEFINITIVA
         rooms_updated = False
         if 'rooms' in update_data and update_data['rooms'] is not None:
             print(f"🔄 Atualizando quartos da reserva {reservation_id}")
-            print(f"📊 Quartos atuais: {[rr.room_id for rr in reservation_obj.reservation_rooms]}")
-            print(f"📊 Novos quartos: {[r['room_id'] for r in update_data['rooms']]}")
+            
+            # Capturar quartos atuais
+            current_rooms = []
+            for rr in reservation_obj.reservation_rooms:
+                try:
+                    room_obj = self.db.query(Room).filter(Room.id == rr.room_id).first()
+                    room_number = room_obj.room_number if room_obj else str(rr.room_id)
+                    current_rooms.append(f"Quarto {room_number}")
+                except:
+                    current_rooms.append(f"Quarto {rr.room_id}")
+            
+            # Capturar novos quartos
+            new_rooms = []
+            for room_data in update_data['rooms']:
+                try:
+                    room_obj = self.db.query(Room).filter(Room.id == room_data['room_id']).first()
+                    room_number = room_obj.room_number if room_obj else str(room_data['room_id'])
+                    new_rooms.append(f"Quarto {room_number}")
+                except:
+                    new_rooms.append(f"Quarto {room_data['room_id']}")
+            
+            print(f"📊 Quartos atuais: {current_rooms}")
+            print(f"📊 Novos quartos: {new_rooms}")
             
             # Verificar disponibilidade dos novos quartos
             new_room_ids = [room_data['room_id'] for room_data in update_data['rooms']]
@@ -521,6 +542,39 @@ class ReservationService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Novos quartos não disponíveis no período: {unavailable_rooms}"
                 )
+            
+            # ✅ SOLUÇÃO DEFINITIVA: Registrar alteração de quartos na tabela RESERVATIONS
+            # Isso garante que o log aparecerá no histórico porque usa o ID da reserva
+            try:
+                from app.services.audit_service import AuditService
+                audit_service = AuditService(self.db)
+                
+                # Verificar se é transferência simples (1 para 1)
+                if len(current_rooms) == 1 and len(new_rooms) == 1 and current_rooms[0] != new_rooms[0]:
+                    description = f"🔄 Hóspede transferido de {current_rooms[0]} para {new_rooms[0]}"
+                else:
+                    description = f"🏨 Quartos alterados: {' + '.join(current_rooms)} → {' + '.join(new_rooms)}"
+                
+                # Registrar como um update na tabela RESERVATIONS (usando ID da reserva)
+                # Isso garante que aparecerá no histórico
+                old_rooms_value = ', '.join(current_rooms)
+                new_rooms_value = ', '.join(new_rooms)
+                
+                audit_service.log_update(
+                    table_name="reservations",  # ✅ CHAVE: Usar tabela reservations
+                    record_id=reservation_obj.id,  # ✅ CHAVE: ID da reserva (não muda)
+                    old_values={'quartos': old_rooms_value},
+                    new_values={'quartos': new_rooms_value},
+                    user=current_user,
+                    request=request,
+                    description=description
+                )
+                
+                print(f"✅ Auditoria de quartos registrada: {description}")
+                
+            except Exception as e:
+                print(f"⚠️ Erro na auditoria de quartos: {e}")
+                # Continuar mesmo se a auditoria falhar
             
             # Remover quartos existentes
             for existing_room in reservation_obj.reservation_rooms:
@@ -545,7 +599,7 @@ class ReservationService:
                 self.db.add(reservation_room)
             
             rooms_updated = True
-            print(f"✅ Quartos atualizados: {[r['room_id'] for r in update_data['rooms']]}")
+            print(f"✅ Quartos atualizados: {new_rooms}")
             
             # ✅ IMPORTANTE: Remover 'rooms' do update_data para não processar no loop básico
             del update_data['rooms']
@@ -573,7 +627,7 @@ class ReservationService:
             self.db.refresh(reservation_obj)
             
             # ✅ AUDITORIA AUTOMÁTICA PELO DECORADOR
-            # Vai mostrar: "Total: R$ 150,00 → R$ 180,00", "Check-in: 15/09 → 16/09", "Quartos: [1] → [2]", etc.
+            # Vai mostrar: "Total: R$ 150,00 → R$ 180,00", "Check-in: 15/09 → 16/09", etc.
             
             print(f"✅ Reserva {reservation_id} atualizada com sucesso")
             if rooms_updated:
@@ -587,7 +641,8 @@ class ReservationService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Erro ao atualizar reserva"
             )
-
+            
+            
     # ✅ MÉTODO CONFIRM_RESERVATION COM AUDITORIA AUTOMÁTICA
     @auto_audit_update("reservations", "Reserva confirmada")
     def confirm_reservation(
