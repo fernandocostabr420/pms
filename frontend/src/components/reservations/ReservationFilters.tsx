@@ -54,15 +54,21 @@ const statusOptions = [
   { value: 'no_show', label: 'No-show' }
 ];
 
+// ✅ CORRIGIDO: Usar valores do banco (não os labels amigáveis)
 const sourceOptions = [
   { value: 'all', label: 'Todos' },
   { value: 'direct', label: 'Direto' },
-  { value: 'booking.com', label: 'Booking.com' },
+  { value: 'booking', label: 'Booking.com' },        // ✅ CORRIGIDO: era 'booking.com'
   { value: 'airbnb', label: 'Airbnb' },
   { value: 'expedia', label: 'Expedia' },
+  { value: 'hotels', label: 'Hotels.com' },          // ✅ ADICIONADO
+  { value: 'agoda', label: 'Agoda' },                // ✅ ADICIONADO
   { value: 'phone', label: 'Telefone' },
   { value: 'email', label: 'E-mail' },
-  { value: 'walk_in', label: 'Walk-in' }
+  { value: 'walk_in', label: 'Walk-in' },
+  { value: 'website', label: 'Site' },               // ✅ ADICIONADO
+  { value: 'social_media', label: 'Redes Sociais' }, // ✅ ADICIONADO
+  { value: 'referral', label: 'Indicação' }          // ✅ ADICIONADO
 ];
 
 const balanceOptions = [
@@ -208,6 +214,8 @@ export default function ReservationFiltersComponent({
 
   // ✅ APLICAR FILTROS - Única função que dispara a busca
   const applyFilters = () => {
+    // ✅ CORREÇÃO APLICADA: Agora os valores já são corretos no sourceOptions
+    // Não precisa mais de mapeamento reverso porque já estamos usando os valores do banco
     onFiltersChange(localFilters);
   };
 
@@ -486,7 +494,7 @@ export default function ReservationFiltersComponent({
                     variant="outline"
                     className={cn(
                       "flex-1 justify-start text-left font-normal text-xs",
-                      !checkOutTo && "text-muted-foregreen"
+                      !checkOutTo && "text-muted-foreground" // ✅ CORRIGIDO: era "text-muted-foregreen"
                     )}
                     disabled={loading}
                   >
