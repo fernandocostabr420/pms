@@ -403,6 +403,197 @@ class PMSApiClient {
     return response.data;
   }
 
+  // ===== CORREÇÃO: MÉTODO PARA CODIFICAR PARÂMETROS DE BUSCA =====
+  private encodeSearchParams(params: Record<string, any>): Record<string, any> {
+    const encoded = { ...params };
+    
+    // ✅ CORREÇÃO ESPECÍFICA: Encodar parâmetro search se contém email
+    if (encoded.search && typeof encoded.search === 'string') {
+      const searchValue = encoded.search.trim();
+      
+      // Detectar se é email (contém @) e encodar
+      if (searchValue.includes('@')) {
+        encoded.search = encodeURIComponent(searchValue);
+      }
+    }
+    
+    // Encodar outros parâmetros que podem conter caracteres especiais
+    if (encoded.guest_email && typeof encoded.guest_email === 'string') {
+      encoded.guest_email = encodeURIComponent(encoded.guest_email.trim());
+    }
+    
+    return encoded;
+  }
+
+  // ✅ MÉTODO CORRIGIDO: getReservationsWithDetails
+  async getReservationsWithDetails(params?: {
+    page?: number;
+    per_page?: number;
+    status?: string;
+    source?: string;
+    property_id?: number;
+    guest_id?: number;
+    check_in_from?: string;
+    check_in_to?: string;
+    check_out_from?: string;
+    check_out_to?: string;
+    created_from?: string;
+    created_to?: string;
+    search?: string;
+    guest_email?: string;
+    guest_phone?: string;
+    guest_document_type?: string;
+    guest_nationality?: string;
+    guest_city?: string;
+    guest_state?: string;
+    guest_country?: string;
+    cancelled_from?: string;
+    cancelled_to?: string;
+    confirmed_from?: string;
+    confirmed_to?: string;
+    actual_checkin_from?: string;
+    actual_checkin_to?: string;
+    actual_checkout_from?: string;
+    actual_checkout_to?: string;
+    min_guests?: number;
+    max_guests?: number;
+    min_nights?: number;
+    max_nights?: number;
+    room_type_id?: number;
+    room_number?: string;
+    has_special_requests?: boolean;
+    has_internal_notes?: boolean;
+    deposit_paid?: boolean;
+    payment_status?: string;
+    marketing_source?: string;
+    is_current?: boolean;
+    can_check_in?: boolean;
+    can_check_out?: boolean;
+    can_cancel?: boolean;
+    min_amount?: number;
+    max_amount?: number;
+    is_paid?: boolean;
+    requires_deposit?: boolean;
+    is_group_reservation?: boolean;
+  }): Promise<ReservationListResponseWithDetails> {
+    // ✅ APLICAR ENCODING ANTES DE LIMPAR PARÂMETROS
+    const encodedParams = this.encodeSearchParams(params || {});
+    
+    // Limpar parâmetros nulos/vazios
+    const cleanParams = Object.fromEntries(
+      Object.entries(encodedParams).filter(([_, value]) => 
+        value !== null && value !== undefined && value !== '' && value !== 'all'
+      )
+    );
+
+    // Sempre incluir detalhes para este método
+    cleanParams.include_guest_details = true;
+    cleanParams.include_room_details = true;
+    cleanParams.include_payment_details = true;
+
+    console.log('Parâmetros enviados (com encoding):', cleanParams); // ✅ DEBUG
+
+    try {
+      const response = await this.client.get<ReservationListResponseWithDetails>('/reservations/detailed', { params: cleanParams });
+      return response.data;
+    } catch (error: any) {
+      console.error('Erro ao carregar reservas detalhadas:', error);
+      
+      // Fallback: tentar o endpoint padrão se o detalhado não existir
+      try {
+        const fallbackResponse = await this.getReservations({
+          ...cleanParams,
+          include_guest_details: true,
+          include_room_details: true,
+        });
+        
+        // Converter para o formato expandido se necessário
+        if ('reservations' in fallbackResponse) {
+          return fallbackResponse as ReservationListResponseWithDetails;
+        }
+        
+        throw new Error('Formato de resposta inválido');
+      } catch (fallbackError) {
+        console.error('Erro no fallback:', fallbackError);
+        throw fallbackError;
+      }
+    }
+  }
+
+  // ✅ CORREÇÃO APLICADA AO MÉTODO ORIGINAL TAMBÉM
+  async getReservations(params?: { 
+    page?: number; 
+    per_page?: number; 
+    status?: string;
+    source?: string;
+    property_id?: number;
+    guest_id?: number;
+    check_in_from?: string;
+    check_in_to?: string;
+    check_out_from?: string;
+    check_out_to?: string;
+    created_from?: string;
+    created_to?: string;
+    min_amount?: number;
+    max_amount?: number;
+    is_paid?: boolean;
+    requires_deposit?: boolean;
+    is_group_reservation?: boolean;
+    search?: string;
+    
+    // ===== NOVOS PARÂMETROS ADICIONADOS =====
+    guest_email?: string;
+    guest_phone?: string;
+    guest_nationality?: string;
+    guest_city?: string;
+    guest_country?: string;
+    cancelled_from?: string;
+    cancelled_to?: string;
+    confirmed_from?: string;
+    confirmed_to?: string;
+    actual_checkin_from?: string;
+    actual_checkin_to?: string;
+    actual_checkout_from?: string;
+    actual_checkout_to?: string;
+    min_guests?: number;
+    max_guests?: number;
+    min_nights?: number;
+    max_nights?: number;
+    room_type_id?: number;
+    room_number?: string;
+    has_special_requests?: boolean;
+    has_internal_notes?: boolean;
+    deposit_paid?: boolean;
+    payment_status?: string;
+    include_guest_details?: boolean;
+    include_room_details?: boolean;
+    include_payment_summary?: boolean;
+  }): Promise<ReservationListResponse | ReservationListResponseWithDetails> {
+    // ✅ APLICAR ENCODING AQUI TAMBÉM
+    const encodedParams = this.encodeSearchParams(params || {});
+    
+    // Limpar parâmetros nulos/vazios
+    const cleanParams = Object.fromEntries(
+      Object.entries(encodedParams).filter(([_, value]) => 
+        value !== null && value !== undefined && value !== '' && value !== 'all'
+      )
+    );
+
+    // Se tem parâmetros expandidos, usar a nova interface
+    const hasExpandedParams = cleanParams.include_guest_details || 
+                              cleanParams.include_room_details || 
+                              cleanParams.guest_email ||
+                              cleanParams.guest_phone;
+    
+    if (hasExpandedParams) {
+      const response = await this.client.get<ReservationListResponseWithDetails>('/reservations/', { params: cleanParams });
+      return response.data;
+    } else {
+      const response = await this.client.get<ReservationListResponse>('/reservations/', { params: cleanParams });
+      return response.data;
+    }
+  }
+
    // ===== RESERVATIONS API (MÉTODOS ORIGINAIS MANTIDOS + EXPANDIDOS) =====
 
   async getReservations(params?: { 
