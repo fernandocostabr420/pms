@@ -1,4 +1,4 @@
-# backend/app/schemas/reservation.py - ARQUIVO COMPLETO COM MODIFICAÇÕES PARA CORRIGIR MAPEAMENTOS
+# backend/app/schemas/reservation.py - ARQUIVO COMPLETO COM CORREÇÃO DO VALIDADOR
 
 from pydantic import BaseModel, field_validator, Field
 from typing import Optional, List, Dict, Any, Literal
@@ -145,7 +145,7 @@ class ReservationBase(BaseModel):
             return None
         
         # Normalizar para lowercase
-        v_lower = v.lower()
+        v_lower = v.lower().strip()
         
         # Mapeamento de aliases comuns para valores canônicos
         alias_mapping = {
@@ -231,13 +231,45 @@ class ReservationUpdate(BaseModel):
             raise ValueError('Check-out deve ser posterior ao check-in')
         return v
 
+    # ✅ CORRIGIDO: Aplicar mesma validação flexível do ReservationBase
     @field_validator('source')
     @classmethod
     def validate_source(cls, v):
         """Aplica mesma validação da criação"""
         if v is None:
             return None
-        return ReservationBase.__pydantic_validator__.validate_source(v)
+        
+        # Usar a mesma lógica do ReservationBase
+        v_lower = v.lower().strip()
+        
+        # Mapeamento de aliases comuns para valores canônicos
+        alias_mapping = {
+            'booking.com': 'booking',
+            'bookingcom': 'booking',
+            'room_map': 'room_map',
+            'roommap': 'room_map',
+            'mapa_quartos': 'room_map',
+            'direct_booking': 'direct',
+            'direto': 'direct',
+            'telefone': 'phone',
+            'e-mail': 'email',
+            'walk-in': 'walk_in',
+            'walkin': 'walk_in',
+        }
+        
+        # Verificar se há um alias
+        normalized = alias_mapping.get(v_lower, v_lower)
+        
+        # Verificar se o valor normalizado é válido
+        valid_sources = [source.value for source in ReservationSource]
+        if normalized in valid_sources:
+            return normalized
+        
+        # Se não é válido, retornar como está mas logar warning
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Origem de reserva desconhecida: {v}")
+        return v_lower
 
 
 class ReservationResponse(ReservationBase):
@@ -830,7 +862,7 @@ class ReservationDetailedResponse(BaseModel):
     
     # Campos computados
     status_display: str
-    source_display: str  # ✅ NOVO
+    source_display: str
     is_current: bool = False
     days_until_checkin: Optional[int] = None
     days_since_checkout: Optional[int] = None
