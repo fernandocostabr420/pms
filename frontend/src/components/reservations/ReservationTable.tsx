@@ -1,4 +1,4 @@
-// frontend/src/components/reservations/ReservationTable.tsx
+// frontend/src/components/reservations/ReservationTable.tsx - CORRIGIDO PARA MAPEAMENTOS
 
 'use client';
 
@@ -45,6 +45,12 @@ import {
   CalendarCheck,
   CalendarX,
   Clock,
+  Building2,
+  Map,
+  Settings,
+  UserPlus,
+  MessageSquare,
+  Share2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ReservationResponseWithGuestDetails } from '@/types/reservation';
@@ -65,6 +71,7 @@ interface ReservationTableProps {
   actionLoading?: { [key: number]: string | null };
 }
 
+// ✅ CORRIGIDO: Mapeamento completo de status (sincronizado com backend)
 const statusConfig = {
   pending: { label: 'Pendente', color: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
   confirmed: { label: 'Confirmada', color: 'bg-blue-100 text-blue-800 border-blue-200' },
@@ -72,18 +79,100 @@ const statusConfig = {
   checked_out: { label: 'Check-out', color: 'bg-gray-100 text-gray-800 border-gray-200' },
   cancelled: { label: 'Cancelada', color: 'bg-red-100 text-red-800 border-red-200' },
   no_show: { label: 'No-show', color: 'bg-orange-100 text-orange-800 border-orange-200' },
+  // ✅ NOVO: Status para reservas externas não confirmadas
+  booking: { label: 'Reserva Externa', color: 'bg-purple-100 text-purple-800 border-purple-200' },
 };
 
+// ✅ CORRIGIDO: Mapeamento completo de origens (sincronizado com backend)
 const sourceConfig = {
-  direct: { label: 'Direta', color: 'bg-blue-100 text-blue-800 border-blue-200', icon: Home },
-  'booking.com': { label: 'Booking', color: 'bg-blue-100 text-blue-800 border-blue-200', icon: Globe },
-  airbnb: { label: 'Airbnb', color: 'bg-red-100 text-red-800 border-red-200', icon: Globe },
-  expedia: { label: 'Expedia', color: 'bg-yellow-100 text-yellow-800 border-yellow-200', icon: Globe },
-  agoda: { label: 'Agoda', color: 'bg-purple-100 text-purple-800 border-purple-200', icon: Globe },
+  // Canais diretos
+  direct: { label: 'Reserva Direta', color: 'bg-blue-100 text-blue-800 border-blue-200', icon: Building2 },
+  direct_booking: { label: 'Reserva Direta', color: 'bg-blue-100 text-blue-800 border-blue-200', icon: Building2 },
+  website: { label: 'Site Próprio', color: 'bg-blue-100 text-blue-800 border-blue-200', icon: Globe },
   phone: { label: 'Telefone', color: 'bg-green-100 text-green-800 border-green-200', icon: Phone },
   email: { label: 'Email', color: 'bg-gray-100 text-gray-800 border-gray-200', icon: Mail },
-  website: { label: 'Site', color: 'bg-blue-100 text-blue-800 border-blue-200', icon: Globe },
   walk_in: { label: 'Walk-in', color: 'bg-orange-100 text-orange-800 border-orange-200', icon: Home },
+  
+  // OTAs principais
+  booking: { label: 'Booking.com', color: 'bg-blue-100 text-blue-800 border-blue-200', icon: Globe },
+  'booking.com': { label: 'Booking.com', color: 'bg-blue-100 text-blue-800 border-blue-200', icon: Globe },
+  airbnb: { label: 'Airbnb', color: 'bg-red-100 text-red-800 border-red-200', icon: Globe },
+  expedia: { label: 'Expedia', color: 'bg-yellow-100 text-yellow-800 border-yellow-200', icon: Globe },
+  'hotels.com': { label: 'Hotels.com', color: 'bg-red-100 text-red-800 border-red-200', icon: Globe },
+  agoda: { label: 'Agoda', color: 'bg-purple-100 text-purple-800 border-purple-200', icon: Globe },
+  despegar: { label: 'Despegar', color: 'bg-orange-100 text-orange-800 border-orange-200', icon: Globe },
+  trivago: { label: 'Trivago', color: 'bg-green-100 text-green-800 border-green-200', icon: Globe },
+  
+  // ✅ NOVOS: Canais internos do sistema
+  room_map: { label: 'Mapa de Quartos', color: 'bg-indigo-100 text-indigo-800 border-indigo-200', icon: Map },
+  dashboard: { label: 'Dashboard', color: 'bg-slate-100 text-slate-800 border-slate-200', icon: Settings },
+  admin: { label: 'Administração', color: 'bg-gray-100 text-gray-800 border-gray-200', icon: Settings },
+  
+  // Outros canais
+  agent: { label: 'Agente/Operadora', color: 'bg-teal-100 text-teal-800 border-teal-200', icon: UserPlus },
+  social_media: { label: 'Redes Sociais', color: 'bg-pink-100 text-pink-800 border-pink-200', icon: Share2 },
+  referral: { label: 'Indicação', color: 'bg-cyan-100 text-cyan-800 border-cyan-200', icon: Users },
+  corporate: { label: 'Corporativo', color: 'bg-emerald-100 text-emerald-800 border-emerald-200', icon: Building2 },
+  group: { label: 'Grupo', color: 'bg-violet-100 text-violet-800 border-violet-200', icon: Users },
+};
+
+// ✅ FUNÇÃO HELPER PARA FALLBACK DE STATUS
+const getStatusDisplay = (status: string) => {
+  const config = statusConfig[status as keyof typeof statusConfig];
+  if (config) {
+    return config;
+  }
+  
+  // Fallback para status não mapeados
+  return {
+    label: status.replace('_', ' ').toUpperCase(),
+    color: 'bg-gray-100 text-gray-800 border-gray-200'
+  };
+};
+
+// ✅ FUNÇÃO HELPER PARA FALLBACK DE ORIGEM
+const getSourceDisplay = (source: string) => {
+  if (!source) {
+    return {
+      label: 'Não Informado',
+      color: 'bg-gray-100 text-gray-500 border-gray-200',
+      icon: Globe
+    };
+  }
+  
+  // Tentar encontrar configuração exata
+  const config = sourceConfig[source as keyof typeof sourceConfig];
+  if (config) {
+    return config;
+  }
+  
+  // Tentar buscar por aliases comuns
+  const lowerSource = source.toLowerCase();
+  const aliases: { [key: string]: keyof typeof sourceConfig } = {
+    'booking.com': 'booking',
+    'bookingcom': 'booking',
+    'room_map': 'room_map',
+    'roommap': 'room_map',
+    'mapa_quartos': 'room_map',
+    'direct_booking': 'direct',
+    'direto': 'direct',
+    'telefone': 'phone',
+    'e-mail': 'email',
+    'walk-in': 'walk_in',
+    'walkin': 'walk_in',
+  };
+  
+  const aliasKey = aliases[lowerSource];
+  if (aliasKey && sourceConfig[aliasKey]) {
+    return sourceConfig[aliasKey];
+  }
+  
+  // Fallback para origens não mapeadas
+  return {
+    label: source.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
+    color: 'bg-gray-100 text-gray-600 border-gray-200',
+    icon: Globe
+  };
 };
 
 const formatCurrency = (value: number) => {
@@ -177,7 +266,8 @@ const getQuickActions = (reservation: ReservationResponseWithGuestDetails) => {
     });
   }
 
-  if (['pending', 'confirmed'].includes(reservation.status)) {
+  // ✅ CORRIGIDO: Incluir status "booking" nas ações disponíveis
+  if (['pending', 'confirmed', 'booking'].includes(reservation.status)) {
     actions.push({
       key: 'cancel',
       label: 'Cancelar',
@@ -374,9 +464,11 @@ export default function ReservationTable({
           {sortedReservations.map((reservation) => {
             const nights = calculateNights(reservation.check_in_date, reservation.check_out_date);
             const rooms = formatRooms(reservation.rooms);
-            const status = statusConfig[reservation.status as keyof typeof statusConfig] || 
-                         { label: reservation.status, color: 'bg-gray-100 text-gray-800' };
-            const source = sourceConfig[reservation.source as keyof typeof sourceConfig];
+            
+            // ✅ USAR FUNÇÕES DE FALLBACK
+            const statusDisplay = getStatusDisplay(reservation.status);
+            const sourceDisplay = getSourceDisplay(reservation.source);
+            
             const quickActions = getQuickActions(reservation);
             
             return (
@@ -471,31 +563,23 @@ export default function ReservationTable({
                 <TableCell className="px-2 py-3">
                   <Badge 
                     variant="secondary" 
-                    className={cn("text-xs font-medium border", status.color)}
+                    className={cn("text-xs font-medium border", statusDisplay.color)}
                   >
-                    {status.label}
+                    {statusDisplay.label}
                   </Badge>
                 </TableCell>
 
                 <TableCell className="px-2 py-3">
-                  {source ? (
-                    <div className="flex items-center">
-                      <source.icon className="h-4 w-4 mr-2 text-gray-500" />
-                      <Badge 
-                        variant="secondary" 
-                        className={cn("text-xs font-medium border", source.color)}
-                      >
-                        {source.label}
-                      </Badge>
-                    </div>
-                  ) : (
+                  {/* ✅ USAR sourceDisplay COM FALLBACK */}
+                  <div className="flex items-center">
+                    <sourceDisplay.icon className="h-4 w-4 mr-2 text-gray-500" />
                     <Badge 
                       variant="secondary" 
-                      className="text-xs font-medium bg-gray-100 text-gray-800"
+                      className={cn("text-xs font-medium border", sourceDisplay.color)}
                     >
-                      {reservation.source || 'N/A'}
+                      {sourceDisplay.label}
                     </Badge>
-                  )}
+                  </div>
                 </TableCell>
 
                 <TableCell className="px-2 py-3">

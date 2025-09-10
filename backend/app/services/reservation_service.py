@@ -1,4 +1,4 @@
-# backend/app/services/reservation_service.py
+# backend/app/services/reservation_service.py - CORRIGIDO PARA MAPEAMENTOS
 
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -26,7 +26,7 @@ from app.schemas.guest import GuestCheckInData, GuestUpdate
 from app.services.audit_service import AuditService
 from app.schemas.reservation import ReservationDetailedResponse
 
-# ✅ NOVOS IMPORTS PARA AUDITORIA AUTOMÁTICA
+# IMPORTS PARA AUDITORIA AUTOMÁTICA
 from app.utils.decorators import (
     audit_operation, 
     auto_audit_update, 
@@ -38,11 +38,11 @@ from app.services.audit_formatting_service import AuditFormattingService
 
 
 class ReservationService:
-    """Serviço para operações com reservas - COM AUDITORIA COMPLETA"""
+    """Serviço para operações com reservas - COM AUDITORIA COMPLETA E MAPEAMENTOS CORRIGIDOS"""
     
     def __init__(self, db: Session):
         self.db = db
-        # ✅ ADICIONADO: Serviço de formatação de auditoria
+        # Serviço de formatação de auditoria
         self.audit_formatter = AuditFormattingService()
 
     def generate_reservation_number(self, tenant_id: int) -> str:
@@ -208,6 +208,7 @@ class ReservationService:
             conflicting_reservations=conflicting_reservations if conflicting_reservations else None
         )
 
+    # ✅ MÉTODO GET_RESERVATIONS CORRIGIDO PARA FILTROS FLEXÍVEIS
     def get_reservations(
         self, 
         tenant_id: int, 
@@ -215,7 +216,7 @@ class ReservationService:
         skip: int = 0, 
         limit: int = 100
     ) -> List[Reservation]:
-        """Lista reservas com filtros opcionais"""
+        """Lista reservas com filtros opcionais - CORRIGIDO PARA BUSCA FLEXÍVEL"""
         query = self.db.query(Reservation).options(
             joinedload(Reservation.guest),
             joinedload(Reservation.property_obj),
@@ -226,11 +227,43 @@ class ReservationService:
         )
         
         if filters:
+            # ✅ FILTRO DE STATUS FLEXÍVEL
             if filters.status:
-                query = query.filter(Reservation.status == filters.status)
+                # Normalizar status para busca
+                normalized_status = Reservation.normalize_status_for_search(filters.status)
+                
+                # Buscar por status exato OU por suas variações
+                status_variations = Reservation.get_status_variations(normalized_status)
+                query = query.filter(Reservation.status.in_(status_variations))
             
+            # ✅ FILTRO DE STATUS MÚLTIPLO (NOVO)
+            if filters.status_list:
+                normalized_statuses = []
+                for status in filters.status_list:
+                    normalized = Reservation.normalize_status_for_search(status)
+                    variations = Reservation.get_status_variations(normalized)
+                    normalized_statuses.extend(variations)
+                
+                query = query.filter(Reservation.status.in_(normalized_statuses))
+            
+            # ✅ FILTRO DE ORIGEM FLEXÍVEL
             if filters.source:
-                query = query.filter(Reservation.source == filters.source)
+                # Normalizar origem para busca
+                normalized_source = Reservation.normalize_source_for_search(filters.source)
+                
+                # Buscar por origem exata OU por suas variações
+                source_variations = Reservation.get_source_variations(normalized_source)
+                query = query.filter(Reservation.source.in_(source_variations))
+            
+            # ✅ FILTRO DE ORIGEM MÚLTIPLO (NOVO)
+            if filters.source_list:
+                normalized_sources = []
+                for source in filters.source_list:
+                    normalized = Reservation.normalize_source_for_search(source)
+                    variations = Reservation.get_source_variations(normalized)
+                    normalized_sources.extend(variations)
+                
+                query = query.filter(Reservation.source.in_(normalized_sources))
             
             if filters.property_id:
                 query = query.filter(Reservation.property_id == filters.property_id)
@@ -273,32 +306,67 @@ class ReservationService:
             if filters.is_group_reservation is not None:
                 query = query.filter(Reservation.is_group_reservation == filters.is_group_reservation)
             
-            # Busca textual
+            # ✅ BUSCA TEXTUAL MELHORADA
             if filters.search:
-                search_term = f"%{filters.search}%"
+                search_term = f"%{filters.search.strip()}%"
                 query = query.join(Guest).filter(
                     or_(
+                        # Busca por número da reserva
                         Reservation.reservation_number.ilike(search_term),
+                        # Busca por nome do hóspede (primeiro e último nome)
                         Guest.first_name.ilike(search_term),
                         Guest.last_name.ilike(search_term),
+                        # Busca por nome completo
+                        func.concat(Guest.first_name, ' ', Guest.last_name).ilike(search_term),
+                        # Busca por email
                         Guest.email.ilike(search_term),
-                        Reservation.internal_notes.ilike(search_term)
+                        # Busca por telefone
+                        Guest.phone.ilike(search_term),
+                        # Busca em observações
+                        Reservation.internal_notes.ilike(search_term),
+                        Reservation.guest_requests.ilike(search_term)
                     )
                 )
         
         return query.order_by(Reservation.created_at.desc()).offset(skip).limit(limit).all()
 
+    # ✅ COUNT_RESERVATIONS TAMBÉM CORRIGIDO
     def count_reservations(self, tenant_id: int, filters: Optional[ReservationFilters] = None) -> int:
-        """Conta total de reservas (para paginação)"""
+        """Conta total de reservas (para paginação) - CORRIGIDO"""
         query = self.db.query(func.count(Reservation.id)).filter(
             Reservation.tenant_id == tenant_id,
             Reservation.is_active == True
         )
         
-        # Aplicar mesmos filtros da busca (versão simplificada)
+        # Aplicar mesmos filtros da busca
         if filters:
+            # ✅ FILTROS FLEXÍVEIS TAMBÉM NO COUNT
             if filters.status:
-                query = query.filter(Reservation.status == filters.status)
+                normalized_status = Reservation.normalize_status_for_search(filters.status)
+                status_variations = Reservation.get_status_variations(normalized_status)
+                query = query.filter(Reservation.status.in_(status_variations))
+            
+            if filters.status_list:
+                normalized_statuses = []
+                for status in filters.status_list:
+                    normalized = Reservation.normalize_status_for_search(status)
+                    variations = Reservation.get_status_variations(normalized)
+                    normalized_statuses.extend(variations)
+                query = query.filter(Reservation.status.in_(normalized_statuses))
+            
+            if filters.source:
+                normalized_source = Reservation.normalize_source_for_search(filters.source)
+                source_variations = Reservation.get_source_variations(normalized_source)
+                query = query.filter(Reservation.source.in_(source_variations))
+            
+            if filters.source_list:
+                normalized_sources = []
+                for source in filters.source_list:
+                    normalized = Reservation.normalize_source_for_search(source)
+                    variations = Reservation.get_source_variations(normalized)
+                    normalized_sources.extend(variations)
+                query = query.filter(Reservation.source.in_(normalized_sources))
+            
             if filters.property_id:
                 query = query.filter(Reservation.property_id == filters.property_id)
             if filters.guest_id:
@@ -307,10 +375,26 @@ class ReservationService:
                 query = query.filter(Reservation.check_in_date >= filters.check_in_from)
             if filters.check_in_to:
                 query = query.filter(Reservation.check_in_date <= filters.check_in_to)
+            
+            # ✅ BUSCA TEXTUAL NO COUNT TAMBÉM
+            if filters.search:
+                search_term = f"%{filters.search.strip()}%"
+                query = query.join(Guest).filter(
+                    or_(
+                        Reservation.reservation_number.ilike(search_term),
+                        Guest.first_name.ilike(search_term),
+                        Guest.last_name.ilike(search_term),
+                        func.concat(Guest.first_name, ' ', Guest.last_name).ilike(search_term),
+                        Guest.email.ilike(search_term),
+                        Guest.phone.ilike(search_term),
+                        Reservation.internal_notes.ilike(search_term),
+                        Reservation.guest_requests.ilike(search_term)
+                    )
+                )
         
         return query.scalar()
 
-    # ✅ MÉTODO CREATE_RESERVATION COM AUDITORIA AUTOMÁTICA
+    # MÉTODO CREATE_RESERVATION COM AUDITORIA AUTOMÁTICA
     @audit_operation("reservations", "CREATE", "Nova reserva criada")
     def create_reservation(
         self, 
@@ -371,6 +455,11 @@ class ReservationService:
         
         # Calcular total_guests
         total_guests = reservation_data.adults + reservation_data.children
+        
+        # ✅ NORMALIZAR ORIGEM AUTOMATICAMENTE
+        normalized_source = reservation_data.source
+        if normalized_source:
+            normalized_source = Reservation.normalize_source_for_search(normalized_source)
 
         # Criar reserva principal
         db_reservation = Reservation(
@@ -386,7 +475,7 @@ class ReservationService:
             total_amount=reservation_data.total_amount,
             discount=reservation_data.discount,
             taxes=reservation_data.taxes,
-            source=reservation_data.source,
+            source=normalized_source,  # ✅ NORMALIZADO
             source_reference=reservation_data.source_reference,
             guest_requests=reservation_data.guest_requests,
             internal_notes=reservation_data.internal_notes,
@@ -422,9 +511,7 @@ class ReservationService:
             self.db.commit()
             self.db.refresh(db_reservation)
             
-            # ✅ AUDITORIA AUTOMÁTICA PELO DECORADOR
-            # Vai registrar: guest_id, property_id, dates, amounts, status='pending', etc.
-            
+            # AUDITORIA AUTOMÁTICA PELO DECORADOR
             return db_reservation
             
         except IntegrityError:
@@ -434,7 +521,7 @@ class ReservationService:
                 detail="Erro ao criar reserva - dados duplicados ou conflito"
             )
 
-# ✅ MÉTODO UPDATE_RESERVATION COM AUDITORIA AUTOMÁTICA - SOLUÇÃO DEFINITIVA
+    # MÉTODO UPDATE_RESERVATION COM AUDITORIA AUTOMÁTICA - SOLUÇÃO DEFINITIVA
     @auto_audit_update("reservations", "Reserva atualizada")
     def update_reservation(
         self, 
@@ -480,6 +567,10 @@ class ReservationService:
                     detail="Hóspede não encontrado"
                 )
 
+        # ✅ NORMALIZAR ORIGEM SE FORNECIDA
+        if 'source' in update_data and update_data['source']:
+            update_data['source'] = Reservation.normalize_source_for_search(update_data['source'])
+
         # Se as datas mudaram, verificar disponibilidade
         dates_changed = 'check_in_date' in update_data or 'check_out_date' in update_data
         if dates_changed:
@@ -499,7 +590,7 @@ class ReservationService:
                     detail=f"Quartos não disponíveis no novo período: {unavailable_rooms}"
                 )
 
-        # ✅ PROCESSAR ATUALIZAÇÃO DE QUARTOS - SOLUÇÃO DEFINITIVA
+        # PROCESSAR ATUALIZAÇÃO DE QUARTOS - SOLUÇÃO DEFINITIVA
         rooms_updated = False
         if 'rooms' in update_data and update_data['rooms'] is not None:
             print(f"🔄 Atualizando quartos da reserva {reservation_id}")
@@ -543,8 +634,7 @@ class ReservationService:
                     detail=f"Novos quartos não disponíveis no período: {unavailable_rooms}"
                 )
             
-            # ✅ SOLUÇÃO DEFINITIVA: Registrar alteração de quartos na tabela RESERVATIONS
-            # Isso garante que o log aparecerá no histórico porque usa o ID da reserva
+            # SOLUÇÃO DEFINITIVA: Registrar alteração de quartos na tabela RESERVATIONS
             try:
                 from app.services.audit_service import AuditService
                 audit_service = AuditService(self.db)
@@ -556,13 +646,12 @@ class ReservationService:
                     description = f"🏨 Quartos alterados: {' + '.join(current_rooms)} → {' + '.join(new_rooms)}"
                 
                 # Registrar como um update na tabela RESERVATIONS (usando ID da reserva)
-                # Isso garante que aparecerá no histórico
                 old_rooms_value = ', '.join(current_rooms)
                 new_rooms_value = ', '.join(new_rooms)
                 
                 audit_service.log_update(
-                    table_name="reservations",  # ✅ CHAVE: Usar tabela reservations
-                    record_id=reservation_obj.id,  # ✅ CHAVE: ID da reserva (não muda)
+                    table_name="reservations",  # CHAVE: Usar tabela reservations
+                    record_id=reservation_obj.id,  # CHAVE: ID da reserva (não muda)
                     old_values={'quartos': old_rooms_value},
                     new_values={'quartos': new_rooms_value},
                     user=current_user,
@@ -601,7 +690,7 @@ class ReservationService:
             rooms_updated = True
             print(f"✅ Quartos atualizados: {new_rooms}")
             
-            # ✅ IMPORTANTE: Remover 'rooms' do update_data para não processar no loop básico
+            # IMPORTANTE: Remover 'rooms' do update_data para não processar no loop básico
             del update_data['rooms']
 
         # Atualizar campos de hóspedes se necessário
@@ -610,7 +699,7 @@ class ReservationService:
             children = update_data.get('children', reservation_obj.children)
             update_data['total_guests'] = adults + children
 
-        # ✅ APLICAR ALTERAÇÕES APENAS NOS CAMPOS BÁSICOS DA RESERVA
+        # APLICAR ALTERAÇÕES APENAS NOS CAMPOS BÁSICOS DA RESERVA
         for field, value in update_data.items():
             if hasattr(reservation_obj, field):
                 print(f"📝 Atualizando campo {field}: {getattr(reservation_obj, field)} → {value}")
@@ -626,8 +715,7 @@ class ReservationService:
             self.db.commit()
             self.db.refresh(reservation_obj)
             
-            # ✅ AUDITORIA AUTOMÁTICA PELO DECORADOR
-            # Vai mostrar: "Total: R$ 150,00 → R$ 180,00", "Check-in: 15/09 → 16/09", etc.
+            # AUDITORIA AUTOMÁTICA PELO DECORADOR
             
             print(f"✅ Reserva {reservation_id} atualizada com sucesso")
             if rooms_updated:
@@ -642,8 +730,7 @@ class ReservationService:
                 detail="Erro ao atualizar reserva"
             )
             
-            
-    # ✅ MÉTODO CONFIRM_RESERVATION COM AUDITORIA AUTOMÁTICA
+    # MÉTODO CONFIRM_RESERVATION COM AUDITORIA AUTOMÁTICA
     @auto_audit_update("reservations", "Reserva confirmada")
     def confirm_reservation(
         self, 
@@ -670,7 +757,7 @@ class ReservationService:
                 detail="Apenas reservas pendentes podem ser confirmadas"
             )
 
-        # ✅ ALTERAÇÕES CAPTURADAS AUTOMATICAMENTE PELO DECORADOR
+        # ALTERAÇÕES CAPTURADAS AUTOMATICAMENTE PELO DECORADOR
         reservation_obj.status = 'confirmed'
         reservation_obj.confirmed_date = datetime.utcnow()
         
@@ -678,7 +765,7 @@ class ReservationService:
             self.db.commit()
             self.db.refresh(reservation_obj)
             
-            # ✅ AUDITORIA AUTOMÁTICA: "✅ Reserva confirmada"
+            # AUDITORIA AUTOMÁTICA: "✅ Reserva confirmada"
             return reservation_obj
             
         except Exception as e:
@@ -688,7 +775,7 @@ class ReservationService:
                 detail="Erro ao confirmar reserva"
             )
 
-    # ✅ MÉTODO CHECK_IN COM AUDITORIA AUTOMÁTICA E MANUAL
+    # MÉTODO CHECK_IN COM AUDITORIA AUTOMÁTICA E MANUAL
     @auto_audit_update("reservations", "Check-in realizado")
     def check_in_reservation(
         self, 
@@ -716,7 +803,7 @@ class ReservationService:
                 detail="Check-in não permitido para esta reserva"
             )
 
-        # ✅ PROCESSAR DADOS DO HÓSPEDE SE FORNECIDOS
+        # PROCESSAR DADOS DO HÓSPEDE SE FORNECIDOS
         guest_updated = False
         if check_in_request.guest_data:
             try:
@@ -734,7 +821,7 @@ class ReservationService:
                     detail=f"Erro ao atualizar dados do hóspede: {str(e)}"
                 )
 
-        # ✅ ALTERAÇÕES NA RESERVA CAPTURADAS AUTOMATICAMENTE
+        # ALTERAÇÕES NA RESERVA CAPTURADAS AUTOMATICAMENTE
         reservation_obj.status = 'checked_in'
         reservation_obj.checked_in_date = check_in_request.actual_check_in_time or datetime.utcnow()
         
@@ -759,8 +846,7 @@ class ReservationService:
             self.db.commit()
             self.db.refresh(reservation_obj)
             
-            # ✅ AUDITORIA AUTOMÁTICA: "🏨 Check-in realizado"
-            # Vai capturar: Status: "confirmed" → "checked_in", checked_in_date, internal_notes
+            # AUDITORIA AUTOMÁTICA: "🏨 Check-in realizado"
             
             return reservation_obj
             
@@ -790,7 +876,7 @@ class ReservationService:
         if not guest:
             raise ValueError("Hóspede não encontrado")
         
-        # ✅ VALIDAR CAMPOS OBRIGATÓRIOS PARA CHECK-IN
+        # VALIDAR CAMPOS OBRIGATÓRIOS PARA CHECK-IN
         required_fields = {
             'first_name': guest_data.first_name,
             'last_name': guest_data.last_name,
@@ -815,14 +901,13 @@ class ReservationService:
             missing_names = [field_names.get(field, field) for field in missing_fields]
             raise ValueError(f"Campos obrigatórios não preenchidos: {', '.join(missing_names)}")
         
-        # ✅ PREPARAR DADOS PARA ATUALIZAÇÃO
-        # Convertendo GuestCheckInData para GuestUpdate
+        # PREPARAR DADOS PARA ATUALIZAÇÃO
         update_data = GuestUpdate(
             first_name=guest_data.first_name,
             last_name=guest_data.last_name,
             email=guest_data.email,
             phone=guest_data.phone,
-            document_type='cpf',  # Assumindo CPF para check-in brasileiro
+            document_type='cpf',
             document_number=guest_data.document_number,
             date_of_birth=guest_data.date_of_birth,
             gender=guest_data.gender,
@@ -837,8 +922,7 @@ class ReservationService:
             neighborhood=guest_data.neighborhood
         )
         
-        # ✅ VERIFICAR SE REALMENTE PRECISA ATUALIZAR
-        # Comparar dados atuais com novos dados
+        # VERIFICAR SE REALMENTE PRECISA ATUALIZAR
         needs_update = False
         current_data = {
             'first_name': guest.first_name,
@@ -862,14 +946,13 @@ class ReservationService:
         
         for field, new_value in new_data.items():
             current_value = current_data.get(field)
-            # Comparar valores considerando None e strings vazias como equivalentes
             if (new_value or '').strip() != (current_value or '').strip():
                 needs_update = True
                 break
         
-        # ✅ ATUALIZAR APENAS SE NECESSÁRIO
+        # ATUALIZAR APENAS SE NECESSÁRIO
         if needs_update:
-            # ✅ USAR AUDITORIA MANUAL PARA DADOS DO HÓSPEDE
+            # USAR AUDITORIA MANUAL PARA DADOS DO HÓSPEDE
             with AuditContext(self.db, current_user, request) as audit:
                 old_guest_data = _extract_model_data(guest)
                 
@@ -899,7 +982,7 @@ class ReservationService:
         
         return False
 
-    # ✅ MÉTODO CHECK_OUT COM AUDITORIA AUTOMÁTICA
+    # MÉTODO CHECK_OUT COM AUDITORIA AUTOMÁTICA
     @auto_audit_update("reservations", "Check-out realizado")
     def check_out_reservation(
         self, 
@@ -927,7 +1010,7 @@ class ReservationService:
                 detail="Check-out não permitido para esta reserva"
             )
 
-        # ✅ ALTERAÇÕES CAPTURADAS AUTOMATICAMENTE
+        # ALTERAÇÕES CAPTURADAS AUTOMATICAMENTE
         reservation_obj.status = 'checked_out'
         reservation_obj.checked_out_date = check_out_request.actual_check_out_time or datetime.utcnow()
         
@@ -948,8 +1031,7 @@ class ReservationService:
             self.db.commit()
             self.db.refresh(reservation_obj)
             
-            # ✅ AUDITORIA AUTOMÁTICA: "🚪 Check-out realizado"
-            # Vai capturar: Status, checked_out_date, total_amount (se mudou), internal_notes
+            # AUDITORIA AUTOMÁTICA: "🚪 Check-out realizado"
             
             return reservation_obj
             
@@ -960,7 +1042,7 @@ class ReservationService:
                 detail="Erro ao realizar check-out"
             )
 
-    # ✅ MÉTODO CANCEL_RESERVATION COM AUDITORIA AUTOMÁTICA
+    # MÉTODO CANCEL_RESERVATION COM AUDITORIA AUTOMÁTICA
     @auto_audit_update("reservations", "Reserva cancelada")
     def cancel_reservation(
         self, 
@@ -988,7 +1070,7 @@ class ReservationService:
                 detail="Esta reserva não pode ser cancelada"
             )
 
-        # ✅ ALTERAÇÕES CAPTURADAS AUTOMATICAMENTE
+        # ALTERAÇÕES CAPTURADAS AUTOMATICAMENTE
         reservation_obj.status = 'cancelled'
         reservation_obj.cancelled_date = datetime.utcnow()
         reservation_obj.cancellation_reason = cancel_request.cancellation_reason
@@ -1012,8 +1094,7 @@ class ReservationService:
             self.db.commit()
             self.db.refresh(reservation_obj)
             
-            # ✅ AUDITORIA AUTOMÁTICA: "❌ Reserva cancelada"
-            # Vai capturar: Status, cancelled_date, cancellation_reason, paid_amount (se mudou)
+            # AUDITORIA AUTOMÁTICA: "❌ Reserva cancelada"
             
             return reservation_obj
             
@@ -1051,13 +1132,22 @@ class ReservationService:
         if property_id:
             query = query.filter(Reservation.property_id == property_id)
         
+        # ✅ FILTRO DE STATUS FLEXÍVEL
         if status_filter:
-            query = query.filter(Reservation.status.in_(status_filter))
+            # Normalizar cada status e buscar variações
+            normalized_statuses = []
+            for status in status_filter:
+                normalized = Reservation.normalize_status_for_search(status)
+                variations = Reservation.get_status_variations(normalized)
+                normalized_statuses.extend(variations)
+            
+            query = query.filter(Reservation.status.in_(normalized_statuses))
         
         return query.order_by(Reservation.check_in_date).all()
 
+    # ✅ GET_RESERVATION_STATS CORRIGIDO
     def get_reservation_stats(self, tenant_id: int, property_id: Optional[int] = None) -> Dict[str, Any]:
-        """Obtém estatísticas das reservas"""
+        """Obtém estatísticas das reservas - USANDO DISPLAY NAMES"""
         query = self.db.query(Reservation).filter(
             Reservation.tenant_id == tenant_id,
             Reservation.is_active == True
@@ -1072,7 +1162,11 @@ class ReservationService:
             func.count(Reservation.id)
         ).group_by(Reservation.status).all()
         
-        status_counts = {status: count for status, count in stats_by_status}
+        # ✅ USAR DISPLAY NAMES PARA STATUS
+        status_counts = {}
+        for status, count in stats_by_status:
+            display_name = Reservation._STATUS_DISPLAY_MAP.get(status, status.replace('_', ' ').title())
+            status_counts[display_name] = count
         
         # Reservas hoje
         today = date.today()
@@ -1102,6 +1196,7 @@ class ReservationService:
             'pending_revenue': float(pending_revenue or 0)
         }
 
+    # ✅ GET_RESERVATION_DETAILED USANDO AUDITORIA FORMATADA
     def get_reservation_detailed(self, reservation_id: int, tenant_id: int) -> Optional[Dict[str, Any]]:
         """
         Busca reserva com todos os detalhes para página individual
@@ -1313,7 +1408,7 @@ class ReservationService:
         }
         
         # === 6. HISTÓRICO DE AUDITORIA MELHORADO ===
-        # ✅ MODIFICADO: Usar o novo serviço de formatação
+        # MODIFICADO: Usar o novo serviço de formatação
         payment_ids = [p.id for p in reservation.payments] if reservation.payments else []
         
         audit_logs = self.db.query(AuditLog).options(
@@ -1336,16 +1431,6 @@ class ReservationService:
         
         # === 7. CAMPOS COMPUTADOS ===
         nights = (reservation.check_out_date - reservation.check_in_date).days
-        
-        # Status display mais amigável
-        status_map = {
-            'pending': 'Pendente',
-            'confirmed': 'Confirmada',
-            'checked_in': 'Check-in Feito',
-            'checked_out': 'Check-out Feito',
-            'cancelled': 'Cancelada',
-            'no_show': 'Não Compareceu'
-        }
         
         # Calcular dias até check-in ou desde check-out
         days_until_checkin = None
@@ -1393,10 +1478,11 @@ class ReservationService:
             'rooms': rooms_data,
             'payment': payment_data,
             'actions': actions,
-            'audit_history': audit_history,  # ✅ AGORA COM FORMATAÇÃO RICA
+            'audit_history': audit_history,  # AGORA COM FORMATAÇÃO RICA
             
-            # Campos computados
-            'status_display': status_map.get(reservation.status, reservation.status),
+            # ✅ CAMPOS COMPUTADOS MELHORADOS
+            'status_display': reservation.status_display,  # Usa o property do modelo
+            'source_display': reservation.source_display,  # ✅ NOVO
             'is_current': current_status == 'checked_in',
             'days_until_checkin': days_until_checkin,
             'days_since_checkout': days_since_checkout,

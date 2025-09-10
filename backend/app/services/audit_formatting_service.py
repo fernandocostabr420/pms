@@ -38,7 +38,7 @@ class AuditFormattingService:
         'cancelled_by': 'Cancelado por',
         'cancellation_reason': 'Motivo do Cancelamento',
         
-        # ✅ ADICIONADO: Campo para alterações de quartos
+        # Campo para alterações de quartos
         'quartos': 'Quartos da Reserva',
         
         # Campos de pagamento
@@ -79,7 +79,7 @@ class AuditFormattingService:
         'updated_at': 'Atualizado em',
     }
     
-    # Mapeamento de status para nomes amigáveis
+    # ✅ CORRIGIDO: Mapeamento de status para nomes amigáveis - TODOS OS STATUS VÁLIDOS
     STATUS_NAMES = {
         'pending': 'Pendente',
         'confirmed': 'Confirmada',
@@ -87,6 +87,8 @@ class AuditFormattingService:
         'checked_out': 'Check-out Feito', 
         'cancelled': 'Cancelada',
         'no_show': 'Não Compareceu',
+        # ✅ ADICIONADO: Status que aparecem na tabela mas não estavam mapeados
+        'booking': 'Reserva Externa',  # Para reservas vindas de booking.com antes da confirmação
     }
     
     # Mapeamento de formas de pagamento
@@ -100,20 +102,149 @@ class AuditFormattingService:
         'other': 'Outros',
     }
     
-    # Mapeamento de canais de origem
+    # ✅ CORRIGIDO: Mapeamento de canais de origem - TODOS OS CANAIS USADOS
     SOURCE_NAMES = {
+        # Canais diretos
         'direct': 'Reserva Direta',
-        'booking': 'Booking.com',
-        'airbnb': 'Airbnb',
-        'expedia': 'Expedia',
+        'direct_booking': 'Reserva Direta',
+        'website': 'Site Próprio',
         'phone': 'Telefone',
         'email': 'Email',
         'walk_in': 'Walk-in',
+        
+        # OTAs principais
+        'booking': 'Booking.com',
+        'booking.com': 'Booking.com',  # Alias para compatibilidade
+        'airbnb': 'Airbnb',
+        'expedia': 'Expedia',
+        'hotels.com': 'Hotels.com',
+        'agoda': 'Agoda',
+        'despegar': 'Despegar',
+        'trivago': 'Trivago',
+        
+        # Canais internos do sistema
+        'room_map': 'Mapa de Quartos',  # ✅ NOVO: para reservas criadas pelo mapa
+        'dashboard': 'Dashboard',
+        'admin': 'Administração',
+        
+        # Outros canais
         'agent': 'Agente/Operadora',
+        'social_media': 'Redes Sociais',
+        'referral': 'Indicação',
+        'corporate': 'Corporativo',
+        'group': 'Grupo',
+        
+        # ✅ NOVO: Mapeamento para valores que podem aparecer em cinza
+        'undefined': 'Não Informado',
+        'unknown': 'Desconhecido',
+        '': 'Não Informado',
+        None: 'Não Informado',
+    }
+
+    # ✅ NOVO: Mapeamento reverso para busca (múltiplos valores podem mapear para o mesmo resultado)
+    STATUS_ALIASES = {
+        'pending': ['pending', 'pendente'],
+        'confirmed': ['confirmed', 'confirmada'],
+        'checked_in': ['checked_in', 'check_in', 'checkin', 'check-in'],
+        'checked_out': ['checked_out', 'check_out', 'checkout', 'check-out'],
+        'cancelled': ['cancelled', 'canceled', 'cancelada'],
+        'no_show': ['no_show', 'noshow', 'no-show', 'nao_compareceu'],
+        'booking': ['booking', 'reserva_externa'],
+    }
+
+    SOURCE_ALIASES = {
+        'booking.com': ['booking', 'booking.com', 'bookingcom'],
+        'room_map': ['room_map', 'roommap', 'mapa_quartos', 'mapa'],
+        'direct': ['direct', 'direto', 'direct_booking'],
+        'phone': ['phone', 'telefone', 'fone'],
+        'email': ['email', 'e-mail', 'mail'],
+        'walk_in': ['walk_in', 'walkin', 'walk-in', 'presencial'],
     }
 
     def __init__(self):
         pass
+
+    def get_status_display_name(self, status: str) -> str:
+        """
+        ✅ NOVO: Método para obter nome de display do status com fallback
+        """
+        if not status:
+            return 'Não Informado'
+        
+        # Buscar primeiro no mapeamento principal
+        display_name = self.STATUS_NAMES.get(status.lower())
+        if display_name:
+            return display_name
+        
+        # Se não encontrou, tentar pelos aliases
+        for canonical_status, aliases in self.STATUS_ALIASES.items():
+            if status.lower() in [alias.lower() for alias in aliases]:
+                return self.STATUS_NAMES.get(canonical_status, status)
+        
+        # Fallback: capitalizar primeira letra
+        return status.replace('_', ' ').title()
+
+    def get_source_display_name(self, source: str) -> str:
+        """
+        ✅ NOVO: Método para obter nome de display da origem com fallback
+        """
+        if not source:
+            return 'Não Informado'
+        
+        # Buscar primeiro no mapeamento principal
+        display_name = self.SOURCE_NAMES.get(source.lower())
+        if display_name:
+            return display_name
+        
+        # Se não encontrou, tentar pelos aliases
+        for canonical_source, aliases in self.SOURCE_ALIASES.items():
+            if source.lower() in [alias.lower() for alias in aliases]:
+                return self.SOURCE_NAMES.get(canonical_source, source)
+        
+        # Fallback: capitalizar primeira letra
+        return source.replace('_', ' ').title()
+
+    def normalize_status(self, status: str) -> str:
+        """
+        ✅ NOVO: Normaliza status para valor canônico
+        """
+        if not status:
+            return 'pending'
+        
+        status_lower = status.lower()
+        
+        # Verificar se já é um status válido
+        if status_lower in self.STATUS_NAMES:
+            return status_lower
+        
+        # Buscar pelos aliases
+        for canonical_status, aliases in self.STATUS_ALIASES.items():
+            if status_lower in [alias.lower() for alias in aliases]:
+                return canonical_status
+        
+        # Se não encontrou, retornar como está (mas em lowercase)
+        return status_lower
+
+    def normalize_source(self, source: str) -> str:
+        """
+        ✅ NOVO: Normaliza origem para valor canônico
+        """
+        if not source:
+            return 'direct'
+        
+        source_lower = source.lower()
+        
+        # Verificar se já é uma origem válida
+        if source_lower in self.SOURCE_NAMES:
+            return source_lower
+        
+        # Buscar pelos aliases
+        for canonical_source, aliases in self.SOURCE_ALIASES.items():
+            if source_lower in [alias.lower() for alias in aliases]:
+                return canonical_source
+        
+        # Se não encontrou, retornar como está (mas em lowercase)
+        return source_lower
 
     def format_audit_entry(self, log: Any) -> Dict[str, Any]:
         """
@@ -280,13 +411,13 @@ class AuditFormattingService:
             description = "📝 Reserva atualizada"
             
             if log.changed_fields and log.old_values and log.new_values:
-                # ✅ ADICIONADO: Tratamento especial para mudanças de quartos
+                # Tratamento especial para mudanças de quartos
                 if 'quartos' in log.changed_fields:
                     # Usar a descrição já formatada do log (que vem do nosso código)
                     if log.description and ('🔄' in log.description or '🏨' in log.description):
                         description = log.description  # Usar nossa descrição personalizada
                 
-                # Tratamento especial para mudanças de status (código existente)
+                # Tratamento especial para mudanças de status
                 elif 'status' in log.changed_fields:
                     new_status = log.new_values.get('status')
                     if new_status == 'confirmed':
@@ -416,8 +547,9 @@ class AuditFormattingService:
                 field_type = 'datetime'
                 
             elif field == 'status':
-                old_formatted = self.STATUS_NAMES.get(old_value, old_value) if old_value else None
-                new_formatted = self.STATUS_NAMES.get(new_value, new_value) if new_value else None
+                # ✅ CORRIGIDO: Usar o novo método que lida com status não mapeados
+                old_formatted = self.get_status_display_name(old_value) if old_value else None
+                new_formatted = self.get_status_display_name(new_value) if new_value else None
                 field_type = 'status'
                 
             elif field == 'payment_method':
@@ -426,8 +558,9 @@ class AuditFormattingService:
                 field_type = 'payment_method'
                 
             elif field == 'source':
-                old_formatted = self.SOURCE_NAMES.get(old_value, old_value) if old_value else None
-                new_formatted = self.SOURCE_NAMES.get(new_value, new_value) if new_value else None
+                # ✅ CORRIGIDO: Usar o novo método que lida com origens não mapeadas
+                old_formatted = self.get_source_display_name(old_value) if old_value else None
+                new_formatted = self.get_source_display_name(new_value) if new_value else None
                 field_type = 'source'
                 
             elif field in ['room_id', 'assigned_room']:
@@ -435,7 +568,7 @@ class AuditFormattingService:
                 new_formatted = f"Quarto {new_value}" if new_value else None
                 field_type = 'room'
                 
-            # ✅ ADICIONADO: Tratamento especial para alterações de quartos
+            # Tratamento especial para alterações de quartos
             elif field == 'quartos':
                 old_formatted = old_value if old_value else "Nenhum"
                 new_formatted = new_value if new_value else "Nenhum"

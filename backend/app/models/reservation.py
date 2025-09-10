@@ -1,7 +1,7 @@
-# app/models/reservation.py
+# app/models/reservation.py - CORRIGIDO PARA MAPEAMENTOS
 
 from sqlalchemy import Column, String, Date, DateTime, Numeric, Integer, Text, JSON, Boolean, ForeignKey
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 from datetime import datetime, date
 from decimal import Decimal
 
@@ -28,7 +28,7 @@ class Reservation(BaseModel, TenantMixin):
     
     # Status da reserva
     status = Column(String(20), nullable=False, default="pending", index=True)
-    # pending, confirmed, checked_in, checked_out, cancelled, no_show
+    # pending, confirmed, checked_in, checked_out, cancelled, no_show, booking
     
     # Informações dos hóspedes
     adults = Column(Integer, default=1, nullable=False)
@@ -43,7 +43,7 @@ class Reservation(BaseModel, TenantMixin):
     taxes = Column(Numeric(10, 2), default=0, nullable=False)        # Impostos/taxas
     
     # Origem da reserva
-    source = Column(String(50), nullable=True, index=True)   # direct, booking.com, airbnb, etc.
+    source = Column(String(50), nullable=True, index=True)   # direct, booking, airbnb, room_map, etc.
     source_reference = Column(String(100), nullable=True)   # ID externo da reserva
     
     # Datas importantes
@@ -71,13 +71,138 @@ class Reservation(BaseModel, TenantMixin):
     guest = relationship("Guest", back_populates="reservations")
     property_obj = relationship("Property")
     reservation_rooms = relationship("ReservationRoom", back_populates="reservation", cascade="all, delete-orphan")
-    payments = relationship("Payment", back_populates="reservation", cascade="all, delete-orphan")  # ✅ NOVO
+    payments = relationship("Payment", back_populates="reservation", cascade="all, delete-orphan")
     
+    # ✅ NOVOS MAPEAMENTOS PARA CORRIGIR PROBLEMAS
+    
+    # Mapeamento de status válidos
+    _VALID_STATUSES = {
+        'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 'no_show', 'booking'
+    }
+    
+    # Mapeamento de status para display
+    _STATUS_DISPLAY_MAP = {
+        'pending': 'Pendente',
+        'confirmed': 'Confirmada',
+        'checked_in': 'Check-in Realizado',
+        'checked_out': 'Check-out Realizado',
+        'cancelled': 'Cancelada',
+        'no_show': 'No-show',
+        'booking': 'Reserva Externa'  # ✅ NOVO: Para booking.com não confirmadas
+    }
+    
+    # Mapeamento de origens válidas
+    _VALID_SOURCES = {
+        'direct', 'direct_booking', 'website', 'phone', 'email', 'walk_in',
+        'booking', 'booking.com', 'airbnb', 'expedia', 'hotels.com', 'agoda',
+        'room_map', 'dashboard', 'admin', 'agent', 'social_media', 'referral'
+    }
+    
+    # Mapeamento de origens para display
+    _SOURCE_DISPLAY_MAP = {
+        'direct': 'Reserva Direta',
+        'direct_booking': 'Reserva Direta',
+        'website': 'Site Próprio',
+        'phone': 'Telefone',
+        'email': 'Email',
+        'walk_in': 'Walk-in',
+        'booking': 'Booking.com',
+        'booking.com': 'Booking.com',
+        'airbnb': 'Airbnb',
+        'expedia': 'Expedia',
+        'hotels.com': 'Hotels.com',
+        'agoda': 'Agoda',
+        'room_map': 'Mapa de Quartos',  # ✅ NOVO: Para reservas criadas pelo mapa
+        'dashboard': 'Dashboard',
+        'admin': 'Administração',
+        'agent': 'Agente/Operadora',
+        'social_media': 'Redes Sociais',
+        'referral': 'Indicação',
+    }
+    
+    # Aliases para normalização
+    _SOURCE_ALIASES = {
+        'booking.com': 'booking',
+        'bookingcom': 'booking',
+        'room_map': 'room_map',
+        'roommap': 'room_map',
+        'mapa_quartos': 'room_map',
+        'direct_booking': 'direct',
+        'direto': 'direct',
+        'telefone': 'phone',
+        'e-mail': 'email',
+        'walk-in': 'walk_in',
+        'walkin': 'walk_in',
+    }
+
     def __repr__(self):
         return (f"<Reservation(id={self.id}, number='{self.reservation_number}', "
                 f"guest='{self.guest.full_name if self.guest else 'N/A'}', "
                 f"dates={self.check_in_date}-{self.check_out_date}, status='{self.status}')>")
     
+    # ✅ VALIDADORES PARA NORMALIZAÇÃO AUTOMÁTICA
+    
+    @validates('status')
+    def validate_status(self, key, status):
+        """Valida e normaliza status da reserva"""
+        if not status:
+            return 'pending'
+        
+        status_lower = status.lower().strip()
+        
+        # Se já é válido, retornar
+        if status_lower in self._VALID_STATUSES:
+            return status_lower
+        
+        # Normalizar aliases comuns
+        status_aliases = {
+            'check_in': 'checked_in',
+            'checkin': 'checked_in',
+            'check-in': 'checked_in',
+            'check_out': 'checked_out',
+            'checkout': 'checked_out',
+            'check-out': 'checked_out',
+            'canceled': 'cancelled',
+            'no-show': 'no_show',
+            'noshow': 'no_show',
+            'reserva_externa': 'booking',
+        }
+        
+        normalized = status_aliases.get(status_lower)
+        if normalized:
+            return normalized
+        
+        # Se não reconhecido, usar pending como padrão
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Status desconhecido: {status}, usando 'pending'")
+        return 'pending'
+
+    @validates('source')
+    def validate_source(self, key, source):
+        """Valida e normaliza origem da reserva"""
+        if not source:
+            return 'direct'
+        
+        source_lower = source.lower().strip()
+        
+        # Se já é válido, retornar
+        if source_lower in self._VALID_SOURCES:
+            return source_lower
+        
+        # Aplicar aliases
+        normalized = self._SOURCE_ALIASES.get(source_lower)
+        if normalized:
+            return normalized
+        
+        # Se não reconhecido, manter como está mas logar
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Origem desconhecida: {source}")
+        return source_lower
+
+    # ✅ PROPRIEDADES MELHORADAS
+
     @property
     def nights(self):
         """Número de noites da reserva"""
@@ -87,38 +212,38 @@ class Reservation(BaseModel, TenantMixin):
     
     @property
     def total_paid(self):
-        """Total efetivamente pago (apenas pagamentos confirmados) - ✅ NOVO"""
+        """Total efetivamente pago (apenas pagamentos confirmados)"""
         confirmed_payments = [p for p in self.payments if p.status == "confirmed" and not p.is_refund]
         return sum(p.amount for p in confirmed_payments)
     
     @property
     def total_refunded(self):
-        """Total estornado - ✅ NOVO"""
+        """Total estornado"""
         refunds = [p for p in self.payments if p.status == "confirmed" and p.is_refund]
         return sum(p.amount for p in refunds)
     
     @property
     def balance_due(self):
-        """Saldo devedor baseado nos pagamentos reais - ✅ ATUALIZADO"""
+        """Saldo devedor baseado nos pagamentos reais"""
         if not self.total_amount:
             return Decimal('0')
         return self.total_amount - self.total_paid + self.total_refunded
     
     @property
     def balance_due_legacy(self):
-        """Saldo devedor usando campo paid_amount (compatibilidade) - ✅ NOVO"""
+        """Saldo devedor usando campo paid_amount (compatibilidade)"""
         if not self.total_amount:
             return Decimal('0')
         return self.total_amount - self.paid_amount
     
     @property
     def is_paid(self):
-        """Verifica se a reserva está quitada - ✅ ATUALIZADO"""
+        """Verifica se a reserva está quitada"""
         return self.balance_due <= 0
     
     @property
     def payment_status(self):
-        """Status do pagamento baseado nos pagamentos reais - ✅ NOVO"""
+        """Status do pagamento baseado nos pagamentos reais"""
         if not self.total_amount or self.total_amount == 0:
             return "no_payment_required"
         
@@ -134,7 +259,7 @@ class Reservation(BaseModel, TenantMixin):
     
     @property
     def last_payment_date(self):
-        """Data do último pagamento confirmado - ✅ NOVO"""
+        """Data do último pagamento confirmado"""
         confirmed_payments = [p for p in self.payments if p.status == "confirmed"]
         if not confirmed_payments:
             return None
@@ -142,21 +267,20 @@ class Reservation(BaseModel, TenantMixin):
     
     @property
     def payment_count(self):
-        """Número total de pagamentos (exceto estornos) - ✅ NOVO"""
+        """Número total de pagamentos (exceto estornos)"""
         return len([p for p in self.payments if not p.is_refund and p.status == "confirmed"])
     
     @property
     def status_display(self):
-        """Status formatado para exibição"""
-        status_map = {
-            "pending": "Pendente",
-            "confirmed": "Confirmada",
-            "checked_in": "Check-in Realizado",
-            "checked_out": "Check-out Realizado",
-            "cancelled": "Cancelada",
-            "no_show": "No-show"
-        }
-        return status_map.get(self.status, self.status.title())
+        """Status formatado para exibição - CORRIGIDO"""
+        return self._STATUS_DISPLAY_MAP.get(self.status, self.status.replace('_', ' ').title())
+    
+    @property
+    def source_display(self):
+        """✅ NOVO: Origem formatada para exibição"""
+        if not self.source:
+            return 'Não Informado'
+        return self._SOURCE_DISPLAY_MAP.get(self.source, self.source.replace('_', ' ').title())
     
     @property
     def can_check_in(self):
@@ -187,6 +311,95 @@ class Reservation(BaseModel, TenantMixin):
             self.check_in_date <= today <= self.check_out_date and
             self.is_active
         )
+    
+    # ✅ NOVOS MÉTODOS PARA SUPORTE A FILTROS FLEXÍVEIS
+    
+    @classmethod
+    def normalize_status_for_search(cls, status: str) -> str:
+        """Normaliza status para busca flexível"""
+        if not status:
+            return status
+        
+        status_lower = status.lower().strip()
+        
+        # Mapeamentos de busca flexível
+        search_map = {
+            'pendente': 'pending',
+            'confirmada': 'confirmed',
+            'check-in': 'checked_in',
+            'checkin': 'checked_in',
+            'check_in': 'checked_in',
+            'check-out': 'checked_out',
+            'checkout': 'checked_out',
+            'check_out': 'checked_out',
+            'cancelada': 'cancelled',
+            'canceled': 'cancelled',
+            'no-show': 'no_show',
+            'noshow': 'no_show',
+            'reserva_externa': 'booking',
+            'booking': 'booking',
+        }
+        
+        return search_map.get(status_lower, status_lower)
+    
+    @classmethod
+    def normalize_source_for_search(cls, source: str) -> str:
+        """Normaliza origem para busca flexível"""
+        if not source:
+            return source
+        
+        source_lower = source.lower().strip()
+        
+        # Mapeamentos de busca flexível
+        search_map = {
+            'booking.com': 'booking',
+            'bookingcom': 'booking',
+            'room_map': 'room_map',
+            'roommap': 'room_map',
+            'mapa_quartos': 'room_map',
+            'mapa': 'room_map',
+            'direct_booking': 'direct',
+            'direto': 'direct',
+            'direct': 'direct',
+            'telefone': 'phone',
+            'fone': 'phone',
+            'e-mail': 'email',
+            'mail': 'email',
+            'walk-in': 'walk_in',
+            'walkin': 'walk_in',
+            'presencial': 'walk_in',
+        }
+        
+        return search_map.get(source_lower, source_lower)
+    
+    @classmethod
+    def get_status_variations(cls, canonical_status: str) -> list:
+        """Retorna todas as variações possíveis de um status para busca"""
+        variations_map = {
+            'pending': ['pending', 'pendente'],
+            'confirmed': ['confirmed', 'confirmada'],
+            'checked_in': ['checked_in', 'check_in', 'checkin', 'check-in'],
+            'checked_out': ['checked_out', 'check_out', 'checkout', 'check-out'],
+            'cancelled': ['cancelled', 'canceled', 'cancelada'],
+            'no_show': ['no_show', 'noshow', 'no-show'],
+            'booking': ['booking', 'reserva_externa'],
+        }
+        
+        return variations_map.get(canonical_status, [canonical_status])
+    
+    @classmethod
+    def get_source_variations(cls, canonical_source: str) -> list:
+        """Retorna todas as variações possíveis de uma origem para busca"""
+        variations_map = {
+            'booking': ['booking', 'booking.com', 'bookingcom'],
+            'room_map': ['room_map', 'roommap', 'mapa_quartos', 'mapa'],
+            'direct': ['direct', 'direct_booking', 'direto'],
+            'phone': ['phone', 'telefone', 'fone'],
+            'email': ['email', 'e-mail', 'mail'],
+            'walk_in': ['walk_in', 'walkin', 'walk-in', 'presencial'],
+        }
+        
+        return variations_map.get(canonical_source, [canonical_source])
 
 
 class ReservationRoom(BaseModel):

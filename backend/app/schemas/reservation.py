@@ -1,12 +1,59 @@
-# backend/app/schemas/reservation.py - ARQUIVO COMPLETO COM MODIFICAÇÕES PARA CHECK-OUTS PENDENTES
+# backend/app/schemas/reservation.py - ARQUIVO COMPLETO COM MODIFICAÇÕES PARA CORRIGIR MAPEAMENTOS
 
 from pydantic import BaseModel, field_validator, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime, date
 from decimal import Decimal
+from enum import Enum
 
-# ✅ NOVO IMPORT - Schema para dados do check-in
+# NOVO IMPORT - Schema para dados do check-in
 from app.schemas.guest import GuestCheckInData
+
+
+# ✅ NOVOS ENUMS PARA VALIDAÇÃO E MAPEAMENTO
+
+class ReservationStatus(str, Enum):
+    """Enum para status válidos de reserva"""
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    CHECKED_IN = "checked_in"
+    CHECKED_OUT = "checked_out"
+    CANCELLED = "cancelled"
+    NO_SHOW = "no_show"
+    BOOKING = "booking"  # Para reservas externas não confirmadas
+
+
+class ReservationSource(str, Enum):
+    """Enum para origens válidas de reserva"""
+    # Canais diretos
+    DIRECT = "direct"
+    DIRECT_BOOKING = "direct_booking"
+    WEBSITE = "website"
+    PHONE = "phone"
+    EMAIL = "email"
+    WALK_IN = "walk_in"
+    
+    # OTAs principais
+    BOOKING = "booking"
+    BOOKING_COM = "booking.com"
+    AIRBNB = "airbnb"
+    EXPEDIA = "expedia"
+    HOTELS_COM = "hotels.com"
+    AGODA = "agoda"
+    DESPEGAR = "despegar"
+    TRIVAGO = "trivago"
+    
+    # Canais internos do sistema
+    ROOM_MAP = "room_map"
+    DASHBOARD = "dashboard"
+    ADMIN = "admin"
+    
+    # Outros canais
+    AGENT = "agent"
+    SOCIAL_MEDIA = "social_media"
+    REFERRAL = "referral"
+    CORPORATE = "corporate"
+    GROUP = "group"
 
 
 class ReservationRoomBase(BaseModel):
@@ -66,7 +113,7 @@ class ReservationBase(BaseModel):
     discount: Decimal = Field(default=Decimal('0.00'), ge=0, description="Desconto")
     taxes: Decimal = Field(default=Decimal('0.00'), ge=0, description="Taxas")
     
-    # Origem
+    # ✅ CORRIGIDO: Origem com validação enum
     source: Optional[str] = Field(None, max_length=100, description="Canal de origem")
     source_reference: Optional[str] = Field(None, max_length=200, description="Referência no canal")
     
@@ -89,11 +136,53 @@ class ReservationBase(BaseModel):
         if check_in and v <= check_in:
             raise ValueError('Check-out deve ser posterior ao check-in')
         return v
+    
+    @field_validator('source')
+    @classmethod
+    def validate_source(cls, v):
+        """Valida e normaliza a origem da reserva"""
+        if v is None:
+            return None
+        
+        # Normalizar para lowercase
+        v_lower = v.lower()
+        
+        # Mapeamento de aliases comuns para valores canônicos
+        alias_mapping = {
+            'booking.com': 'booking',
+            'bookingcom': 'booking',
+            'room_map': 'room_map',
+            'roommap': 'room_map',
+            'mapa_quartos': 'room_map',
+            'direct_booking': 'direct',
+            'direto': 'direct',
+            'telefone': 'phone',
+            'e-mail': 'email',
+            'walk-in': 'walk_in',
+            'walkin': 'walk_in',
+        }
+        
+        # Verificar se há um alias
+        normalized = alias_mapping.get(v_lower, v_lower)
+        
+        # Verificar se o valor normalizado é válido
+        valid_sources = [source.value for source in ReservationSource]
+        if normalized in valid_sources:
+            return normalized
+        
+        # Se não é válido, retornar como está mas logar warning
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Origem de reserva desconhecida: {v}")
+        return v_lower
 
 
 class ReservationCreate(ReservationBase):
     """Schema para criação de Reservation"""
     rooms: List[ReservationRoomCreate] = Field(..., min_length=1, description="Quartos da reserva")
+    
+    # ✅ NOVO: Status inicial opcional (padrão: pending)
+    status: Optional[ReservationStatus] = Field(ReservationStatus.PENDING, description="Status inicial")
 
 
 class ReservationUpdate(BaseModel):
@@ -112,7 +201,7 @@ class ReservationUpdate(BaseModel):
     discount: Optional[Decimal] = Field(None, ge=0)
     taxes: Optional[Decimal] = Field(None, ge=0)
     
-    # ✅ ADICIONADO: Campos de origem que estavam faltando
+    # ✅ CORRIGIDO: Campos de origem que estavam faltando
     source: Optional[str] = Field(None, max_length=100, description="Canal de origem")
     source_reference: Optional[str] = Field(None, max_length=200, description="Referência no canal")
     
@@ -128,6 +217,9 @@ class ReservationUpdate(BaseModel):
     is_group_reservation: Optional[bool] = None
     requires_deposit: Optional[bool] = None
     
+    # Status (com validação)
+    status: Optional[ReservationStatus] = None
+    
     # Quartos (opcional)
     rooms: Optional[List[ReservationRoomCreate]] = None
     
@@ -139,6 +231,14 @@ class ReservationUpdate(BaseModel):
             raise ValueError('Check-out deve ser posterior ao check-in')
         return v
 
+    @field_validator('source')
+    @classmethod
+    def validate_source(cls, v):
+        """Aplica mesma validação da criação"""
+        if v is None:
+            return None
+        return ReservationBase.__pydantic_validator__.validate_source(v)
+
 
 class ReservationResponse(ReservationBase):
     """Schema para resposta de Reservation"""
@@ -146,7 +246,8 @@ class ReservationResponse(ReservationBase):
     reservation_number: str
     tenant_id: int
     
-    status: str
+    # ✅ CORRIGIDO: Status com enum para garantir valores válidos
+    status: str  # Mantemos como string na resposta para compatibilidade
     total_guests: int
     paid_amount: Decimal
     
@@ -167,10 +268,13 @@ class ReservationResponse(ReservationBase):
     guest_email: Optional[str] = None
     property_name: Optional[str] = None
     
+    # ✅ NOVO: Display names para status e origem
+    status_display: Optional[str] = None
+    source_display: Optional[str] = None
+    
     # Campos computados
     nights: Optional[int] = None
     balance_due: Optional[Decimal] = None
-    status_display: Optional[str] = None
     is_paid: Optional[bool] = None
     can_check_in: Optional[bool] = None
     can_check_out: Optional[bool] = None
@@ -208,7 +312,7 @@ class CheckInRequest(BaseModel):
     notes: Optional[str] = Field(None, max_length=500, description="Observações do check-in")
     room_assignments: Optional[Dict[int, int]] = Field(None, description="Atribuições de quartos {reservation_room_id: room_id}")
     
-    # ✅ NOVO - Dados do hóspede para atualizar durante o check-in
+    # NOVO - Dados do hóspede para atualizar durante o check-in
     guest_data: Optional[GuestCheckInData] = Field(
         None, 
         description="Dados do hóspede para atualizar/validar durante o check-in"
@@ -238,7 +342,7 @@ class AvailabilityRequest(BaseModel):
     children: Optional[int] = Field(default=0, ge=0, le=10)
     room_type_id: Optional[int] = None
     
-    # ✅ NOVO CAMPO - Excluir reserva específica da verificação (para edições)
+    # NOVO CAMPO - Excluir reserva específica da verificação (para edições)
     exclude_reservation_id: Optional[int] = Field(
         None, 
         description="ID da reserva a ser excluída da verificação de conflitos (usado em edições)"
@@ -264,7 +368,7 @@ class AvailableRoom(BaseModel):
     floor: Optional[int] = None
     building: Optional[str] = None
     
-    # ✅ NOVO CAMPO - Taxa base do quarto
+    # NOVO CAMPO - Taxa base do quarto
     rate_per_night: Optional[float] = Field(
         None, 
         description="Taxa base por noite do quarto"
@@ -289,6 +393,10 @@ class ReservationFilters(BaseModel):
     property_id: Optional[int] = Field(None, description="ID da propriedade")
     guest_id: Optional[int] = Field(None, description="ID do hóspede")
     search: Optional[str] = Field(None, description="Busca geral")
+    
+    # ✅ NOVO: Filtros com múltiplos valores (para busca flexível)
+    status_list: Optional[List[str]] = Field(None, description="Lista de status para filtrar")
+    source_list: Optional[List[str]] = Field(None, description="Lista de origens para filtrar")
     
     # Filtros de data
     check_in_from: Optional[date] = Field(None, description="Check-in a partir de")
@@ -447,13 +555,13 @@ class ReservationSummary(BaseModel):
     revenue_per_night: Decimal
 
 
-# ===== ✅ SCHEMAS MODIFICADOS PARA DASHBOARD COM CHECK-OUTS PENDENTES =====
+# ===== SCHEMAS MODIFICADOS PARA DASHBOARD COM CHECK-OUTS PENDENTES =====
 
 class DashboardSummaryResponse(BaseModel):
     """Schema para resumo do dashboard - ATUALIZADO"""
     total_reservations: int
     todays_checkins: int
-    pending_checkouts: int  # ✅ ALTERADO: era todays_checkouts
+    pending_checkouts: int  # ALTERADO: era todays_checkouts
     current_guests: int
     total_revenue: Decimal
     paid_revenue: Decimal
@@ -467,12 +575,12 @@ class TodaysReservationsResponse(BaseModel):
     """Schema para reservas de hoje - ATUALIZADO"""
     date: str
     arrivals_count: int
-    pending_checkouts_count: int  # ✅ ALTERADO: era departures_count
+    pending_checkouts_count: int  # ALTERADO: era departures_count
     current_guests_count: int
     
     # Dados detalhados (quando include_details=True)
     arrivals: Optional[List[Dict[str, Any]]] = None
-    pending_checkouts: Optional[List[Dict[str, Any]]] = None  # ✅ ALTERADO: era departures
+    pending_checkouts: Optional[List[Dict[str, Any]]] = None  # ALTERADO: era departures
     current_guests: Optional[List[Dict[str, Any]]] = None
 
 
@@ -486,7 +594,7 @@ class DashboardStatsResponse(BaseModel):
     
     # Estatísticas hoje
     today_arrivals: int
-    pending_checkouts: int  # ✅ ALTERADO: era today_departures
+    pending_checkouts: int  # ALTERADO: era today_departures
     current_guests: int
     available_rooms_today: int
     
@@ -722,6 +830,7 @@ class ReservationDetailedResponse(BaseModel):
     
     # Campos computados
     status_display: str
+    source_display: str  # ✅ NOVO
     is_current: bool = False
     days_until_checkin: Optional[int] = None
     days_since_checkout: Optional[int] = None
@@ -730,3 +839,32 @@ class ReservationDetailedResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     tenant_id: int
+
+
+# ✅ NOVO: Schemas para normalização de dados existentes
+
+class NormalizationReport(BaseModel):
+    """Schema para relatório de normalização de dados"""
+    total_records_checked: int
+    records_updated: int
+    status_changes: Dict[str, int]
+    source_changes: Dict[str, int]
+    errors: List[str]
+    started_at: datetime
+    completed_at: datetime
+
+
+class BatchUpdateRequest(BaseModel):
+    """Schema para atualização em lote de reservas"""
+    reservation_ids: List[int] = Field(..., max_length=1000, description="IDs das reservas")
+    updates: Dict[str, Any] = Field(..., description="Campos para atualizar")
+    reason: str = Field(..., max_length=500, description="Motivo da atualização em lote")
+
+
+class BatchUpdateResponse(BaseModel):
+    """Schema para resposta de atualização em lote"""
+    total_requested: int
+    successfully_updated: int
+    failed_updates: int
+    errors: List[Dict[str, str]]
+    updated_reservation_ids: List[int]
