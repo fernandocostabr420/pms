@@ -1,9 +1,9 @@
-// frontend/src/app/dashboard/reservations/page.tsx
+// frontend/src/app/dashboard/reservations/page.tsx - ARQUIVO COMPLETO COM TODAS AS FUNCIONALIDADES
 
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation'; // ✅ Adicionar import do router
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -33,9 +33,9 @@ import ReservationTable from '@/components/reservations/ReservationTable';
 import ReservationCard from '@/components/reservations/ReservationCard';
 import ReservationDetails from '@/components/reservations/ReservationDetails';
 import LoadingSpinner from '@/components/ui/loading-spinner';
-import CancelReservationModal from '@/components/reservations/CancelReservationModal'; // ✅ NOVO IMPORT
+import CancelReservationModal from '@/components/reservations/CancelReservationModal';
 
-// ✅ NOVOS IMPORTS - Componente Padronizado
+// Componente Padronizado
 import StandardReservationModal from '@/components/reservations/StandardReservationModal';
 import { RESERVATION_MODAL_CONFIGS } from '@/components/reservations/configs/reservationModalConfigs';
 
@@ -68,6 +68,8 @@ interface QuickStats {
 const INITIAL_FILTERS: ReservationFilters = {
   status: undefined,
   source: undefined,
+  status_list: undefined, // ✅ SUPORTE MULTI-SELECT
+  source_list: undefined, // ✅ SUPORTE MULTI-SELECT
   property_id: undefined,
   guest_id: undefined,
   check_in_from: undefined,
@@ -90,7 +92,7 @@ const PER_PAGE = 20;
 type ViewMode = 'table' | 'cards';
 
 export default function ReservationsPage() {
-  const router = useRouter(); // ✅ Hook do router
+  const router = useRouter();
 
   // Estados principais
   const [state, setState] = useState<ReservationPageState>({
@@ -112,16 +114,16 @@ export default function ReservationsPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('table');
 
-  // ✅ NOVOS ESTADOS - Modais Padronizados
+  // Estados - Modais Padronizados
   const [showNewReservationModal, setShowNewReservationModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [reservationToEdit, setReservationToEdit] = useState<ReservationResponseWithGuestDetails | null>(null);
 
-  // ✅ NOVOS ESTADOS - Modal de Cancelamento
+  // Estados - Modal de Cancelamento
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [reservationToCancel, setReservationToCancel] = useState<ReservationResponseWithGuestDetails | null>(null);
 
-  // ✅ NOVA FUNÇÃO: Handler para clique na reserva (navegar para página de detalhes)
+  // Handler para clique na reserva (navegar para página de detalhes)
   const handleReservationClick = useCallback((reservation: ReservationResponseWithGuestDetails) => {
     router.push(`/dashboard/reservations/${reservation.id}`);
   }, [router]);
@@ -132,6 +134,9 @@ export default function ReservationsPage() {
       setState(prev => ({ ...prev, loading: true, error: null }));
       
       const currentPage = page || state.currentPage;
+      
+      // ✅ PREPARAR PARÂMETROS - O backend já recebe os campos corretos
+      // O ReservationFilters.tsx já converte arrays para strings CSV no applyFilters()
       const params = {
         page: currentPage,
         per_page: PER_PAGE,
@@ -143,6 +148,8 @@ export default function ReservationsPage() {
           )
         ),
       };
+
+      console.log('Parâmetros da busca:', params); // ✅ DEBUG
 
       const response = await apiClient.getReservationsWithDetails(params);
       
@@ -199,6 +206,7 @@ export default function ReservationsPage() {
 
   // Handlers
   const handleFiltersChange = (newFilters: ReservationFilters) => {
+    console.log('Novos filtros recebidos:', newFilters); // ✅ DEBUG
     setFilters(newFilters);
     setState(prev => ({ ...prev, currentPage: 1 }));
   };
@@ -219,13 +227,12 @@ export default function ReservationsPage() {
     setShowDetails(true);
   };
 
-  // ✅ HANDLER ATUALIZADO - Agora abre o modal padronizado
   const handleEditReservation = (reservation: ReservationResponseWithGuestDetails) => {
     setReservationToEdit(reservation);
     setShowEditModal(true);
   };
 
-  // ✅ NOVOS HANDLERS - Modais Padronizados
+  // Handlers - Modais Padronizados
   const handleNewReservation = () => {
     setReservationToEdit(null);
     setShowNewReservationModal(true);
@@ -233,8 +240,8 @@ export default function ReservationsPage() {
 
   const handleNewReservationSuccess = () => {
     setShowNewReservationModal(false);
-    loadReservations(); // Recarregar lista
-    loadQuickStats(); // Atualizar estatísticas
+    loadReservations(); 
+    loadQuickStats(); 
     toast({
       title: "Sucesso",
       description: "Reserva criada com sucesso!"
@@ -244,15 +251,15 @@ export default function ReservationsPage() {
   const handleEditReservationSuccess = () => {
     setShowEditModal(false);
     setReservationToEdit(null);
-    loadReservations(); // Recarregar lista
-    loadQuickStats(); // Atualizar estatísticas
+    loadReservations(); 
+    loadQuickStats(); 
     toast({
       title: "Sucesso", 
       description: "Reserva atualizada com sucesso!"
     });
   };
 
-  // ✅ NOVA FUNÇÃO - Handler do cancelamento
+  // Handler do cancelamento
   const handleCancelConfirm = async (cancelData: {
     cancellation_reason: string;
     refund_amount?: number;
@@ -271,7 +278,6 @@ export default function ReservationsPage() {
         variant: 'default',
       });
       
-      // Recarregar dados da página
       await loadReservations();
       await loadQuickStats();
       
@@ -282,7 +288,7 @@ export default function ReservationsPage() {
         description: error.response?.data?.detail || 'Erro interno do servidor',
         variant: 'destructive',
       });
-      throw error; // Re-throw para o modal tratar
+      throw error;
     } finally {
       setActionLoading(prev => ({ ...prev, [reservationToCancel.id]: null }));
     }
@@ -320,17 +326,15 @@ export default function ReservationsPage() {
           break;
           
         case 'cancel':
-          // ✅ MODIFICAÇÃO - Abrir modal de cancelamento
           setReservationToCancel(reservation);
           setCancelModalOpen(true);
-          return; // Sair sem fazer o resto do processamento
+          return;
           
         default:
           break;
       }
       
       if (response) {
-        // Recarregar dados após ação bem-sucedida
         loadReservations();
         loadQuickStats();
       }
@@ -394,10 +398,13 @@ export default function ReservationsPage() {
     }
   };
 
-  // Verificar se há filtros ativos
-  const hasActiveFilters = Object.values(filters).some(value => 
-    value !== undefined && value !== '' && value !== null
-  );
+  // ✅ VERIFICAR FILTROS ATIVOS - Incluindo multi-select
+  const hasActiveFilters = Object.values(filters).some(value => {
+    if (Array.isArray(value)) {
+      return value.length > 0;
+    }
+    return value !== undefined && value !== '' && value !== null;
+  });
 
   const getActionLoadingForReservation = (reservationId: number) => {
     return actionLoading[reservationId] || null;
@@ -452,7 +459,12 @@ export default function ReservationsPage() {
             Filtros
             {hasActiveFilters && (
               <Badge variant="secondary" className="ml-2 bg-blue-100 text-blue-800">
-                {Object.values(filters).filter(v => v !== undefined && v !== '' && v !== null).length}
+                {Object.values(filters).reduce((count, value) => {
+                  if (Array.isArray(value)) {
+                    return count + value.length;
+                  }
+                  return count + (value !== undefined && value !== '' && value !== null ? 1 : 0);
+                }, 0)}
               </Badge>
             )}
           </Button>
@@ -471,7 +483,6 @@ export default function ReservationsPage() {
             Exportar
           </Button>
           
-          {/* ✅ BOTÃO ATUALIZADO - Conectado ao handler */}
           <Button size="sm" onClick={handleNewReservation}>
             <Plus className="h-4 w-4 mr-2" />
             Nova Reserva
@@ -560,22 +571,12 @@ export default function ReservationsPage() {
 
       {/* Filtros */}
       {showFilters && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Filter className="h-5 w-5" />
-              Filtros de Busca
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ReservationFiltersComponent
-              filters={filters}
-              onFiltersChange={handleFiltersChange}
-              onClearFilters={handleClearFilters}
-              loading={state.loading}
-            />
-          </CardContent>
-        </Card>
+        <ReservationFiltersComponent
+          filters={filters}
+          onFiltersChange={handleFiltersChange}
+          onClearFilters={handleClearFilters}
+          loading={state.loading}
+        />
       )}
 
       {/* Erro */}
@@ -647,7 +648,7 @@ export default function ReservationsPage() {
                   onView={handleViewReservation}
                   onEdit={handleEditReservation}
                   onQuickAction={handleQuickAction}
-                  onReservationClick={handleReservationClick} // ✅ Nova prop
+                  onReservationClick={handleReservationClick}
                   actionLoading={actionLoading}
                 />
               </CardContent>
@@ -661,7 +662,7 @@ export default function ReservationsPage() {
                       onView={() => handleViewReservation(reservation)}
                       onEdit={() => handleEditReservation(reservation)}
                       onQuickAction={(action) => handleQuickAction(reservation, action)}
-                      onClick={handleReservationClick} // ✅ Adicionar para os cards também
+                      onClick={handleReservationClick}
                       actionLoading={getActionLoadingForReservation(reservation.id)}
                     />
                   ))}
@@ -724,7 +725,7 @@ export default function ReservationsPage() {
         />
       )}
 
-      {/* ===== NOVOS MODAIS PADRONIZADOS ===== */}
+      {/* Modais Padronizados */}
       
       {/* Modal para Nova Reserva */}
       <StandardReservationModal
@@ -746,7 +747,7 @@ export default function ReservationsPage() {
         {...RESERVATION_MODAL_CONFIGS.EDIT_RESERVATION}
       />
 
-      {/* ✅ NOVO MODAL - Cancelamento de Reserva */}
+      {/* Modal de Cancelamento de Reserva */}
       <CancelReservationModal
         isOpen={cancelModalOpen}
         onClose={() => {

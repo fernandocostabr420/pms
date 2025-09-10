@@ -1,4 +1,4 @@
-// frontend/src/types/reservation.ts - ARQUIVO COMPLETO COM TODAS AS MODIFICAÇÕES
+// frontend/src/types/reservation.ts - ARQUIVO COMPLETO COM TODAS AS MODIFICAÇÕES + MULTI-SELECT
 
 import { BaseResponse } from './api';
 
@@ -108,7 +108,7 @@ export interface ReservationUpdate {
   }[];
 }
 
-// ===== FILTROS EXPANDIDOS (ORIGINAL + NOVOS CAMPOS) =====
+// ===== FILTROS EXPANDIDOS (ORIGINAL + NOVOS CAMPOS + MULTI-SELECT) =====
 export interface ReservationFilters {
   // Filtros básicos existentes
   status?: string;
@@ -127,6 +127,10 @@ export interface ReservationFilters {
   requires_deposit?: boolean;
   is_group_reservation?: boolean;
   search?: string;
+  
+  // ===== NOVOS CAMPOS MULTI-SELECT =====
+  status_list?: string[];
+  source_list?: string[];
   
   // ===== NOVOS FILTROS ADICIONADOS =====
   
@@ -563,4 +567,23 @@ export interface ReservationActionResult {
   message: string;
   data?: any;
   errors?: string[];
+}
+
+// ===== TIPOS PARA MULTI-SELECT =====
+
+export interface MultiSelectOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
+
+export interface MultiSelectProps {
+  options: MultiSelectOption[];
+  value: string[];
+  onChange: (value: string[]) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  maxSelections?: number;
+  allowSelectAll?: boolean;
+  className?: string;
 }

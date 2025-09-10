@@ -1,4 +1,4 @@
-// frontend/src/components/reservations/ReservationFilters.tsx
+// frontend/src/components/reservations/ReservationFilters.tsx - COMPLETO COM MULTI-SELECT
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
@@ -36,6 +36,7 @@ import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { ReservationFilters } from '@/types/reservation';
 import apiClient from '@/lib/api';
+import MultiSelect, { MultiSelectOption } from '@/components/ui/multi-select'; // ✅ IMPORT DO MULTI-SELECT
 
 interface ReservationFiltersProps {
   filters: ReservationFilters;
@@ -44,8 +45,8 @@ interface ReservationFiltersProps {
   loading?: boolean;
 }
 
-const statusOptions = [
-  { value: 'all', label: 'Todos' },
+// ✅ OPÇÕES PARA MULTI-SELECT - Agora sem "all"
+const statusOptions: MultiSelectOption[] = [
   { value: 'pending', label: 'Pendente' },
   { value: 'confirmed', label: 'Confirmada' },
   { value: 'checked_in', label: 'Check-in Realizado' },
@@ -54,21 +55,20 @@ const statusOptions = [
   { value: 'no_show', label: 'No-show' }
 ];
 
-// ✅ CORRIGIDO: Usar valores do banco (não os labels amigáveis)
-const sourceOptions = [
-  { value: 'all', label: 'Todos' },
+// ✅ OPÇÕES PARA MULTI-SELECT - Usando valores corretos do banco
+const sourceOptions: MultiSelectOption[] = [
   { value: 'direct', label: 'Direto' },
-  { value: 'booking', label: 'Booking.com' },        // ✅ CORRIGIDO: era 'booking.com'
+  { value: 'booking', label: 'Booking.com' },
   { value: 'airbnb', label: 'Airbnb' },
   { value: 'expedia', label: 'Expedia' },
-  { value: 'hotels', label: 'Hotels.com' },          // ✅ ADICIONADO
-  { value: 'agoda', label: 'Agoda' },                // ✅ ADICIONADO
+  { value: 'hotels', label: 'Hotels.com' },
+  { value: 'agoda', label: 'Agoda' },
   { value: 'phone', label: 'Telefone' },
   { value: 'email', label: 'E-mail' },
   { value: 'walk_in', label: 'Walk-in' },
-  { value: 'website', label: 'Site' },               // ✅ ADICIONADO
-  { value: 'social_media', label: 'Redes Sociais' }, // ✅ ADICIONADO
-  { value: 'referral', label: 'Indicação' }          // ✅ ADICIONADO
+  { value: 'website', label: 'Site' },
+  { value: 'social_media', label: 'Redes Sociais' },
+  { value: 'referral', label: 'Indicação' }
 ];
 
 const balanceOptions = [
@@ -90,6 +90,10 @@ export default function ReservationFiltersComponent({
   
   // 🎯 ESTADO LOCAL - Não dispara busca automaticamente
   const [localFilters, setLocalFilters] = useState<ReservationFilters>(filters);
+  
+  // ✅ NOVOS ESTADOS PARA MULTI-SELECT
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
+  const [selectedSources, setSelectedSources] = useState<string[]>([]);
   
   // Estados para os seletores de data (locais)
   const [reservationDateFrom, setReservationDateFrom] = useState<Date>();
@@ -116,9 +120,26 @@ export default function ReservationFiltersComponent({
   useEffect(() => {
     setLocalFilters(filters);
     
+    // ✅ SINCRONIZAR MULTI-SELECT com filtros recebidos
+    // Converter de status/source únicos ou status_list/source_list para arrays
+    if (filters.status_list && filters.status_list.length > 0) {
+      setSelectedStatuses(filters.status_list);
+    } else if (filters.status) {
+      setSelectedStatuses([filters.status]);
+    } else {
+      setSelectedStatuses([]);
+    }
+    
+    if (filters.source_list && filters.source_list.length > 0) {
+      setSelectedSources(filters.source_list);
+    } else if (filters.source) {
+      setSelectedSources([filters.source]);
+    } else {
+      setSelectedSources([]);
+    }
+    
     // Sincronizar datas
     if (filters.created_from) {
-      // created_from pode vir como datetime, extrair apenas a data
       const dateOnly = filters.created_from.split('T')[0];
       setReservationDateFrom(new Date(dateOnly));
     } else {
@@ -126,7 +147,6 @@ export default function ReservationFiltersComponent({
     }
     
     if (filters.created_to) {
-      // created_to pode vir como datetime, extrair apenas a data
       const dateOnly = filters.created_to.split('T')[0];
       setReservationDateTo(new Date(dateOnly));
     } else {
@@ -163,6 +183,27 @@ export default function ReservationFiltersComponent({
     setLocalFilters(prev => ({
       ...prev,
       [key]: value,
+    }));
+  };
+
+  // ✅ NOVOS HANDLERS PARA MULTI-SELECT
+  const handleStatusChange = (newStatuses: string[]) => {
+    setSelectedStatuses(newStatuses);
+    // Atualizar filtros locais
+    setLocalFilters(prev => ({
+      ...prev,
+      status_list: newStatuses.length > 0 ? newStatuses : undefined,
+      status: undefined, // Limpar status único
+    }));
+  };
+
+  const handleSourceChange = (newSources: string[]) => {
+    setSelectedSources(newSources);
+    // Atualizar filtros locais
+    setLocalFilters(prev => ({
+      ...prev,
+      source_list: newSources.length > 0 ? newSources : undefined,
+      source: undefined, // Limpar source único
     }));
   };
 
@@ -214,9 +255,50 @@ export default function ReservationFiltersComponent({
 
   // ✅ APLICAR FILTROS - Única função que dispara a busca
   const applyFilters = () => {
-    // ✅ CORREÇÃO APLICADA: Agora os valores já são corretos no sourceOptions
-    // Não precisa mais de mapeamento reverso porque já estamos usando os valores do banco
-    onFiltersChange(localFilters);
+    // ✅ CONVERTER ARRAYS PARA STRINGS CSV para compatibilidade com API
+    const filtersToSend = { ...localFilters };
+    
+    // ✅ CORRIGIDO: Usar states locais dos multi-selects em vez dos campos dos filtros
+    
+    // Converter selectedStatuses para campo status
+    if (selectedStatuses.length > 0) {
+      if (selectedStatuses.length === 1) {
+        // Se apenas um item, usar campo status único
+        filtersToSend.status = selectedStatuses[0];
+      } else {
+        // Se múltiplos itens, converter para string CSV
+        filtersToSend.status = selectedStatuses.join(',');
+      }
+      // Limpar campos multi-select
+      delete filtersToSend.status_list;
+    } else {
+      // Se nenhum status selecionado, limpar ambos campos
+      delete filtersToSend.status;
+      delete filtersToSend.status_list;
+    }
+    
+    // Converter selectedSources para campo source
+    if (selectedSources.length > 0) {
+      if (selectedSources.length === 1) {
+        // Se apenas um item, usar campo source único
+        filtersToSend.source = selectedSources[0];
+      } else {
+        // Se múltiplos itens, converter para string CSV
+        filtersToSend.source = selectedSources.join(',');
+      }
+      // Limpar campos multi-select
+      delete filtersToSend.source_list;
+    } else {
+      // Se nenhum source selecionado, limpar ambos campos
+      delete filtersToSend.source;
+      delete filtersToSend.source_list;
+    }
+    
+    console.log('Filtros sendo enviados:', filtersToSend); // ✅ DEBUG
+    console.log('Status selecionados:', selectedStatuses); // ✅ DEBUG
+    console.log('Sources selecionados:', selectedSources); // ✅ DEBUG
+    
+    onFiltersChange(filtersToSend);
   };
 
   // 🧹 LIMPAR FILTROS 
@@ -224,6 +306,8 @@ export default function ReservationFiltersComponent({
     const emptyFilters: ReservationFilters = {
       status: undefined,
       source: undefined,
+      status_list: undefined,
+      source_list: undefined,
       property_id: undefined,
       guest_id: undefined,
       check_in_from: undefined,
@@ -242,6 +326,8 @@ export default function ReservationFiltersComponent({
     };
     
     setLocalFilters(emptyFilters);
+    setSelectedStatuses([]);
+    setSelectedSources([]);
     setReservationDateFrom(undefined);
     setReservationDateTo(undefined);
     setCheckInFrom(undefined);
@@ -256,7 +342,7 @@ export default function ReservationFiltersComponent({
   const hasUnappliedChanges = JSON.stringify(localFilters) !== JSON.stringify(filters);
   const hasActiveFilters = Object.values(localFilters).some(value => 
     value !== null && value !== undefined && value !== '' && value !== 'all'
-  );
+  ) || selectedStatuses.length > 0 || selectedSources.length > 0;
 
   return (
     <Card className="mb-6">
@@ -267,7 +353,8 @@ export default function ReservationFiltersComponent({
             Filtros de Busca
             {hasActiveFilters && (
               <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
-                {Object.values(localFilters).filter(v => v && v !== 'all').length}
+                {(Object.values(localFilters).filter(v => v && v !== 'all').length + 
+                  selectedStatuses.length + selectedSources.length)}
               </span>
             )}
           </CardTitle>
@@ -301,25 +388,19 @@ export default function ReservationFiltersComponent({
             </div>
           </div>
 
-          {/* Status */}
+          {/* ✅ STATUS - AGORA COM MULTI-SELECT */}
           <div>
             <Label>Status</Label>
-            <Select
-              value={localFilters.status || 'all'}
-              onValueChange={(value) => handleLocalFilterChange('status', value === 'all' ? undefined : value)}
+            <MultiSelect
+              options={statusOptions}
+              value={selectedStatuses}
+              onChange={handleStatusChange}
+              placeholder="Selecione status..."
               disabled={loading}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                {statusOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              allowSelectAll={true}
+              searchable={true}
+              className="w-full"
+            />
           </div>
 
           {/* Propriedade */}
@@ -494,7 +575,7 @@ export default function ReservationFiltersComponent({
                     variant="outline"
                     className={cn(
                       "flex-1 justify-start text-left font-normal text-xs",
-                      !checkOutTo && "text-muted-foreground" // ✅ CORRIGIDO: era "text-muted-foregreen"
+                      !checkOutTo && "text-muted-foreground"
                     )}
                     disabled={loading}
                   >
@@ -520,25 +601,19 @@ export default function ReservationFiltersComponent({
         {showAdvanced && (
           <div className="space-y-4 pt-4 border-t">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Canal/Origem */}
+              {/* ✅ CANAL/ORIGEM - AGORA COM MULTI-SELECT */}
               <div>
                 <Label>Canal</Label>
-                <Select
-                  value={localFilters.source || 'all'}
-                  onValueChange={(value) => handleLocalFilterChange('source', value === 'all' ? undefined : value)}
+                <MultiSelect
+                  options={sourceOptions}
+                  value={selectedSources}
+                  onChange={handleSourceChange}
+                  placeholder="Selecione canais..."
                   disabled={loading}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Canal" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sourceOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  allowSelectAll={true}
+                  searchable={true}
+                  className="w-full"
+                />
               </div>
 
               {/* E-mail do Hóspede */}
