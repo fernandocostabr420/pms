@@ -5,16 +5,34 @@ import { cn } from "@/lib/utils"
 
 const Table = React.forwardRef<
   HTMLTableElement,
-  React.HTMLAttributes<HTMLTableElement>
->(({ className, ...props }, ref) => (
-  <div className="relative w-full overflow-auto">
-    <table
-      ref={ref}
-      className={cn("w-full caption-bottom text-sm", className)}
-      {...props}
-    />
-  </div>
-))
+  React.HTMLAttributes<HTMLTableElement> & { fixedScroll?: boolean }
+>(({ className, fixedScroll = false, ...props }, ref) => {
+  if (fixedScroll) {
+    // Scroll fixo na parte inferior da tela
+    return (
+      <div className="table-fixed-scroll-container">
+        <div className="table-fixed-scroll-wrapper">
+          <table
+            ref={ref}
+            className={cn("w-full caption-bottom text-sm", className)}
+            {...props}
+          />
+        </div>
+      </div>
+    )
+  }
+  
+  // Comportamento padrão
+  return (
+    <div className="relative w-full overflow-auto">
+      <table
+        ref={ref}
+        className={cn("w-full caption-bottom text-sm", className)}
+        {...props}
+      />
+    </div>
+  )
+})
 Table.displayName = "Table"
 
 const TableHeader = React.forwardRef<

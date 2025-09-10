@@ -36,7 +36,6 @@ import {
   Mail,
   Users,
   Calendar,
-  Building,
   DollarSign,
   CreditCard,
   Globe,
@@ -45,10 +44,11 @@ import {
   BedDouble,
   CalendarCheck,
   CalendarX,
+  Clock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ReservationResponseWithGuestDetails } from '@/types/reservation';
-import { formatReservationDate } from '@/lib/calendar-utils'; // ✅ IMPORT CORRETO
+import { formatReservationDate } from '@/lib/calendar-utils';
 
 interface SortConfig {
   key: string;
@@ -93,7 +93,14 @@ const formatCurrency = (value: number) => {
   }).format(value);
 };
 
-// ✅ FUNÇÃO REMOVIDA - Agora usa formatReservationDate do calendar-utils
+const formatCreatedDate = (dateString: string) => {
+  try {
+    const date = new Date(dateString);
+    return format(date, 'dd/MM/yyyy', { locale: ptBR });
+  } catch {
+    return dateString;
+  }
+};
 
 const formatShortDate = (dateString: string) => {
   try {
@@ -216,8 +223,6 @@ const getSortValue = (reservation: ReservationResponseWithGuestDetails, key: str
       return new Date(reservation.check_out_date);
     case 'total_guests':
       return reservation.total_guests;
-    case 'property_name':
-      return reservation.property_name || '';
     case 'status':
       return reservation.status || '';
     case 'created_date':
@@ -276,18 +281,18 @@ export default function ReservationTable({
     <Button
       variant="ghost"
       size="sm"
-      className="h-8 px-2 font-semibold hover:bg-transparent"
+      className="h-7 px-2 font-semibold hover:bg-transparent text-sm"
       onClick={() => handleSort(columnKey)}
     >
       {children}
       {sortConfig.key === columnKey ? (
         sortConfig.direction === 'asc' ? (
-          <ArrowUp className="ml-2 h-4 w-4" />
+          <ArrowUp className="ml-1 h-3 w-3" />
         ) : (
-          <ArrowDown className="ml-2 h-4 w-4" />
+          <ArrowDown className="ml-1 h-3 w-3" />
         )
       ) : (
-        <ArrowUpDown className="ml-2 h-4 w-4 opacity-50" />
+        <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
       )}
     </Button>
   );
@@ -320,272 +325,259 @@ export default function ReservationTable({
   }
 
   return (
-    <div className="bg-white border rounded-lg shadow-sm card-container">
-      <div className="table-container">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-gray-50/50">
-              <TableHead className="font-semibold text-gray-700 w-16">
-                <SortButton columnKey="id">ID</SortButton>
-              </TableHead>
-              <TableHead className="font-semibold text-gray-700">
-                <SortButton columnKey="guest_name">Hóspede</SortButton>
-              </TableHead>
-              <TableHead className="font-semibold text-gray-700">
-                Contato
-              </TableHead>
-              <TableHead className="font-semibold text-gray-700">
-                <SortButton columnKey="check_in_date">Check In</SortButton>
-              </TableHead>
-              <TableHead className="font-semibold text-gray-700">
-                <SortButton columnKey="check_out_date">Check Out</SortButton>
-              </TableHead>
-              <TableHead className="font-semibold text-gray-700 text-center">
-                <SortButton columnKey="total_guests">Hóspedes</SortButton>
-              </TableHead>
-              <TableHead className="font-semibold text-gray-700">
-                <SortButton columnKey="property_name">Propriedade</SortButton>
-              </TableHead>
-              <TableHead className="font-semibold text-gray-700">
-                Quarto(s)
-              </TableHead>
-              <TableHead className="font-semibold text-gray-700">
-                <SortButton columnKey="status">Status</SortButton>
-              </TableHead>
-              <TableHead className="font-semibold text-gray-700">
-                <SortButton columnKey="created_date">Data Criação</SortButton>
-              </TableHead>
-              <TableHead className="font-semibold text-gray-700">
-                <SortButton columnKey="source">Origem</SortButton>
-              </TableHead>
-              <TableHead className="font-semibold text-gray-700">
-                <SortButton columnKey="total_amount">Valor</SortButton>
-              </TableHead>
-              <TableHead className="font-semibold text-gray-700">
-                Pagamento
-              </TableHead>
-              <TableHead className="font-semibold text-gray-700 w-24">
-                Ações
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sortedReservations.map((reservation) => {
-              const nights = calculateNights(reservation.check_in_date, reservation.check_out_date);
-              const rooms = formatRooms(reservation.rooms);
-              const status = statusConfig[reservation.status as keyof typeof statusConfig] || 
-                           { label: reservation.status, color: 'bg-gray-100 text-gray-800' };
-              const source = sourceConfig[reservation.source as keyof typeof sourceConfig];
-              const quickActions = getQuickActions(reservation);
-              
-              return (
-                <TableRow 
-                  key={reservation.id} 
-                  className="hover:bg-gray-50/50 transition-colors cursor-pointer"
-                  onClick={(e) => handleRowClick(reservation, e)}
-                >
-                  <TableCell className="font-mono text-sm text-gray-600">
-                    <div className="flex items-center">
-                      <Hash className="h-3 w-3 mr-1 text-gray-400" />
-                      {reservation.id}
-                    </div>
-                  </TableCell>
+    <div className="bg-white border rounded-lg shadow-sm">
+      <Table fixedScroll={true}>
+        <TableHeader>
+          <TableRow className="bg-gray-50/50 border-b">
+            <TableHead className="font-semibold text-gray-700 w-16 px-2 py-2">
+              <SortButton columnKey="id">ID</SortButton>
+            </TableHead>
+            <TableHead className="font-semibold text-gray-700 px-2 py-2">
+              <SortButton columnKey="guest_name">Hóspede</SortButton>
+            </TableHead>
+            <TableHead className="font-semibold text-gray-700 px-2 py-2">
+              Contato
+            </TableHead>
+            <TableHead className="font-semibold text-gray-700 px-2 py-2">
+              <SortButton columnKey="created_date">Data Criação</SortButton>
+            </TableHead>
+            <TableHead className="font-semibold text-gray-700 px-2 py-2">
+              <SortButton columnKey="check_in_date">Check In</SortButton>
+            </TableHead>
+            <TableHead className="font-semibold text-gray-700 px-2 py-2">
+              <SortButton columnKey="check_out_date">Check Out</SortButton>
+            </TableHead>
+            <TableHead className="font-semibold text-gray-700 px-2 py-2 text-center">
+              <SortButton columnKey="total_guests">Hóspedes</SortButton>
+            </TableHead>
+            <TableHead className="font-semibold text-gray-700 px-2 py-2">
+              Quarto(s)
+            </TableHead>
+            <TableHead className="font-semibold text-gray-700 px-2 py-2">
+              <SortButton columnKey="status">Status</SortButton>
+            </TableHead>
+            <TableHead className="font-semibold text-gray-700 px-2 py-2">
+              <SortButton columnKey="source">Origem</SortButton>
+            </TableHead>
+            <TableHead className="font-semibold text-gray-700 px-2 py-2">
+              <SortButton columnKey="total_amount">Valor</SortButton>
+            </TableHead>
+            <TableHead className="font-semibold text-gray-700 px-2 py-2">
+              Pagamento
+            </TableHead>
+            <TableHead className="font-semibold text-gray-700 w-16 px-2 py-2">
+              Ações
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {sortedReservations.map((reservation) => {
+            const nights = calculateNights(reservation.check_in_date, reservation.check_out_date);
+            const rooms = formatRooms(reservation.rooms);
+            const status = statusConfig[reservation.status as keyof typeof statusConfig] || 
+                         { label: reservation.status, color: 'bg-gray-100 text-gray-800' };
+            const source = sourceConfig[reservation.source as keyof typeof sourceConfig];
+            const quickActions = getQuickActions(reservation);
+            
+            return (
+              <TableRow 
+                key={reservation.id} 
+                className="hover:bg-gray-50/50 transition-colors cursor-pointer border-b"
+                onClick={(e) => handleRowClick(reservation, e)}
+              >
+                <TableCell className="px-2 py-3 font-mono text-sm text-gray-600">
+                  <div className="flex items-center">
+                    <Hash className="h-3 w-3 mr-1 text-gray-400" />
+                    {reservation.id}
+                  </div>
+                </TableCell>
 
-                  <TableCell>
-                    <div className="font-medium text-gray-900">
-                      {reservation.guest_name || 'N/A'}
+                <TableCell className="px-2 py-3">
+                  <div className="font-medium text-gray-900">
+                    {reservation.guest_name || 'N/A'}
+                  </div>
+                  {reservation.guest_email && (
+                    <div className="text-sm text-gray-500 truncate max-w-[160px]">
+                      {reservation.guest_email}
                     </div>
-                    {reservation.guest_email && (
-                      <div className="text-sm text-gray-500 truncate max-w-[200px]">
-                        {reservation.guest_email}
+                  )}
+                </TableCell>
+
+                <TableCell className="px-2 py-3">
+                  <div className="flex flex-col space-y-1">
+                    {reservation.guest_phone && (
+                      <div className="flex items-center text-sm text-gray-600">
+                        <Phone className="h-3 w-3 mr-1" />
+                        {reservation.guest_phone}
                       </div>
                     )}
-                  </TableCell>
+                    {reservation.guest_email && (
+                      <div className="flex items-center text-sm text-gray-600">
+                        <Mail className="h-3 w-3 mr-1" />
+                        <span className="truncate max-w-[120px]">{reservation.guest_email}</span>
+                      </div>
+                    )}
+                  </div>
+                </TableCell>
 
-                  <TableCell>
-                    <div className="flex flex-col space-y-1">
-                      {reservation.guest_phone && (
-                        <div className="flex items-center text-sm text-gray-600">
-                          <Phone className="h-3 w-3 mr-1" />
-                          {reservation.guest_phone}
-                        </div>
+                <TableCell className="px-2 py-3">
+                  <div className="flex items-center text-sm text-gray-600">
+                    <Clock className="h-4 w-4 mr-2 text-gray-500" />
+                    {formatCreatedDate(reservation.created_date)}
+                  </div>
+                </TableCell>
+
+                <TableCell className="px-2 py-3">
+                  <div className="flex items-center text-sm">
+                    <CalendarCheck className="h-4 w-4 mr-2 text-green-600" />
+                    <div>
+                      <div className="font-medium">{formatReservationDate(reservation.check_in_date)}</div>
+                      <div className="text-xs text-gray-500">{formatShortDate(reservation.check_in_date)}</div>
+                    </div>
+                  </div>
+                </TableCell>
+
+                <TableCell className="px-2 py-3">
+                  <div className="flex items-center text-sm">
+                    <CalendarX className="h-4 w-4 mr-2 text-red-600" />
+                    <div>
+                      <div className="font-medium">{formatReservationDate(reservation.check_out_date)}</div>
+                      <div className="text-xs text-gray-500">
+                        {nights} {nights === 1 ? 'Diária' : 'Diárias'}
+                      </div>
+                    </div>
+                  </div>
+                </TableCell>
+
+                <TableCell className="px-2 py-3 text-center">
+                  <div className="flex items-center justify-center">
+                    <Users className="h-4 w-4 mr-1 text-gray-500" />
+                    <span className="font-medium">{reservation.total_guests}</span>
+                  </div>
+                </TableCell>
+
+                <TableCell className="px-2 py-3">
+                  <div className="flex items-center">
+                    <BedDouble className="h-4 w-4 mr-2 text-gray-500" />
+                    <div className="text-sm">
+                      <div className="font-medium">{rooms.display}</div>
+                      {rooms.count > 1 && (
+                        <div className="text-xs text-gray-500">{rooms.count} quartos</div>
                       )}
-                      {reservation.guest_email && (
-                        <div className="flex items-center text-sm text-gray-600">
-                          <Mail className="h-3 w-3 mr-1" />
-                          <span className="truncate max-w-[150px]">{reservation.guest_email}</span>
-                        </div>
-                      )}
                     </div>
-                  </TableCell>
+                  </div>
+                </TableCell>
 
-                  <TableCell>
-                    <div className="flex items-center text-sm">
-                      <CalendarCheck className="h-4 w-4 mr-2 text-green-600" />
-                      <div>
-                        <div className="font-medium">{formatReservationDate(reservation.check_in_date)}</div>
-                        <div className="text-xs text-gray-500">{formatShortDate(reservation.check_in_date)}</div>
-                      </div>
-                    </div>
-                  </TableCell>
+                <TableCell className="px-2 py-3">
+                  <Badge 
+                    variant="secondary" 
+                    className={cn("text-xs font-medium border", status.color)}
+                  >
+                    {status.label}
+                  </Badge>
+                </TableCell>
 
-                  <TableCell>
-                    <div className="flex items-center text-sm">
-                      <CalendarX className="h-4 w-4 mr-2 text-red-600" />
-                      <div>
-                        <div className="font-medium">{formatReservationDate(reservation.check_out_date)}</div>
-                        <div className="text-xs text-gray-500">
-                          {nights} {nights === 1 ? 'noite' : 'noites'}
-                        </div>
-                      </div>
-                    </div>
-                  </TableCell>
-
-                  <TableCell className="text-center">
-                    <div className="flex items-center justify-center">
-                      <Users className="h-4 w-4 mr-1 text-gray-500" />
-                      <span className="font-medium">{reservation.total_guests}</span>
-                    </div>
-                  </TableCell>
-
-                  <TableCell>
+                <TableCell className="px-2 py-3">
+                  {source ? (
                     <div className="flex items-center">
-                      <Building className="h-4 w-4 mr-2 text-gray-500" />
-                      <span className="font-medium truncate max-w-[150px]">
-                        {reservation.property_name || 'N/A'}
-                      </span>
-                    </div>
-                  </TableCell>
-
-                  <TableCell>
-                    <div className="flex items-center">
-                      <BedDouble className="h-4 w-4 mr-2 text-gray-500" />
-                      <div className="text-sm">
-                        <div className="font-medium">{rooms.display}</div>
-                        {rooms.count > 1 && (
-                          <div className="text-xs text-gray-500">{rooms.count} quartos</div>
-                        )}
-                      </div>
-                    </div>
-                  </TableCell>
-
-                  <TableCell>
-                    <Badge 
-                      variant="secondary" 
-                      className={cn("text-xs font-medium border", status.color)}
-                    >
-                      {status.label}
-                    </Badge>
-                  </TableCell>
-
-                  <TableCell>
-                    <div className="text-sm text-gray-600">
-                      {formatReservationDate(reservation.created_date)}
-                    </div>
-                  </TableCell>
-
-                  <TableCell>
-                    {source ? (
-                      <div className="flex items-center">
-                        <source.icon className="h-4 w-4 mr-2 text-gray-500" />
-                        <Badge 
-                          variant="secondary" 
-                          className={cn("text-xs font-medium border", source.color)}
-                        >
-                          {source.label}
-                        </Badge>
-                      </div>
-                    ) : (
+                      <source.icon className="h-4 w-4 mr-2 text-gray-500" />
                       <Badge 
                         variant="secondary" 
-                        className="text-xs font-medium bg-gray-100 text-gray-800"
+                        className={cn("text-xs font-medium border", source.color)}
                       >
-                        {reservation.source || 'N/A'}
+                        {source.label}
+                      </Badge>
+                    </div>
+                  ) : (
+                    <Badge 
+                      variant="secondary" 
+                      className="text-xs font-medium bg-gray-100 text-gray-800"
+                    >
+                      {reservation.source || 'N/A'}
+                    </Badge>
+                  )}
+                </TableCell>
+
+                <TableCell className="px-2 py-3">
+                  <div className="flex items-center font-medium">
+                    <DollarSign className="h-4 w-4 mr-1 text-green-600" />
+                    {formatCurrency(reservation.total_amount || 0)}
+                  </div>
+                </TableCell>
+
+                <TableCell className="px-2 py-3">
+                  <div className="flex flex-col space-y-1">
+                    {reservation.is_paid ? (
+                      <Badge className="text-xs bg-green-100 text-green-800 border-green-200">
+                        <CreditCard className="h-3 w-3 mr-1" />
+                        Pago
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary" className="text-xs bg-yellow-100 text-yellow-800 border-yellow-200">
+                        <CreditCard className="h-3 w-3 mr-1" />
+                        Pendente
                       </Badge>
                     )}
-                  </TableCell>
+                    {reservation.requires_deposit && (
+                      <div className="text-xs text-gray-500">Requer depósito</div>
+                    )}
+                  </div>
+                </TableCell>
 
-                  <TableCell>
-                    <div className="flex items-center font-medium">
-                      <DollarSign className="h-4 w-4 mr-1 text-green-600" />
-                      {formatCurrency(reservation.total_amount || 0)}
-                    </div>
-                  </TableCell>
-
-                  <TableCell>
-                    <div className="flex flex-col space-y-1">
-                      {reservation.is_paid ? (
-                        <Badge className="text-xs bg-green-100 text-green-800 border-green-200">
-                          <CreditCard className="h-3 w-3 mr-1" />
-                          Pago
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary" className="text-xs bg-yellow-100 text-yellow-800 border-yellow-200">
-                          <CreditCard className="h-3 w-3 mr-1" />
-                          Pendente
-                        </Badge>
-                      )}
-                      {reservation.requires_deposit && (
-                        <div className="text-xs text-gray-500">Requer depósito</div>
-                      )}
-                    </div>
-                  </TableCell>
-
-                  <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="h-8 w-8 p-0"
-                          disabled={actionLoading[reservation.id] !== undefined}
-                        >
-                          {actionLoading[reservation.id] ? (
-                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                          ) : (
-                            <MoreHorizontal className="h-4 w-4" />
+                <TableCell className="px-2 py-3">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="h-8 w-8 p-0"
+                        disabled={actionLoading[reservation.id] !== undefined}
+                      >
+                        {actionLoading[reservation.id] ? (
+                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                        ) : (
+                          <MoreHorizontal className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuItem
+                        onClick={() => onView?.(reservation)}
+                        className="cursor-pointer"
+                      >
+                        <Eye className="h-4 w-4 mr-2" />
+                        Ver detalhes
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => onEdit?.(reservation)}
+                        className="cursor-pointer"
+                      >
+                        <Edit className="h-4 w-4 mr-2" />
+                        Editar
+                      </DropdownMenuItem>
+                      
+                      {quickActions.map((action) => (
+                        <DropdownMenuItem
+                          key={action.key}
+                          onClick={() => onQuickAction?.(reservation, action.key)}
+                          className={cn(
+                            "cursor-pointer",
+                            action.variant === 'destructive' && "text-red-600 focus:text-red-600"
                           )}
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem
-                          onClick={() => onView?.(reservation)}
-                          className="cursor-pointer"
+                          disabled={action.disabled}
                         >
-                          <Eye className="h-4 w-4 mr-2" />
-                          Ver detalhes
+                          <action.icon className="h-4 w-4 mr-2" />
+                          {action.label}
                         </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => onEdit?.(reservation)}
-                          className="cursor-pointer"
-                        >
-                          <Edit className="h-4 w-4 mr-2" />
-                          Editar
-                        </DropdownMenuItem>
-                        
-                        {quickActions.map((action) => (
-                          <DropdownMenuItem
-                            key={action.key}
-                            onClick={() => onQuickAction?.(reservation, action.key)}
-                            className={cn(
-                              "cursor-pointer",
-                              action.variant === 'destructive' && "text-red-600 focus:text-red-600"
-                            )}
-                            disabled={action.disabled}
-                          >
-                            <action.icon className="h-4 w-4 mr-2" />
-                            {action.label}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
     </div>
   );
 }
