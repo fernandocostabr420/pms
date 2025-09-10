@@ -1,7 +1,7 @@
-# backend/app/schemas/reservation.py - ARQUIVO COMPLETO COM CORREÇÃO DO VALIDADOR
+# backend/app/schemas/reservation.py - ARQUIVO COMPLETO COM MULTI-SELECT PARA STATUS E CANAL
 
 from pydantic import BaseModel, field_validator, Field
-from typing import Optional, List, Dict, Any, Literal
+from typing import Optional, List, Dict, Any, Literal, Union
 from datetime import datetime, date
 from decimal import Decimal
 from enum import Enum
@@ -415,22 +415,31 @@ class AvailabilityResponse(BaseModel):
     conflicting_reservations: Optional[List[str]] = None
 
 
-# ===== SCHEMAS PARA FILTROS =====
+# ===== SCHEMAS PARA FILTROS - COM MULTI-SELECT ===== 
 
 class ReservationFilters(BaseModel):
-    """Schema para filtros de reserva"""
-    # Filtros básicos
-    status: Optional[str] = Field(None, description="Status da reserva")
-    source: Optional[str] = Field(None, description="Canal de origem")
+    """Schema para filtros de reserva - ATUALIZADO COM MULTI-SELECT"""
+    
+    # ===== FILTROS BÁSICOS (COMPATIBILIDADE) =====
+    status: Optional[str] = Field(None, description="Status da reserva (filtro único)")
+    source: Optional[str] = Field(None, description="Canal de origem (filtro único)")
     property_id: Optional[int] = Field(None, description="ID da propriedade")
     guest_id: Optional[int] = Field(None, description="ID do hóspede")
     search: Optional[str] = Field(None, description="Busca geral")
     
-    # ✅ NOVO: Filtros com múltiplos valores (para busca flexível)
-    status_list: Optional[List[str]] = Field(None, description="Lista de status para filtrar")
-    source_list: Optional[List[str]] = Field(None, description="Lista de origens para filtrar")
+    # ===== NOVOS FILTROS MULTI-SELECT ===== 
+    status_list: Optional[List[str]] = Field(
+        None, 
+        description="Lista de status para filtrar (multi-seleção)",
+        examples=[["pending", "confirmed"], ["checked_in", "checked_out"]]
+    )
+    source_list: Optional[List[str]] = Field(
+        None, 
+        description="Lista de origens para filtrar (multi-seleção)",
+        examples=[["booking", "direct"], ["airbnb", "expedia"]]
+    )
     
-    # Filtros de data
+    # ===== FILTROS DE DATA =====
     check_in_from: Optional[date] = Field(None, description="Check-in a partir de")
     check_in_to: Optional[date] = Field(None, description="Check-in até")
     check_out_from: Optional[date] = Field(None, description="Check-out a partir de")
@@ -442,7 +451,7 @@ class ReservationFilters(BaseModel):
     cancelled_from: Optional[date] = Field(None, description="Cancelamento a partir de")
     cancelled_to: Optional[date] = Field(None, description="Cancelamento até")
     
-    # Filtros do hóspede
+    # ===== FILTROS DO HÓSPEDE =====
     guest_email: Optional[str] = Field(None, description="Email do hóspede")
     guest_phone: Optional[str] = Field(None, description="Telefone do hóspede")
     guest_document_type: Optional[str] = Field(None, description="Tipo de documento")
@@ -451,7 +460,7 @@ class ReservationFilters(BaseModel):
     guest_state: Optional[str] = Field(None, description="Estado do hóspede")
     guest_country: Optional[str] = Field(None, description="País do hóspede")
     
-    # Filtros de valores
+    # ===== FILTROS DE VALORES =====
     min_amount: Optional[Decimal] = Field(None, ge=0, description="Valor mínimo")
     max_amount: Optional[Decimal] = Field(None, ge=0, description="Valor máximo")
     min_guests: Optional[int] = Field(None, ge=1, description="Mínimo de hóspedes")
@@ -459,18 +468,18 @@ class ReservationFilters(BaseModel):
     min_nights: Optional[int] = Field(None, ge=1, description="Mínimo de noites")
     max_nights: Optional[int] = Field(None, ge=1, description="Máximo de noites")
     
-    # Filtros de quarto
+    # ===== FILTROS DE QUARTO =====
     room_type_id: Optional[int] = Field(None, description="ID do tipo de quarto")
     room_number: Optional[str] = Field(None, description="Número do quarto")
     
-    # Filtros especiais
+    # ===== FILTROS ESPECIAIS =====
     has_special_requests: Optional[bool] = Field(None, description="Possui pedidos especiais")
     has_internal_notes: Optional[bool] = Field(None, description="Possui notas internas")
     deposit_paid: Optional[bool] = Field(None, description="Depósito pago")
     payment_status: Optional[str] = Field(None, description="Status do pagamento")
     marketing_source: Optional[str] = Field(None, description="Origem do marketing")
     
-    # Filtros por flags específicas
+    # ===== FILTROS POR FLAGS ESPECÍFICAS =====
     is_current: Optional[bool] = Field(None, description="Reservas atuais (hóspede no hotel)")
     can_check_in: Optional[bool] = Field(None, description="Pode fazer check-in")
     can_check_out: Optional[bool] = Field(None, description="Pode fazer check-out")
@@ -478,6 +487,101 @@ class ReservationFilters(BaseModel):
     is_paid: Optional[bool] = Field(None, description="Está pago")
     requires_deposit: Optional[bool] = Field(None, description="Requer depósito")
     is_group_reservation: Optional[bool] = Field(None, description="É reserva em grupo")
+    
+    # ===== VALIDADORES PARA MULTI-SELECT =====
+    
+    @field_validator('status_list')
+    @classmethod
+    def validate_status_list(cls, v):
+        """Valida e normaliza lista de status"""
+        if not v:
+            return v
+        
+        # Normalizar cada status na lista
+        normalized_list = []
+        for status in v:
+            if status and isinstance(status, str):
+                # Normalizar para lowercase e remover espaços
+                normalized = status.lower().strip()
+                
+                # Mapeamento de aliases
+                status_aliases = {
+                    'pendente': 'pending',
+                    'confirmada': 'confirmed',
+                    'confirmado': 'confirmed',
+                    'check_in': 'checked_in',
+                    'check-in': 'checked_in',
+                    'checkin': 'checked_in',
+                    'check_out': 'checked_out',
+                    'check-out': 'checked_out',
+                    'checkout': 'checked_out',
+                    'cancelada': 'cancelled',
+                    'cancelado': 'cancelled',
+                    'no_show': 'no_show',
+                    'no-show': 'no_show',
+                    'noshow': 'no_show'
+                }
+                
+                normalized = status_aliases.get(normalized, normalized)
+                
+                # Verificar se é válido
+                valid_statuses = [s.value for s in ReservationStatus]
+                if normalized in valid_statuses:
+                    normalized_list.append(normalized)
+                else:
+                    # Log warning mas inclui mesmo assim
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Status desconhecido na lista: {status}")
+                    normalized_list.append(normalized)
+        
+        return normalized_list if normalized_list else None
+    
+    @field_validator('source_list')
+    @classmethod
+    def validate_source_list(cls, v):
+        """Valida e normaliza lista de origens"""
+        if not v:
+            return v
+        
+        # Normalizar cada origem na lista
+        normalized_list = []
+        for source in v:
+            if source and isinstance(source, str):
+                # Normalizar para lowercase
+                normalized = source.lower().strip()
+                
+                # Mapeamento de aliases (mesmo do campo único)
+                source_aliases = {
+                    'booking.com': 'booking',
+                    'bookingcom': 'booking',
+                    'room_map': 'room_map',
+                    'roommap': 'room_map',
+                    'mapa_quartos': 'room_map',
+                    'direct_booking': 'direct',
+                    'direto': 'direct',
+                    'telefone': 'phone',
+                    'e-mail': 'email',
+                    'walk-in': 'walk_in',
+                    'walkin': 'walk_in',
+                    'hotels.com': 'hotels',
+                    'hotelscom': 'hotels'
+                }
+                
+                normalized = source_aliases.get(normalized, normalized)
+                
+                # Verificar se é válido
+                valid_sources = [s.value for s in ReservationSource]
+                if normalized in valid_sources:
+                    normalized_list.append(normalized)
+                else:
+                    # Log warning mas inclui mesmo assim
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Origem desconhecida na lista: {source}")
+                    normalized_list.append(normalized)
+        
+        return normalized_list if normalized_list else None
 
 
 # ===== NOVOS SCHEMAS PARA FUNCIONALIDADES EXPANDIDAS =====
@@ -873,7 +977,7 @@ class ReservationDetailedResponse(BaseModel):
     tenant_id: int
 
 
-# ✅ NOVO: Schemas para normalização de dados existentes
+# ===== NOVOS SCHEMAS PARA NORMALIZAÇÃO DE DADOS EXISTENTES =====
 
 class NormalizationReport(BaseModel):
     """Schema para relatório de normalização de dados"""

@@ -1,4 +1,4 @@
-# backend/app/services/reservation_service.py - CORRIGIDO PARA MAPEAMENTOS
+# backend/app/services/reservation_service.py - COMPLETO COM MULTI-SELECT PARA STATUS E CANAL
 
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -38,7 +38,7 @@ from app.services.audit_formatting_service import AuditFormattingService
 
 
 class ReservationService:
-    """Serviço para operações com reservas - COM AUDITORIA COMPLETA E MAPEAMENTOS CORRIGIDOS"""
+    """Serviço para operações com reservas - COM AUDITORIA COMPLETA E MULTI-SELECT PARA FILTROS"""
     
     def __init__(self, db: Session):
         self.db = db
@@ -208,7 +208,7 @@ class ReservationService:
             conflicting_reservations=conflicting_reservations if conflicting_reservations else None
         )
 
-    # ✅ MÉTODO GET_RESERVATIONS CORRIGIDO PARA FILTROS FLEXÍVEIS
+    # ===== MÉTODO PRINCIPAL: GET_RESERVATIONS COM MULTI-SELECT =====
     def get_reservations(
         self, 
         tenant_id: int, 
@@ -216,7 +216,7 @@ class ReservationService:
         skip: int = 0, 
         limit: int = 100
     ) -> List[Reservation]:
-        """Lista reservas com filtros opcionais - CORRIGIDO PARA BUSCA FLEXÍVEL"""
+        """Lista reservas com filtros opcionais - AGORA COM SUPORTE A MULTI-SELECT"""
         query = self.db.query(Reservation).options(
             joinedload(Reservation.guest),
             joinedload(Reservation.property_obj),
@@ -227,44 +227,67 @@ class ReservationService:
         )
         
         if filters:
-            # ✅ FILTRO DE STATUS FLEXÍVEL
-            if filters.status:
-                # Normalizar status para busca
-                normalized_status = Reservation.normalize_status_for_search(filters.status)
-                
-                # Buscar por status exato OU por suas variações
-                status_variations = Reservation.get_status_variations(normalized_status)
-                query = query.filter(Reservation.status.in_(status_variations))
+            # ===== FILTROS DE STATUS COM PRIORIDADE PARA MULTI-SELECT =====
+            status_applied = False
             
-            # ✅ FILTRO DE STATUS MÚLTIPLO (NOVO)
-            if filters.status_list:
-                normalized_statuses = []
+            # 1. Priorizar filtro multi-select se presente
+            if filters.status_list and len(filters.status_list) > 0:
+                print(f"🔍 Aplicando filtro de status multi-select: {filters.status_list}")
+                all_status_variations = []
+                
                 for status in filters.status_list:
-                    normalized = Reservation.normalize_status_for_search(status)
-                    variations = Reservation.get_status_variations(normalized)
-                    normalized_statuses.extend(variations)
+                    normalized = self._normalize_status_for_search(status)
+                    variations = self._get_status_variations(normalized)
+                    all_status_variations.extend(variations)
                 
-                query = query.filter(Reservation.status.in_(normalized_statuses))
-            
-            # ✅ FILTRO DE ORIGEM FLEXÍVEL
-            if filters.source:
-                # Normalizar origem para busca
-                normalized_source = Reservation.normalize_source_for_search(filters.source)
+                # Remover duplicatas
+                unique_variations = list(set(all_status_variations))
+                print(f"🔍 Status finais para busca: {unique_variations}")
                 
-                # Buscar por origem exata OU por suas variações
-                source_variations = Reservation.get_source_variations(normalized_source)
-                query = query.filter(Reservation.source.in_(source_variations))
+                query = query.filter(Reservation.status.in_(unique_variations))
+                status_applied = True
             
-            # ✅ FILTRO DE ORIGEM MÚLTIPLO (NOVO)
-            if filters.source_list:
-                normalized_sources = []
+            # 2. Aplicar filtro único apenas se multi-select não foi usado
+            elif filters.status:
+                print(f"🔍 Aplicando filtro de status único: {filters.status}")
+                normalized_status = self._normalize_status_for_search(filters.status)
+                status_variations = self._get_status_variations(normalized_status)
+                print(f"🔍 Variações de status: {status_variations}")
+                
+                query = query.filter(Reservation.status.in_(status_variations))
+                status_applied = True
+            
+            # ===== FILTROS DE ORIGEM COM PRIORIDADE PARA MULTI-SELECT =====
+            source_applied = False
+            
+            # 1. Priorizar filtro multi-select se presente
+            if filters.source_list and len(filters.source_list) > 0:
+                print(f"🔍 Aplicando filtro de origem multi-select: {filters.source_list}")
+                all_source_variations = []
+                
                 for source in filters.source_list:
-                    normalized = Reservation.normalize_source_for_search(source)
-                    variations = Reservation.get_source_variations(normalized)
-                    normalized_sources.extend(variations)
+                    normalized = self._normalize_source_for_search(source)
+                    variations = self._get_source_variations(normalized)
+                    all_source_variations.extend(variations)
                 
-                query = query.filter(Reservation.source.in_(normalized_sources))
+                # Remover duplicatas
+                unique_variations = list(set(all_source_variations))
+                print(f"🔍 Origens finais para busca: {unique_variations}")
+                
+                query = query.filter(Reservation.source.in_(unique_variations))
+                source_applied = True
             
+            # 2. Aplicar filtro único apenas se multi-select não foi usado
+            elif filters.source:
+                print(f"🔍 Aplicando filtro de origem único: {filters.source}")
+                normalized_source = self._normalize_source_for_search(filters.source)
+                source_variations = self._get_source_variations(normalized_source)
+                print(f"🔍 Variações de origem: {source_variations}")
+                
+                query = query.filter(Reservation.source.in_(source_variations))
+                source_applied = True
+            
+            # ===== DEMAIS FILTROS (INALTERADOS) =====
             if filters.property_id:
                 query = query.filter(Reservation.property_id == filters.property_id)
             
@@ -306,7 +329,7 @@ class ReservationService:
             if filters.is_group_reservation is not None:
                 query = query.filter(Reservation.is_group_reservation == filters.is_group_reservation)
             
-            # ✅ BUSCA TEXTUAL MELHORADA
+            # ===== BUSCA TEXTUAL MELHORADA =====
             if filters.search:
                 search_term = f"%{filters.search.strip()}%"
                 query = query.join(Guest).filter(
@@ -330,9 +353,9 @@ class ReservationService:
         
         return query.order_by(Reservation.created_at.desc()).offset(skip).limit(limit).all()
 
-    # ✅ COUNT_RESERVATIONS TAMBÉM CORRIGIDO
+    # ===== MÉTODO AUXILIAR: COUNT_RESERVATIONS COM MULTI-SELECT =====
     def count_reservations(self, tenant_id: int, filters: Optional[ReservationFilters] = None) -> int:
-        """Conta total de reservas (para paginação) - CORRIGIDO"""
+        """Conta total de reservas (para paginação) - AGORA COM SUPORTE A MULTI-SELECT"""
         query = self.db.query(func.count(Reservation.id)).filter(
             Reservation.tenant_id == tenant_id,
             Reservation.is_active == True
@@ -340,33 +363,41 @@ class ReservationService:
         
         # Aplicar mesmos filtros da busca
         if filters:
-            # ✅ FILTROS FLEXÍVEIS TAMBÉM NO COUNT
-            if filters.status:
-                normalized_status = Reservation.normalize_status_for_search(filters.status)
-                status_variations = Reservation.get_status_variations(normalized_status)
+            # ===== FILTROS DE STATUS COM PRIORIDADE PARA MULTI-SELECT =====
+            # 1. Priorizar filtro multi-select se presente
+            if filters.status_list and len(filters.status_list) > 0:
+                all_status_variations = []
+                for status in filters.status_list:
+                    normalized = self._normalize_status_for_search(status)
+                    variations = self._get_status_variations(normalized)
+                    all_status_variations.extend(variations)
+                unique_variations = list(set(all_status_variations))
+                query = query.filter(Reservation.status.in_(unique_variations))
+            
+            # 2. Aplicar filtro único apenas se multi-select não foi usado
+            elif filters.status:
+                normalized_status = self._normalize_status_for_search(filters.status)
+                status_variations = self._get_status_variations(normalized_status)
                 query = query.filter(Reservation.status.in_(status_variations))
             
-            if filters.status_list:
-                normalized_statuses = []
-                for status in filters.status_list:
-                    normalized = Reservation.normalize_status_for_search(status)
-                    variations = Reservation.get_status_variations(normalized)
-                    normalized_statuses.extend(variations)
-                query = query.filter(Reservation.status.in_(normalized_statuses))
+            # ===== FILTROS DE ORIGEM COM PRIORIDADE PARA MULTI-SELECT =====
+            # 1. Priorizar filtro multi-select se presente
+            if filters.source_list and len(filters.source_list) > 0:
+                all_source_variations = []
+                for source in filters.source_list:
+                    normalized = self._normalize_source_for_search(source)
+                    variations = self._get_source_variations(normalized)
+                    all_source_variations.extend(variations)
+                unique_variations = list(set(all_source_variations))
+                query = query.filter(Reservation.source.in_(unique_variations))
             
-            if filters.source:
-                normalized_source = Reservation.normalize_source_for_search(filters.source)
-                source_variations = Reservation.get_source_variations(normalized_source)
+            # 2. Aplicar filtro único apenas se multi-select não foi usado
+            elif filters.source:
+                normalized_source = self._normalize_source_for_search(filters.source)
+                source_variations = self._get_source_variations(normalized_source)
                 query = query.filter(Reservation.source.in_(source_variations))
             
-            if filters.source_list:
-                normalized_sources = []
-                for source in filters.source_list:
-                    normalized = Reservation.normalize_source_for_search(source)
-                    variations = Reservation.get_source_variations(normalized)
-                    normalized_sources.extend(variations)
-                query = query.filter(Reservation.source.in_(normalized_sources))
-            
+            # ===== DEMAIS FILTROS (IGUAL AO GET_RESERVATIONS) =====
             if filters.property_id:
                 query = query.filter(Reservation.property_id == filters.property_id)
             if filters.guest_id:
@@ -376,7 +407,7 @@ class ReservationService:
             if filters.check_in_to:
                 query = query.filter(Reservation.check_in_date <= filters.check_in_to)
             
-            # ✅ BUSCA TEXTUAL NO COUNT TAMBÉM
+            # ===== BUSCA TEXTUAL NO COUNT TAMBÉM =====
             if filters.search:
                 search_term = f"%{filters.search.strip()}%"
                 query = query.join(Guest).filter(
@@ -393,6 +424,138 @@ class ReservationService:
                 )
         
         return query.scalar()
+
+    # ===== MÉTODOS AUXILIARES PARA NORMALIZAÇÃO ===== 
+    def _normalize_status_for_search(self, status: str) -> str:
+        """Normaliza status para busca"""
+        if not status:
+            return status
+        
+        status_lower = status.lower().strip()
+        
+        # Mapeamento de aliases comuns para valores canônicos
+        status_mapping = {
+            'pendente': 'pending',
+            'confirmada': 'confirmed',
+            'confirmado': 'confirmed',
+            'check_in': 'checked_in',
+            'check-in': 'checked_in',
+            'checkin': 'checked_in',
+            'check_out': 'checked_out',
+            'check-out': 'checked_out',
+            'checkout': 'checked_out',
+            'cancelada': 'cancelled',
+            'cancelado': 'cancelled',
+            'no_show': 'no_show',
+            'no-show': 'no_show',
+            'noshow': 'no_show'
+        }
+        
+        return status_mapping.get(status_lower, status_lower)
+    
+    def _get_status_variations(self, normalized_status: str) -> List[str]:
+        """Retorna todas as variações possíveis de um status normalizado"""
+        variations_map = {
+            'pending': ['pending'],
+            'confirmed': ['confirmed'],
+            'checked_in': ['checked_in'],
+            'checked_out': ['checked_out'],
+            'cancelled': ['cancelled'],
+            'no_show': ['no_show'],
+            'booking': ['booking']  # Para reservas externas
+        }
+        
+        return variations_map.get(normalized_status, [normalized_status])
+    
+    def _normalize_source_for_search(self, source: str) -> str:
+        """Normaliza origem para busca"""
+        if not source:
+            return source
+        
+        source_lower = source.lower().strip()
+        
+        # Mapeamento de aliases comuns para valores canônicos
+        source_mapping = {
+            'booking.com': 'booking',
+            'bookingcom': 'booking',
+            'room_map': 'room_map',
+            'roommap': 'room_map',
+            'mapa_quartos': 'room_map',
+            'direct_booking': 'direct',
+            'direto': 'direct',
+            'telefone': 'phone',
+            'e-mail': 'email',
+            'walk-in': 'walk_in',
+            'walkin': 'walk_in',
+            'hotels.com': 'hotels',
+            'hotelscom': 'hotels'
+        }
+        
+        return source_mapping.get(source_lower, source_lower)
+    
+    def _get_source_variations(self, normalized_source: str) -> List[str]:
+        """Retorna todas as variações possíveis de uma origem normalizada"""
+        variations_map = {
+            'direct': ['direct', 'direct_booking', 'website'],
+            'booking': ['booking', 'booking.com'],
+            'airbnb': ['airbnb'],
+            'expedia': ['expedia'],
+            'hotels': ['hotels', 'hotels.com'],
+            'agoda': ['agoda'],
+            'phone': ['phone'],
+            'email': ['email'],
+            'walk_in': ['walk_in'],
+            'room_map': ['room_map'],
+            'dashboard': ['dashboard'],
+            'admin': ['admin']
+        }
+        
+        return variations_map.get(normalized_source, [normalized_source])
+
+    # ===== MÉTODO AUXILIAR PARA FILTROS EM INTERVALOS DE DATA =====
+    def get_reservations_by_date_range(
+        self, 
+        tenant_id: int, 
+        start_date: date, 
+        end_date: date,
+        property_id: Optional[int] = None,
+        status_filter: Optional[List[str]] = None
+    ) -> List[Reservation]:
+        """Busca reservas em um período (para calendários) - AGORA COM MULTI-SELECT"""
+        
+        query = self.db.query(Reservation).options(
+            joinedload(Reservation.guest),
+            joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room)
+        ).filter(
+            Reservation.tenant_id == tenant_id,
+            Reservation.is_active == True,
+            not_(
+                or_(
+                    Reservation.check_out_date <= start_date,
+                    Reservation.check_in_date >= end_date
+                )
+            )
+        )
+        
+        if property_id:
+            query = query.filter(Reservation.property_id == property_id)
+        
+        # ===== FILTRO DE STATUS COM MULTI-SELECT =====
+        if status_filter and len(status_filter) > 0:
+            print(f"🗓️ Filtro de status no calendário: {status_filter}")
+            all_status_variations = []
+            
+            for status in status_filter:
+                normalized = self._normalize_status_for_search(status)
+                variations = self._get_status_variations(normalized)
+                all_status_variations.extend(variations)
+            
+            unique_variations = list(set(all_status_variations))
+            print(f"🗓️ Status finais para calendário: {unique_variations}")
+            
+            query = query.filter(Reservation.status.in_(unique_variations))
+        
+        return query.order_by(Reservation.check_in_date).all()
 
     # MÉTODO CREATE_RESERVATION COM AUDITORIA AUTOMÁTICA
     @audit_operation("reservations", "CREATE", "Nova reserva criada")
@@ -459,7 +622,7 @@ class ReservationService:
         # ✅ NORMALIZAR ORIGEM AUTOMATICAMENTE
         normalized_source = reservation_data.source
         if normalized_source:
-            normalized_source = Reservation.normalize_source_for_search(normalized_source)
+            normalized_source = self._normalize_source_for_search(normalized_source)
 
         # Criar reserva principal
         db_reservation = Reservation(
@@ -569,7 +732,7 @@ class ReservationService:
 
         # ✅ NORMALIZAR ORIGEM SE FORNECIDA
         if 'source' in update_data and update_data['source']:
-            update_data['source'] = Reservation.normalize_source_for_search(update_data['source'])
+            update_data['source'] = self._normalize_source_for_search(update_data['source'])
 
         # Se as datas mudaram, verificar disponibilidade
         dates_changed = 'check_in_date' in update_data or 'check_out_date' in update_data
@@ -1105,47 +1268,7 @@ class ReservationService:
                 detail="Erro ao cancelar reserva"
             )
 
-    def get_reservations_by_date_range(
-        self, 
-        tenant_id: int, 
-        start_date: date, 
-        end_date: date,
-        property_id: Optional[int] = None,
-        status_filter: Optional[List[str]] = None
-    ) -> List[Reservation]:
-        """Busca reservas em um período (para calendários)"""
-        
-        query = self.db.query(Reservation).options(
-            joinedload(Reservation.guest),
-            joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room)
-        ).filter(
-            Reservation.tenant_id == tenant_id,
-            Reservation.is_active == True,
-            not_(
-                or_(
-                    Reservation.check_out_date <= start_date,
-                    Reservation.check_in_date >= end_date
-                )
-            )
-        )
-        
-        if property_id:
-            query = query.filter(Reservation.property_id == property_id)
-        
-        # ✅ FILTRO DE STATUS FLEXÍVEL
-        if status_filter:
-            # Normalizar cada status e buscar variações
-            normalized_statuses = []
-            for status in status_filter:
-                normalized = Reservation.normalize_status_for_search(status)
-                variations = Reservation.get_status_variations(normalized)
-                normalized_statuses.extend(variations)
-            
-            query = query.filter(Reservation.status.in_(normalized_statuses))
-        
-        return query.order_by(Reservation.check_in_date).all()
-
-    # ✅ GET_RESERVATION_STATS CORRIGIDO
+    # ===== MÉTODO GET_RESERVATION_STATS COM DISPLAY NAMES =====
     def get_reservation_stats(self, tenant_id: int, property_id: Optional[int] = None) -> Dict[str, Any]:
         """Obtém estatísticas das reservas - USANDO DISPLAY NAMES"""
         query = self.db.query(Reservation).filter(
@@ -1196,7 +1319,7 @@ class ReservationService:
             'pending_revenue': float(pending_revenue or 0)
         }
 
-    # ✅ GET_RESERVATION_DETAILED USANDO AUDITORIA FORMATADA
+    # ===== GET_RESERVATION_DETAILED USANDO AUDITORIA FORMATADA =====
     def get_reservation_detailed(self, reservation_id: int, tenant_id: int) -> Optional[Dict[str, Any]]:
         """
         Busca reserva com todos os detalhes para página individual

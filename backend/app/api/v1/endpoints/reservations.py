@@ -1,8 +1,10 @@
+# backend/app/api/v1/endpoints/reservations.py - ARQUIVO COMPLETO COM MULTI-SELECT E REFATORADO
+
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import and_, or_, func, text, desc, asc, not_  # ✅ ADICIONADO not_
+from sqlalchemy import and_, or_, func, text, desc, asc, not_
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 import math
@@ -44,7 +46,196 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-# ===== ENDPOINT PRINCIPAL =====
+# ===== FUNÇÃO AUXILIAR PARA PROCESSAR FILTROS MULTI-SELECT =====
+
+def process_multiselect_params(
+    status: Optional[str] = None,
+    source: Optional[str] = None,
+    status_list: Optional[str] = None,
+    source_list: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Processa parâmetros de multi-select vindos como strings separadas por vírgula
+    e converte para o formato esperado pelo ReservationFilters
+    """
+    filters_dict = {}
+    
+    # Processar status
+    if status_list and status_list.strip():
+        # Multi-select tem prioridade sobre filtro único
+        filters_dict['status_list'] = [s.strip() for s in status_list.split(',') if s.strip()]
+    elif status and status.strip():
+        # ✅ CORREÇÃO: Auto-detectar vírgulas e converter para multi-select
+        if ',' in status:
+            filters_dict['status_list'] = [s.strip() for s in status.split(',') if s.strip()]
+        else:
+            filters_dict['status'] = status.strip()
+    
+    # Processar source
+    if source_list and source_list.strip():
+        # Multi-select tem prioridade sobre filtro único
+        filters_dict['source_list'] = [s.strip() for s in source_list.split(',') if s.strip()]
+    elif source and source.strip():
+        # ✅ CORREÇÃO: Auto-detectar vírgulas e converter para multi-select
+        if ',' in source:
+            filters_dict['source_list'] = [s.strip() for s in source.split(',') if s.strip()]
+        else:
+            filters_dict['source'] = source.strip()
+    
+    return filters_dict
+
+
+def create_reservation_filters(
+    # Filtros básicos
+    status: Optional[str] = None,
+    source: Optional[str] = None,
+    property_id: Optional[int] = None,
+    guest_id: Optional[int] = None,
+    search: Optional[str] = None,
+    
+    # NOVOS: Filtros multi-select como strings CSV
+    status_list: Optional[str] = None,
+    source_list: Optional[str] = None,
+    
+    # Filtros de data
+    check_in_from: Optional[date] = None,
+    check_in_to: Optional[date] = None,
+    check_out_from: Optional[date] = None,
+    check_out_to: Optional[date] = None,
+    created_from: Optional[str] = None,
+    created_to: Optional[str] = None,
+    confirmed_from: Optional[datetime] = None,
+    confirmed_to: Optional[datetime] = None,
+    cancelled_from: Optional[date] = None,
+    cancelled_to: Optional[date] = None,
+    actual_checkin_from: Optional[datetime] = None,
+    actual_checkin_to: Optional[datetime] = None,
+    actual_checkout_from: Optional[datetime] = None,
+    actual_checkout_to: Optional[datetime] = None,
+    
+    # Filtros do hóspede
+    guest_email: Optional[str] = None,
+    guest_phone: Optional[str] = None,
+    guest_document_type: Optional[str] = None,
+    guest_nationality: Optional[str] = None,
+    guest_city: Optional[str] = None,
+    guest_state: Optional[str] = None,
+    guest_country: Optional[str] = None,
+    
+    # Filtros financeiros
+    min_amount: Optional[float] = None,
+    max_amount: Optional[float] = None,
+    min_guests: Optional[int] = None,
+    max_guests: Optional[int] = None,
+    min_nights: Optional[int] = None,
+    max_nights: Optional[int] = None,
+    
+    # Filtros de quarto
+    room_type_id: Optional[int] = None,
+    room_number: Optional[str] = None,
+    
+    # Filtros especiais
+    has_special_requests: Optional[bool] = None,
+    has_internal_notes: Optional[bool] = None,
+    deposit_paid: Optional[bool] = None,
+    payment_status: Optional[str] = None,
+    is_paid: Optional[bool] = None,
+    requires_deposit: Optional[bool] = None,
+    is_group_reservation: Optional[bool] = None,
+) -> ReservationFilters:
+    """Cria objeto ReservationFilters a partir dos parâmetros"""
+    
+    # Processar multi-select
+    multiselect_filters = process_multiselect_params(status, source, status_list, source_list)
+    
+    # Processar datas created_from/to flexíveis
+    created_from_dt = None
+    created_to_dt = None
+    
+    if created_from:
+        try:
+            if 'T' in created_from:
+                created_from_dt = datetime.fromisoformat(created_from.replace('Z', '+00:00'))
+            else:
+                date_obj = datetime.strptime(created_from, '%Y-%m-%d').date()
+                created_from_dt = datetime.combine(date_obj, datetime.min.time())
+        except (ValueError, TypeError):
+            logger.warning(f"Formato de data inválido para created_from: {created_from}")
+    
+    if created_to:
+        try:
+            if 'T' in created_to:
+                created_to_dt = datetime.fromisoformat(created_to.replace('Z', '+00:00'))
+            else:
+                date_obj = datetime.strptime(created_to, '%Y-%m-%d').date()
+                created_to_dt = datetime.combine(date_obj, datetime.max.time())
+        except (ValueError, TypeError):
+            logger.warning(f"Formato de data inválido para created_to: {created_to}")
+    
+    # Construir filtros
+    filter_data = {
+        # Filtros básicos
+        'property_id': property_id,
+        'guest_id': guest_id,
+        'search': search,
+        
+        # Filtros de data
+        'check_in_from': check_in_from,
+        'check_in_to': check_in_to,
+        'check_out_from': check_out_from,
+        'check_out_to': check_out_to,
+        'created_from': created_from_dt,
+        'created_to': created_to_dt,
+        'confirmed_from': confirmed_from,
+        'confirmed_to': confirmed_to,
+        'cancelled_from': cancelled_from,
+        'cancelled_to': cancelled_to,
+        'actual_checkin_from': actual_checkin_from,
+        'actual_checkin_to': actual_checkin_to,
+        'actual_checkout_from': actual_checkout_from,
+        'actual_checkout_to': actual_checkout_to,
+        
+        # Filtros do hóspede
+        'guest_email': guest_email,
+        'guest_phone': guest_phone,
+        'guest_document_type': guest_document_type,
+        'guest_nationality': guest_nationality,
+        'guest_city': guest_city,
+        'guest_state': guest_state,
+        'guest_country': guest_country,
+        
+        # Filtros financeiros
+        'min_amount': Decimal(str(min_amount)) if min_amount is not None else None,
+        'max_amount': Decimal(str(max_amount)) if max_amount is not None else None,
+        'min_guests': min_guests,
+        'max_guests': max_guests,
+        'min_nights': min_nights,
+        'max_nights': max_nights,
+        
+        # Filtros de quarto
+        'room_type_id': room_type_id,
+        'room_number': room_number,
+        
+        # Filtros especiais
+        'has_special_requests': has_special_requests,
+        'has_internal_notes': has_internal_notes,
+        'deposit_paid': deposit_paid,
+        'payment_status': payment_status,
+        'is_paid': is_paid,
+        'requires_deposit': requires_deposit,
+        'is_group_reservation': is_group_reservation,
+        
+        # Adicionar filtros de multi-select processados
+        **multiselect_filters
+    }
+    
+    # Remover valores None
+    filter_data = {k: v for k, v in filter_data.items() if v is not None}
+    
+    return ReservationFilters(**filter_data)
+
+
+# ===== ENDPOINT PRINCIPAL COM MULTI-SELECT =====
 
 @router.get("/", response_model=ReservationListResponse)
 def list_reservations(
@@ -55,18 +246,20 @@ def list_reservations(
     per_page: int = Query(20, ge=1, le=100, description="Itens por página"),
     
     # Filtros básicos existentes
-    status: Optional[str] = Query(None, description="Filtrar por status"),
-    source: Optional[str] = Query(None, description="Filtrar por canal"),
+    status: Optional[str] = Query(None, description="Filtrar por status (filtro único)"),
+    source: Optional[str] = Query(None, description="Filtrar por canal (filtro único)"),
     property_id: Optional[int] = Query(None, description="Filtrar por propriedade"),
     guest_id: Optional[int] = Query(None, description="Filtrar por hóspede"),
+    
+    # NOVOS: Filtros multi-select como strings separadas por vírgula
+    status_list: Optional[str] = Query(None, description="Filtrar por múltiplos status (separados por vírgula)"),
+    source_list: Optional[str] = Query(None, description="Filtrar por múltiplos canais (separados por vírgula)"),
     
     # Filtros de data existentes
     check_in_from: Optional[date] = Query(None, description="Check-in a partir de"),
     check_in_to: Optional[date] = Query(None, description="Check-in até"),
     check_out_from: Optional[date] = Query(None, description="Check-out a partir de"),
     check_out_to: Optional[date] = Query(None, description="Check-out até"),
-    
-    # Correção: Suportar datetime e date para created_from/to
     created_from: Optional[str] = Query(None, description="Criação a partir de (datetime ou date)"),
     created_to: Optional[str] = Query(None, description="Criação até (datetime ou date)"),
     
@@ -77,7 +270,7 @@ def list_reservations(
     requires_deposit: Optional[bool] = Query(None, description="Exige depósito"),
     is_group_reservation: Optional[bool] = Query(None, description="Reserva em grupo"),
     
-    # Busca textual - Principal correção
+    # Busca textual
     search: Optional[str] = Query(None, description="Buscar por nome, email, número reserva"),
     
     # ===== FILTROS EXPANDIDOS =====
@@ -119,8 +312,6 @@ def list_reservations(
     has_special_requests: Optional[bool] = Query(None, description="Possui pedidos especiais"),
     has_internal_notes: Optional[bool] = Query(None, description="Possui notas internas"),
     deposit_paid: Optional[bool] = Query(None, description="Depósito pago"),
-    
-    # Filtros de pagamento
     payment_status: Optional[str] = Query(None, description="Status do pagamento"),
     
     # Parâmetros para incluir dados expandidos
@@ -131,238 +322,73 @@ def list_reservations(
 ):
     """
     Lista reservas do tenant com filtros avançados e paginação
-    Versão corrigida - busca por nome funcional e quartos com schema correto
+    VERSÃO ATUALIZADA COM SUPORTE A MULTI-SELECT
     """
     
     try:
-        # Calcular offset
-        skip = (page - 1) * per_page
-        
-        # Query base com joins explícitos
-        query = db.query(Reservation).join(
-            Guest, Reservation.guest_id == Guest.id
-        ).join(
-            Property, Reservation.property_id == Property.id  
-        ).options(
-            joinedload(Reservation.guest),
-            joinedload(Reservation.property_obj),
-            selectinload(Reservation.reservation_rooms)
-                .joinedload(ReservationRoom.room)
-                .joinedload(Room.room_type)
-        ).filter(
-            Reservation.tenant_id == current_user.tenant_id,
-            Reservation.is_active == True
+        # Criar filtros usando função auxiliar
+        filters = create_reservation_filters(
+            status=status,
+            source=source,
+            property_id=property_id,
+            guest_id=guest_id,
+            search=search,
+            status_list=status_list,  # NOVO
+            source_list=source_list,  # NOVO
+            check_in_from=check_in_from,
+            check_in_to=check_in_to,
+            check_out_from=check_out_from,
+            check_out_to=check_out_to,
+            created_from=created_from,
+            created_to=created_to,
+            confirmed_from=confirmed_from,
+            confirmed_to=confirmed_to,
+            cancelled_from=cancelled_from,
+            cancelled_to=cancelled_to,
+            actual_checkin_from=actual_checkin_from,
+            actual_checkin_to=actual_checkin_to,
+            actual_checkout_from=actual_checkout_from,
+            actual_checkout_to=actual_checkout_to,
+            guest_email=guest_email,
+            guest_phone=guest_phone,
+            guest_document_type=guest_document_type,
+            guest_nationality=guest_nationality,
+            guest_city=guest_city,
+            guest_state=guest_state,
+            guest_country=guest_country,
+            min_amount=min_amount,
+            max_amount=max_amount,
+            min_guests=min_guests,
+            max_guests=max_guests,
+            min_nights=min_nights,
+            max_nights=max_nights,
+            room_type_id=room_type_id,
+            room_number=room_number,
+            has_special_requests=has_special_requests,
+            has_internal_notes=has_internal_notes,
+            deposit_paid=deposit_paid,
+            payment_status=payment_status,
+            is_paid=is_paid,
+            requires_deposit=requires_deposit,
+            is_group_reservation=is_group_reservation,
         )
         
-        # ===== APLICAR FILTROS BÁSICOS =====
+        # Usar o service atualizado
+        reservation_service = ReservationService(db)
+        skip = (page - 1) * per_page
         
-        if status:
-            query = query.filter(Reservation.status == status)
+        # Buscar reservas com filtros (incluindo multi-select)
+        reservations = reservation_service.get_reservations(
+            current_user.tenant_id, 
+            filters, 
+            skip, 
+            per_page
+        )
         
-        if source:
-            query = query.filter(Reservation.source == source)
+        # Contar total
+        total = reservation_service.count_reservations(current_user.tenant_id, filters)
         
-        if property_id:
-            query = query.filter(Reservation.property_id == property_id)
-        
-        if guest_id:
-            query = query.filter(Reservation.guest_id == guest_id)
-        
-        # Busca textual corrigida - com join explícito
-        if search and search.strip():
-            search_term = f"%{search.strip()}%"
-            query = query.filter(
-                or_(
-                    Guest.first_name.ilike(search_term),
-                    Guest.last_name.ilike(search_term),
-                    func.concat(Guest.first_name, ' ', Guest.last_name).ilike(search_term),
-                    Guest.email.ilike(search_term),
-                    Reservation.reservation_number.ilike(search_term)
-                )
-            )
-        
-        # ===== FILTROS DE DATA =====
-        
-        if check_in_from:
-            query = query.filter(Reservation.check_in_date >= check_in_from)
-        
-        if check_in_to:
-            query = query.filter(Reservation.check_in_date <= check_in_to)
-        
-        if check_out_from:
-            query = query.filter(Reservation.check_out_date >= check_out_from)
-        
-        if check_out_to:
-            query = query.filter(Reservation.check_out_date <= check_out_to)
-        
-        # Correção: Tratamento flexível de created_from/to (date ou datetime)
-        if created_from:
-            try:
-                if 'T' in created_from:
-                    # É datetime completo
-                    start_datetime = datetime.fromisoformat(created_from.replace('Z', '+00:00'))
-                else:
-                    # É apenas date, converter para início do dia
-                    date_obj = datetime.strptime(created_from, '%Y-%m-%d').date()
-                    start_datetime = datetime.combine(date_obj, datetime.min.time())
-                query = query.filter(Reservation.created_date >= start_datetime)
-            except (ValueError, TypeError):
-                logger.warning(f"Formato de data inválido para created_from: {created_from}")
-                
-        if created_to:
-            try:
-                if 'T' in created_to:
-                    # É datetime completo
-                    end_datetime = datetime.fromisoformat(created_to.replace('Z', '+00:00'))
-                else:
-                    # É apenas date, converter para final do dia
-                    date_obj = datetime.strptime(created_to, '%Y-%m-%d').date()
-                    end_datetime = datetime.combine(date_obj, datetime.max.time())
-                query = query.filter(Reservation.created_date <= end_datetime)
-            except (ValueError, TypeError):
-                logger.warning(f"Formato de data inválido para created_to: {created_to}")
-        
-        # ===== FILTROS DO HÓSPEDE =====
-        
-        if guest_email:
-            query = query.filter(Guest.email.ilike(f"%{guest_email}%"))
-            
-        if guest_phone:
-            query = query.filter(Guest.phone.ilike(f"%{guest_phone}%"))
-            
-        if guest_document_type:
-            query = query.filter(Guest.document_type == guest_document_type)
-            
-        if guest_nationality:
-            query = query.filter(Guest.nationality == guest_nationality)
-            
-        if guest_city:
-            query = query.filter(Guest.city.ilike(f"%{guest_city}%"))
-            
-        if guest_state:
-            query = query.filter(Guest.state == guest_state)
-            
-        if guest_country:
-            query = query.filter(Guest.country == guest_country)
-        
-        # ===== FILTROS DE DATA EXPANDIDOS =====
-        
-        if cancelled_from:
-            query = query.filter(func.date(Reservation.cancelled_date) >= cancelled_from)
-            
-        if cancelled_to:
-            query = query.filter(func.date(Reservation.cancelled_date) <= cancelled_to)
-            
-        if confirmed_from:
-            query = query.filter(Reservation.confirmed_date >= confirmed_from)
-            
-        if confirmed_to:
-            query = query.filter(Reservation.confirmed_date <= confirmed_to)
-            
-        if actual_checkin_from:
-            query = query.filter(Reservation.checked_in_date >= actual_checkin_from)
-            
-        if actual_checkin_to:
-            query = query.filter(Reservation.checked_in_date <= actual_checkin_to)
-            
-        if actual_checkout_from:
-            query = query.filter(Reservation.checked_out_date >= actual_checkout_from)
-            
-        if actual_checkout_to:
-            query = query.filter(Reservation.checked_out_date <= actual_checkout_to)
-        
-        # ===== FILTROS NUMÉRICOS =====
-        
-        if min_amount is not None:
-            query = query.filter(Reservation.total_amount >= Decimal(str(min_amount)))
-        
-        if max_amount is not None:
-            query = query.filter(Reservation.total_amount <= Decimal(str(max_amount)))
-        
-        if min_guests:
-            query = query.filter(Reservation.total_guests >= min_guests)
-            
-        if max_guests:
-            query = query.filter(Reservation.total_guests <= max_guests)
-            
-        if min_nights:
-            query = query.filter(func.date_part('day', Reservation.check_out_date - Reservation.check_in_date) >= min_nights)
-            
-        if max_nights:
-            query = query.filter(func.date_part('day', Reservation.check_out_date - Reservation.check_in_date) <= max_nights)
-        
-        # ===== FILTROS BOOLEAN - ✅ CORRIGIDO PARA USAR total_paid =====
-        
-        if is_paid is not None:
-            if is_paid:
-                # ✅ CORREÇÃO: Usar property total_paid em vez do campo paid_amount
-                query = query.filter(Reservation.total_amount <= func.coalesce(
-                    func.sum(func.case([
-                        (and_(Payment.status == 'confirmed', Payment.is_refund == False), Payment.amount)
-                    ], else_=0)), 0
-                ))
-            else:
-                query = query.filter(Reservation.total_amount > func.coalesce(
-                    func.sum(func.case([
-                        (and_(Payment.status == 'confirmed', Payment.is_refund == False), Payment.amount)
-                    ], else_=0)), 0
-                ))
-        
-        if requires_deposit is not None:
-            query = query.filter(Reservation.requires_deposit == requires_deposit)
-        
-        if is_group_reservation is not None:
-            query = query.filter(Reservation.is_group_reservation == is_group_reservation)
-            
-        if deposit_paid is not None:
-            query = query.filter(Reservation.deposit_paid == deposit_paid)
-        
-        # ===== FILTROS ESPECIAIS =====
-        
-        if has_special_requests is not None:
-            if has_special_requests:
-                query = query.filter(
-                    and_(
-                        Reservation.guest_requests.isnot(None),
-                        Reservation.guest_requests != ''
-                    )
-                )
-            else:
-                query = query.filter(
-                    or_(
-                        Reservation.guest_requests.is_(None),
-                        Reservation.guest_requests == ''
-                    )
-                )
-                
-        if has_internal_notes is not None:
-            if has_internal_notes:
-                query = query.filter(
-                    and_(
-                        Reservation.internal_notes.isnot(None),
-                        Reservation.internal_notes != ''
-                    )
-                )
-            else:
-                query = query.filter(
-                    or_(
-                        Reservation.internal_notes.is_(None),
-                        Reservation.internal_notes == ''
-                    )
-                )
-        
-        # ===== EXECUTAR QUERY =====
-        
-        # Contar total antes da paginação
-        total = query.count()
-        
-        # Ordenação (mais recente primeiro)
-        query = query.order_by(desc(Reservation.created_date))
-        
-        # Aplicar paginação
-        reservations = query.offset(skip).limit(per_page).all()
-        
-        # ===== CONVERTER PARA RESPONSE =====
+        # ===== CONVERTER PARA RESPONSE (MESMO CÓDIGO EXISTENTE) =====
         
         reservations_response = []
         
@@ -381,7 +407,7 @@ def list_reservations(
                 'total_guests': reservation.total_guests,
                 'room_rate': reservation.room_rate,
                 'total_amount': reservation.total_amount,
-                'paid_amount': reservation.paid_amount,  # Mantido para compatibilidade
+                'paid_amount': reservation.paid_amount,
                 'discount': reservation.discount,
                 'taxes': reservation.taxes,
                 'source': reservation.source,
@@ -419,9 +445,9 @@ def list_reservations(
             else:
                 reservation_dict['property_name'] = "Propriedade não encontrada"
             
-            # ✅ CORREÇÃO: Campos computados - pagamento usando total_paid
+            # Campos computados - pagamento usando total_paid
             total_amount = float(reservation.total_amount) if reservation.total_amount else 0
-            paid_amount = float(reservation.total_paid) if reservation.total_paid else 0  # ✅ MUDANÇA AQUI
+            paid_amount = float(reservation.total_paid) if reservation.total_paid else 0
             
             reservation_dict['is_paid'] = paid_amount >= total_amount if total_amount > 0 else True
             reservation_dict['balance'] = max(0, total_amount - paid_amount)
@@ -432,27 +458,26 @@ def list_reservations(
             else:
                 reservation_dict['nights'] = 0
             
-            # ===== CORREÇÃO: Campos computados - quartos =====
+            # Campos computados - quartos
             if include_room_details and reservation.reservation_rooms:
                 rooms_data = []
                 for room_reservation in reservation.reservation_rooms:
-                    if room_reservation.room:  # Verificar se o quarto existe
-                        # Corrigir para atender ao schema ReservationRoomResponse
+                    if room_reservation.room:
                         room_data = {
-                            'id': room_reservation.id,  # ✅ ID da reservation_room, não do room
-                            'reservation_id': room_reservation.reservation_id,  # ✅ Campo obrigatório
-                            'room_id': room_reservation.room_id,  # ✅ Campo obrigatório
-                            'check_in_date': room_reservation.check_in_date.isoformat() if room_reservation.check_in_date else reservation.check_in_date.isoformat(),  # ✅ Campo obrigatório
-                            'check_out_date': room_reservation.check_out_date.isoformat() if room_reservation.check_out_date else reservation.check_out_date.isoformat(),  # ✅ Campo obrigatório
+                            'id': room_reservation.id,
+                            'reservation_id': room_reservation.reservation_id,
+                            'room_id': room_reservation.room_id,
+                            'check_in_date': room_reservation.check_in_date.isoformat() if room_reservation.check_in_date else reservation.check_in_date.isoformat(),
+                            'check_out_date': room_reservation.check_out_date.isoformat() if room_reservation.check_out_date else reservation.check_out_date.isoformat(),
                             'rate_per_night': room_reservation.rate_per_night if hasattr(room_reservation, 'rate_per_night') else None,
-                            'total_amount': room_reservation.total_amount if hasattr(room_reservation, 'total_amount') else None,  # ✅ Campo obrigatório
-                            'status': room_reservation.status if hasattr(room_reservation, 'status') else 'confirmed',  # ✅ Campo obrigatório
+                            'total_amount': room_reservation.total_amount if hasattr(room_reservation, 'total_amount') else None,
+                            'status': room_reservation.status if hasattr(room_reservation, 'status') else 'confirmed',
                             'notes': room_reservation.notes if hasattr(room_reservation, 'notes') else None,
                             'room_number': room_reservation.room.room_number,
                             'room_name': room_reservation.room.name if hasattr(room_reservation.room, 'name') else None,
                             'room_type_name': room_reservation.room.room_type.name if room_reservation.room.room_type else None,
                             'guests': room_reservation.guests if hasattr(room_reservation, 'guests') else 1,
-                            'rate_plan_name': None  # Pode ser implementado depois
+                            'rate_plan_name': None
                         }
                         rooms_data.append(room_data)
                 
@@ -483,7 +508,7 @@ def list_reservations(
         )
 
 
-# ===== LISTAGEM DETALHADA =====
+# ===== LISTAGEM DETALHADA COM MULTI-SELECT =====
 
 @router.get("/detailed", response_model=ReservationListResponseWithDetails)
 def get_reservations_detailed(
@@ -493,20 +518,24 @@ def get_reservations_detailed(
     page: int = Query(1, ge=1, description="Página (inicia em 1)"),
     per_page: int = Query(20, ge=1, le=100, description="Itens por página"),
     
-    # Todos os filtros suportados
-    status: Optional[str] = Query(None, description="Status da reserva"),
-    source: Optional[str] = Query(None, description="Origem da reserva"),
+    # Filtros básicos
+    status: Optional[str] = Query(None, description="Status da reserva (filtro único)"),
+    source: Optional[str] = Query(None, description="Origem da reserva (filtro único)"),
     property_id: Optional[int] = Query(None, description="ID da propriedade"),
     guest_id: Optional[int] = Query(None, description="ID do hóspede"),
     search: Optional[str] = Query(None, description="Busca por nome, email ou número da reserva"),
+    
+    # NOVOS: Filtros multi-select
+    status_list: Optional[str] = Query(None, description="Múltiplos status (separados por vírgula)"),
+    source_list: Optional[str] = Query(None, description="Múltiplas origens (separadas por vírgula)"),
     
     # Filtros de data
     check_in_from: Optional[date] = Query(None, description="Data de check-in a partir de"),
     check_in_to: Optional[date] = Query(None, description="Data de check-in até"),
     check_out_from: Optional[date] = Query(None, description="Data de check-out a partir de"),
     check_out_to: Optional[date] = Query(None, description="Data de check-out até"),
-    created_from: Optional[datetime] = Query(None, description="Data de criação a partir de"),
-    created_to: Optional[datetime] = Query(None, description="Data de criação até"),
+    created_from: Optional[str] = Query(None, description="Data de criação a partir de"),
+    created_to: Optional[str] = Query(None, description="Data de criação até"),
     confirmed_from: Optional[datetime] = Query(None, description="Data de confirmação a partir de"),
     confirmed_to: Optional[datetime] = Query(None, description="Data de confirmação até"),
     cancelled_from: Optional[date] = Query(None, description="Data de cancelamento a partir de"),
@@ -552,126 +581,69 @@ def get_reservations_detailed(
     include_payment_details: bool = Query(True, description="Incluir detalhes de pagamento"),
     include_property_details: bool = Query(False, description="Incluir detalhes da propriedade"),
 ):
-    """Lista reservas com detalhes expandidos dos hóspedes e propriedades"""
+    """Lista reservas com detalhes expandidos dos hóspedes e propriedades - COM MULTI-SELECT"""
     try:
-        # Calcular offset
+        # Criar filtros usando função auxiliar
+        filters = create_reservation_filters(
+            status=status,
+            source=source,
+            property_id=property_id,
+            guest_id=guest_id,
+            search=search,
+            status_list=status_list,  # NOVO
+            source_list=source_list,  # NOVO
+            check_in_from=check_in_from,
+            check_in_to=check_in_to,
+            check_out_from=check_out_from,
+            check_out_to=check_out_to,
+            created_from=created_from,
+            created_to=created_to,
+            confirmed_from=confirmed_from,
+            confirmed_to=confirmed_to,
+            cancelled_from=cancelled_from,
+            cancelled_to=cancelled_to,
+            actual_checkin_from=actual_checkin_from,
+            actual_checkin_to=actual_checkin_to,
+            actual_checkout_from=actual_checkout_from,
+            actual_checkout_to=actual_checkout_to,
+            guest_email=guest_email,
+            guest_phone=guest_phone,
+            guest_document_type=guest_document_type,
+            guest_nationality=guest_nationality,
+            guest_city=guest_city,
+            guest_state=guest_state,
+            guest_country=guest_country,
+            min_amount=min_amount,
+            max_amount=max_amount,
+            min_guests=min_guests,
+            max_guests=max_guests,
+            min_nights=min_nights,
+            max_nights=max_nights,
+            room_type_id=room_type_id,
+            room_number=room_number,
+            has_special_requests=has_special_requests,
+            has_internal_notes=has_internal_notes,
+            deposit_paid=deposit_paid,
+            payment_status=payment_status,
+            is_paid=is_paid,
+            requires_deposit=requires_deposit,
+            is_group_reservation=is_group_reservation,
+        )
+        
+        # Usar o service atualizado
+        reservation_service = ReservationService(db)
         skip = (page - 1) * per_page
         
-        # Query direta com joinedload completo dos quartos
-        query = db.query(Reservation).options(
-            joinedload(Reservation.guest),
-            joinedload(Reservation.property_obj),
-            joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room).joinedload(Room.room_type)
-        ).filter(
-            Reservation.tenant_id == current_user.tenant_id,
-            Reservation.is_active == True
+        # Buscar reservas com filtros (incluindo multi-select)
+        reservations = reservation_service.get_reservations(
+            current_user.tenant_id, 
+            filters, 
+            skip, 
+            per_page
         )
-
-        # Aplicar filtros básicos
-        if status:
-            query = query.filter(Reservation.status == status)
-        if source:
-            query = query.filter(Reservation.source == source)
-        if property_id:
-            query = query.filter(Reservation.property_id == property_id)
-        if guest_id:
-            query = query.filter(Reservation.guest_id == guest_id)
-
-        # Filtros de busca textual
-        if search:
-            search_term = f"%{search}%"
-            query = query.filter(
-                or_(
-                    Guest.first_name.ilike(search_term),
-                    Guest.last_name.ilike(search_term), 
-                    Guest.email.ilike(search_term),
-                    Reservation.reservation_number.ilike(search_term)
-                )
-            )
-
-        # Filtros de data
-        if check_in_from:
-            query = query.filter(Reservation.check_in_date >= check_in_from)
-        if check_in_to:
-            query = query.filter(Reservation.check_in_date <= check_in_to)
-        if check_out_from:
-            query = query.filter(Reservation.check_out_date >= check_out_from)
-        if check_out_to:
-            query = query.filter(Reservation.check_out_date <= check_out_to)
-        if created_from:
-            query = query.filter(Reservation.created_date >= created_from)
-        if created_to:
-            query = query.filter(Reservation.created_date <= created_to)
-
-        # Filtros do hóspede
-        if guest_email:
-            query = query.filter(Guest.email.ilike(f"%{guest_email}%"))
-        if guest_phone:
-            query = query.filter(Guest.phone.ilike(f"%{guest_phone}%"))
-        if guest_nationality:
-            query = query.filter(Guest.nationality == guest_nationality)
-        if guest_city:
-            query = query.filter(Guest.city.ilike(f"%{guest_city}%"))
-        if guest_state:
-            query = query.filter(Guest.state == guest_state)
-        if guest_country:
-            query = query.filter(Guest.country == guest_country)
-
-        # ✅ CORREÇÃO: Filtros financeiros usando total_paid
-        if min_amount is not None:
-            query = query.filter(Reservation.total_amount >= Decimal(str(min_amount)))
-        if max_amount is not None:
-            query = query.filter(Reservation.total_amount <= Decimal(str(max_amount)))
-        if is_paid is not None:
-            if is_paid:
-                # Usamos uma subquery para calcular total_paid de forma correta
-                from app.models.payment import Payment
-                paid_subquery = db.query(
-                    Payment.reservation_id,
-                    func.sum(Payment.amount).label('total_paid')
-                ).filter(
-                    Payment.status == 'confirmed',
-                    Payment.is_refund == False
-                ).group_by(Payment.reservation_id).subquery()
-                
-                query = query.outerjoin(paid_subquery, Reservation.id == paid_subquery.c.reservation_id)
-                query = query.filter(Reservation.total_amount <= func.coalesce(paid_subquery.c.total_paid, 0))
-            else:
-                # Similar para não pago
-                from app.models.payment import Payment
-                paid_subquery = db.query(
-                    Payment.reservation_id,
-                    func.sum(Payment.amount).label('total_paid')
-                ).filter(
-                    Payment.status == 'confirmed',
-                    Payment.is_refund == False
-                ).group_by(Payment.reservation_id).subquery()
-                
-                query = query.outerjoin(paid_subquery, Reservation.id == paid_subquery.c.reservation_id)
-                query = query.filter(Reservation.total_amount > func.coalesce(paid_subquery.c.total_paid, 0))
-
-        # Filtros de hóspedes
-        if min_guests:
-            query = query.filter(Reservation.total_guests >= min_guests)
-        if max_guests:
-            query = query.filter(Reservation.total_guests <= max_guests)
-
-        # Filtros especiais
-        if deposit_paid is not None:
-            query = query.filter(Reservation.deposit_paid == deposit_paid)
-        if requires_deposit is not None:
-            query = query.filter(Reservation.requires_deposit == requires_deposit)
-        if is_group_reservation is not None:
-            query = query.filter(Reservation.is_group_reservation == is_group_reservation)
-
-        # Contar total antes da paginação
-        total = query.count()
-
-        # Ordenação (mais recente primeiro)
-        query = query.order_by(desc(Reservation.created_date))
-
-        # Aplicar paginação
-        reservations = query.offset(skip).limit(per_page).all()
+        
+        # Contar total
+        total = reservation_service.count_reservations(current_user.tenant_id, filters)
         
         # Converter para response expandido com guest_phone garantido
         detailed_reservations = []
@@ -695,7 +667,7 @@ def get_reservations_detailed(
                 else:
                     base_dict['property_name'] = "Propriedade não encontrada"
                 
-                # Remover campos que conflitam (incluindo 'rooms')
+                # Remover campos que conflitam
                 fields_to_override = [
                     'guest_phone', 'guest_document_type', 'guest_document_number',
                     'guest_nationality', 'guest_city', 'guest_state', 'guest_country',
@@ -726,7 +698,7 @@ def get_reservations_detailed(
                     property_phone=reservation.property_obj.phone if reservation.property_obj else None,
                     property_city=reservation.property_obj.city if reservation.property_obj else None,
 
-                    # Manter estrutura original de quartos (que funcionava!)
+                    # Manter estrutura original de quartos
                     rooms=[
                         ReservationRoomResponse(
                             id=room.id,
@@ -754,20 +726,14 @@ def get_reservations_detailed(
                 detailed_reservations.append(detailed_reservation)
                 
             except Exception as e:
-                # Log individual para debug sem quebrar o endpoint
                 logger.error(f"Erro ao processar reserva {reservation.id}: {str(e)}")
-                logger.error(f"Guest exists: {reservation.guest is not None}")
-                if reservation.guest:
-                    logger.error(f"Guest phone: {reservation.guest.phone}")
-                # Continuar processando as outras reservas
                 continue
         
-        # ✅ CORREÇÃO: Calcular estatísticas da busca usando total_paid
+        # Calcular estatísticas da busca usando total_paid
         summary = None
         if total > 0 and reservations:
-            # Calcular estatísticas básicas
             total_amount = sum(float(r.total_amount or 0) for r in reservations)
-            total_paid = sum(float(r.total_paid or 0) for r in reservations)  # ✅ MUDANÇA AQUI
+            total_paid = sum(float(r.total_paid or 0) for r in reservations)
             total_pending = total_amount - total_paid
             
             # Distribuição por status
@@ -815,10 +781,8 @@ def get_reservations_detailed(
             detail=f"Erro interno do servidor: {str(e)}"
         )
 
-# ===== RESERVAS DE HOJE ===== (DEVE VIR PRIMEIRO)
 
-# backend/app/api/v1/endpoints/reservations.py
-# SUBSTITUIR O ENDPOINT /today PELA VERSÃO CORRIGIDA
+# ===== RESERVAS DE HOJE =====
 
 @router.get("/today", response_model=Dict[str, Any])
 def get_todays_reservations_improved(
@@ -923,8 +887,6 @@ def get_todays_reservations_improved(
             detail=f"Erro ao buscar reservas de hoje: {str(e)}"
         )
 
-# backend/app/api/v1/endpoints/reservations.py
-# LINHA: ~1220 (aproximadamente onde está o endpoint /recent)
 
 @router.get("/recent", response_model=List[Dict[str, Any]])
 def get_recent_reservations(
@@ -951,12 +913,12 @@ def get_recent_reservations(
             desc(Reservation.created_at)
         ).limit(limit).all()
         
-        # ✅ CONSTRUIR DICT MANUAL (mesmo padrão do checked-in-pending-payment)
+        # Construir dict manual
         reservations_list = []
         for reservation in recent_reservations:
             nights = (reservation.check_out_date - reservation.check_in_date).days
             
-            # ✅ CORREÇÃO: Usar total_paid em vez de paid_amount
+            # Usar total_paid em vez de paid_amount
             total_paid = float(reservation.total_paid) if reservation.total_paid else 0.0
             balance_due = float(reservation.total_amount) - total_paid
             
@@ -973,7 +935,7 @@ def get_recent_reservations(
                 "paid_amount": total_paid,
                 "balance_due": balance_due,
                 "nights": nights,
-                "source": reservation.source,  # ✅ ADICIONADO - ESTE ERA O PROBLEMA!
+                "source": reservation.source,
                 "created_at": reservation.created_at.isoformat() if reservation.created_at else None
             })
         
@@ -985,7 +947,8 @@ def get_recent_reservations(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao buscar reservas recentes: {str(e)}"
         )
-        
+
+
 @router.get("/checked-in-pending-payment", response_model=List[Dict[str, Any]])
 def get_checked_in_pending_payment(
     db: Session = Depends(get_db),
@@ -995,7 +958,7 @@ def get_checked_in_pending_payment(
 ):
     """Obtém reservas com check-in feito e saldo pendente"""
     try:
-        # ✅ CORREÇÃO: Query mais complexa para usar total_paid
+        # Query mais complexa para usar total_paid
         from app.models.payment import Payment
         
         # Subquery para calcular total pago de cada reserva
@@ -1019,7 +982,7 @@ def get_checked_in_pending_payment(
             Reservation.tenant_id == current_user.tenant_id,
             Reservation.is_active == True,
             Reservation.status == 'checked_in',
-            # ✅ MUDANÇA: Usar subquery em vez de paid_amount
+            # Usar subquery em vez de paid_amount
             Reservation.total_amount > func.coalesce(paid_subquery.c.total_paid, 0)
         )
         
@@ -1039,7 +1002,7 @@ def get_checked_in_pending_payment(
             if reservation.reservation_rooms and reservation.reservation_rooms[0].room:
                 room_number = reservation.reservation_rooms[0].room.room_number
             
-            # ✅ CORREÇÃO: Usar total_paid
+            # Usar total_paid
             total_paid = float(reservation.total_paid) if reservation.total_paid else 0.0
             pending_amount = float(reservation.total_amount) - total_paid
             
@@ -1051,7 +1014,7 @@ def get_checked_in_pending_payment(
                 "pending_amount": pending_amount,
                 "days_since_checkin": days_since_checkin,
                 "total_amount": float(reservation.total_amount),
-                "paid_amount": total_paid,  # ✅ MUDANÇA AQUI
+                "paid_amount": total_paid,
                 "payment_status": "overdue" if days_since_checkin > 3 else "pending"
             })
         
@@ -1063,7 +1026,8 @@ def get_checked_in_pending_payment(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao buscar check-ins com saldo pendente: {str(e)}"
         )
-        
+
+
 @router.get("/dashboard-summary", response_model=Dict[str, Any])
 def get_dashboard_summary(
     db: Session = Depends(get_db),
@@ -1103,7 +1067,7 @@ def get_dashboard_summary(
             Reservation.status == 'checked_in'
         ).count()
         
-        # ✅ CORREÇÃO: Receita total e pendente usando total_paid
+        # Receita total e pendente usando total_paid
         from app.models.payment import Payment
         
         # Subquery para calcular total pago
@@ -1131,7 +1095,7 @@ def get_dashboard_summary(
         
         pending_revenue = float(total_revenue) - float(paid_revenue)
         
-        # ✅ CORREÇÃO: Saldo pendente de check-ins usando total_paid
+        # Saldo pendente de check-ins usando total_paid
         checked_in_pending = base_query.outerjoin(
             paid_subquery, Reservation.id == paid_subquery.c.reservation_id
         ).filter(
@@ -1159,7 +1123,8 @@ def get_dashboard_summary(
             detail=f"Erro ao buscar resumo do dashboard: {str(e)}"
         )
 
-# ===== CRUD BÁSICO ===== (ENDPOINT GENÉRICO POR ÚLTIMO)
+
+# ===== CRUD BÁSICO =====
 
 @router.get("/{reservation_id}", response_model=ReservationResponse)
 def get_reservation(
@@ -1167,7 +1132,7 @@ def get_reservation(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Busca reserva específica do tenant - VERSÃO CORRIGIDA COM QUARTOS"""
+    """Busca reserva específica do tenant"""
     reservation_service = ReservationService(db)
     reservation_obj = reservation_service.get_reservation_by_id(reservation_id, current_user.tenant_id)
     
@@ -1177,17 +1142,16 @@ def get_reservation(
             detail="Reserva não encontrada"
         )
     
-    # ✅ CONVERSÃO MANUAL PARA INCLUIR QUARTOS (mesmo padrão de outros endpoints)
+    # Conversão manual para incluir quartos
     try:
-        # Usar model_validate para os campos básicos
         base_response = ReservationResponse.model_validate(reservation_obj)
         base_dict = base_response.model_dump()
         
-        # ✅ ADICIONAR QUARTOS MANUALMENTE
+        # Adicionar quartos manualmente
         if reservation_obj.reservation_rooms:
             rooms_data = []
             for room_reservation in reservation_obj.reservation_rooms:
-                if room_reservation.room:  # Verificar se o quarto existe
+                if room_reservation.room:
                     room_data = {
                         'id': room_reservation.id,
                         'reservation_id': room_reservation.reservation_id,
@@ -1202,7 +1166,7 @@ def get_reservation(
                         'room_name': getattr(room_reservation.room, 'name', None),
                         'room_type_name': room_reservation.room.room_type.name if room_reservation.room.room_type else None,
                         'guests': getattr(room_reservation, 'guests', 1),
-                        'rate_plan_name': None  # Pode ser implementado depois
+                        'rate_plan_name': None
                     }
                     rooms_data.append(room_data)
             
@@ -1210,7 +1174,7 @@ def get_reservation(
         else:
             base_dict['rooms'] = []
         
-        # ✅ ADICIONAR CAMPOS COMPUTADOS BÁSICOS
+        # Adicionar campos computados básicos
         if reservation_obj.guest:
             base_dict['guest_name'] = f"{reservation_obj.guest.first_name} {reservation_obj.guest.last_name}".strip()
             base_dict['guest_email'] = reservation_obj.guest.email
@@ -1229,14 +1193,13 @@ def get_reservation(
         else:
             base_dict['nights'] = 0
         
-        # ✅ CORREÇÃO PRINCIPAL: Campos computados - pagamento usando total_paid
+        # Campos computados - pagamento usando total_paid
         total_amount = float(reservation_obj.total_amount) if reservation_obj.total_amount else 0
-        paid_amount = float(reservation_obj.total_paid) if reservation_obj.total_paid else 0  # ✅ MUDANÇA AQUI
+        paid_amount = float(reservation_obj.total_paid) if reservation_obj.total_paid else 0
         
         base_dict['is_paid'] = paid_amount >= total_amount if total_amount > 0 else True
         base_dict['balance_due'] = max(0, total_amount - paid_amount)
         
-        # ✅ RETORNAR RESERVA COM QUARTOS INCLUÍDOS
         return ReservationResponse(**base_dict)
         
     except Exception as e:
@@ -1505,7 +1468,7 @@ def confirm_reservation_expanded(
         )
 
 
-@router.post("/{reservation_id}/check-in", response_model=ReservationResponse)  # ✅ MUDANÇA
+@router.post("/{reservation_id}/check-in", response_model=ReservationResponse)
 def check_in_reservation_expanded(
     reservation_id: int,
     check_in_data: CheckInRequest,
@@ -1513,7 +1476,7 @@ def check_in_reservation_expanded(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Realiza check-in - VERSÃO CORRIGIDA"""
+    """Realiza check-in"""
     try:
         reservation = db.query(Reservation).filter(
             Reservation.id == reservation_id,
@@ -1561,7 +1524,7 @@ def check_in_reservation_expanded(
         )
 
 
-@router.post("/{reservation_id}/check-out", response_model=ReservationResponse)  # ✅ MUDANÇA
+@router.post("/{reservation_id}/check-out", response_model=ReservationResponse)
 def check_out_reservation_expanded(
     reservation_id: int,
     check_out_data: CheckOutRequest,
@@ -1569,7 +1532,7 @@ def check_out_reservation_expanded(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Realiza check-out - VERSÃO CORRIGIDA"""
+    """Realiza check-out"""
     try:
         reservation = db.query(Reservation).filter(
             Reservation.id == reservation_id,
@@ -1617,7 +1580,7 @@ def check_out_reservation_expanded(
         )
 
 
-@router.post("/{reservation_id}/cancel", response_model=ReservationResponse)  # ✅ MUDANÇA: ReservationResponse em vez de ReservationResponseWithGuestDetails
+@router.post("/{reservation_id}/cancel", response_model=ReservationResponse)
 def cancel_reservation_expanded(
     reservation_id: int,
     cancel_data: CancelReservationRequest,
@@ -1625,9 +1588,8 @@ def cancel_reservation_expanded(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Cancela uma reserva - VERSÃO CORRIGIDA"""
+    """Cancela uma reserva"""
     try:
-        # ✅ CORREÇÃO: Query mais simples sem relacionamentos complexos
         reservation = db.query(Reservation).filter(
             Reservation.id == reservation_id,
             Reservation.tenant_id == current_user.tenant_id
@@ -1640,13 +1602,13 @@ def cancel_reservation_expanded(
             )
         
         # Verificar se pode cancelar usando a propriedade do modelo
-        if not reservation.can_cancel:  # ✅ CORREÇÃO: Usar a propriedade do modelo
+        if not reservation.can_cancel:
             raise HTTPException(
                 status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Reserva não pode ser cancelada no status atual"
             )
         
-        # ✅ CORREÇÃO: Usar o serviço em vez de manipular diretamente
+        # Usar o serviço em vez de manipular diretamente
         reservation_service = ReservationService(db)
         
         try:
@@ -1665,7 +1627,6 @@ def cancel_reservation_expanded(
                     detail="Não foi possível cancelar a reserva"
                 )
             
-            # ✅ CORREÇÃO: Retorno simples que sempre funciona
             return ReservationResponse.model_validate(cancelled_reservation)
             
         except ValueError as e:
@@ -1686,13 +1647,6 @@ def cancel_reservation_expanded(
 
 # ===== DISPONIBILIDADE E BUSCA =====
 
-# backend/app/api/v1/endpoints/reservations.py - ENDPOINT CORRIGIDO
-
-# ===== IMPORTS CORRIGIDOS =====
-from sqlalchemy import and_, or_, func, text, desc, asc, not_  # ✅ ADICIONAR not_
-
-# ===== ENDPOINT FUNCIONAL CORRIGIDO =====
-
 @router.post("/check-availability", response_model=AvailabilityResponse)
 def check_availability(
     availability_request: AvailabilityRequest,
@@ -1703,23 +1657,23 @@ def check_availability(
     reservation_service = ReservationService(db)
     
     try:
-        # ✅ USAR O MÉTODO DO SERVICE QUE JÁ FUNCIONA
+        # Usar o método do service que já funciona
         available_rooms = reservation_service.get_available_rooms(
             property_id=availability_request.property_id,
             check_in_date=availability_request.check_in_date,
             check_out_date=availability_request.check_out_date,
             tenant_id=current_user.tenant_id,
             room_type_id=availability_request.room_type_id,
-            exclude_reservation_id=availability_request.exclude_reservation_id  # ✅ NOVO PARÂMETRO
+            exclude_reservation_id=availability_request.exclude_reservation_id
         )
         
-        # ✅ BUSCAR CONFLITOS COM SINTAXE CORRIGIDA
+        # Buscar conflitos com sintaxe corrigida
         conflicts_query = db.query(Reservation.reservation_number).join(ReservationRoom).filter(
             Reservation.property_id == availability_request.property_id,
             Reservation.tenant_id == current_user.tenant_id,
             Reservation.is_active == True,
             Reservation.status.in_(['pending', 'confirmed', 'checked_in']),
-            # ✅ USAR not_ IMPORTADO CORRETAMENTE
+            # Usar not_ importado corretamente
             not_(
                 or_(
                     ReservationRoom.check_out_date <= availability_request.check_in_date,
@@ -1728,7 +1682,7 @@ def check_availability(
             )
         )
         
-        # ✅ EXCLUIR RESERVA ESPECÍFICA DOS CONFLITOS
+        # Excluir reserva específica dos conflitos
         if availability_request.exclude_reservation_id:
             conflicts_query = conflicts_query.filter(
                 Reservation.id != availability_request.exclude_reservation_id
@@ -1736,20 +1690,19 @@ def check_availability(
         
         conflicting_reservations = [r[0] for r in conflicts_query.distinct().all()]
         
-        # ✅ PREPARAR DADOS DOS QUARTOS SEM ACESSAR CAMPOS INEXISTENTES
+        # Preparar dados dos quartos sem acessar campos inexistentes
         rooms_data = []
         for room in available_rooms:
             room_data = {
                 'id': room.id,
                 'room_number': room.room_number,
-                'name': getattr(room, 'name', None),  # Uso seguro
+                'name': getattr(room, 'name', None),
                 'room_type_id': room.room_type_id,
                 'room_type_name': room.room_type.name if room.room_type else None,
-                'max_occupancy': getattr(room, 'max_occupancy', 2),  # Padrão seguro
+                'max_occupancy': getattr(room, 'max_occupancy', 2),
                 'floor': getattr(room, 'floor', None),
                 'building': getattr(room, 'building', None),
-                # ✅ REMOVER REFERÊNCIA A base_rate QUE NÃO EXISTE
-                'rate_per_night': 0.0  # Valor padrão - será sobrescrito pelo frontend se necessário
+                'rate_per_night': 0.0  # Valor padrão
             }
             rooms_data.append(room_data)
         
@@ -1767,7 +1720,6 @@ def check_availability(
             detail=str(e)
         )
     except Exception as e:
-        # ✅ LOG DETALHADO PARA DEBUG
         logger.error(f"Erro em check_availability: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1783,11 +1735,12 @@ def advanced_search_reservations(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100)
 ):
-    """Busca avançada com filtros complexos via POST"""
+    """Busca avançada com filtros complexos via POST - COM SUPORTE A MULTI-SELECT"""
     reservation_service = ReservationService(db)
     
     skip = (page - 1) * per_page
     
+    # O ReservationFilters já suporta status_list e source_list
     reservations = reservation_service.get_reservations(current_user.tenant_id, filters, skip, per_page)
     total = reservation_service.count_reservations(current_user.tenant_id, filters)
     
@@ -1804,17 +1757,18 @@ def advanced_search_reservations(
     )
 
 
-# ===== CALENDÁRIO =====
+# ===== CALENDÁRIO COM MULTI-SELECT =====
 
 @router.get("/calendar/month", response_model=List[ReservationResponse])
 def get_calendar_month(
     year: int = Query(..., ge=2020, le=2030, description="Ano"),
     month: int = Query(..., ge=1, le=12, description="Mês"),
     property_id: Optional[int] = Query(None, description="Filtrar por propriedade"),
+    status_list: Optional[str] = Query(None, description="Filtrar por múltiplos status (separados por vírgula)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Busca reservas de um mês específico para o calendário"""
+    """Busca reservas de um mês específico para o calendário - COM MULTI-SELECT"""
     from calendar import monthrange
     
     reservation_service = ReservationService(db)
@@ -1824,13 +1778,18 @@ def get_calendar_month(
     last_day = monthrange(year, month)[1]
     end_date = date(year, month, last_day)
     
+    # Processar status_list
+    status_filter = ['confirmed', 'checked_in', 'checked_out']  # Padrão
+    if status_list and status_list.strip():
+        status_filter = [s.strip() for s in status_list.split(',') if s.strip()]
+    
     # Buscar reservas do período
     reservations = reservation_service.get_reservations_by_date_range(
         current_user.tenant_id,
         start_date,
         end_date,
         property_id=property_id,
-        status_filter=['confirmed', 'checked_in', 'checked_out']
+        status_filter=status_filter  # Agora suporta multi-select
     )
     
     return [ReservationResponse.model_validate(reservation) for reservation in reservations]
@@ -1841,11 +1800,12 @@ def get_calendar_range(
     start_date: date = Query(..., description="Data inicial"),
     end_date: date = Query(..., description="Data final"),
     property_id: Optional[int] = Query(None, description="Filtrar por propriedade"),
-    status: Optional[str] = Query(None, description="Filtrar por status"),
+    status: Optional[str] = Query(None, description="Filtrar por status (filtro único)"),
+    status_list: Optional[str] = Query(None, description="Filtrar por múltiplos status (separados por vírgula)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Busca reservas em um período específico para o calendário"""
+    """Busca reservas em um período específico para o calendário - COM MULTI-SELECT"""
     reservation_service = ReservationService(db)
     
     # Validar período (máximo 1 ano)
@@ -1855,17 +1815,25 @@ def get_calendar_range(
             detail="Período não pode exceder 365 dias"
         )
     
-    status_filter = [status] if status else ['confirmed', 'checked_in', 'checked_out']
+    # Processar filtros de status com prioridade para multi-select
+    status_filter = ['confirmed', 'checked_in', 'checked_out']  # Padrão
+    if status_list and status_list.strip():
+        # Multi-select tem prioridade
+        status_filter = [s.strip() for s in status_list.split(',') if s.strip()]
+    elif status:
+        # Filtro único para compatibilidade
+        status_filter = [status]
     
     reservations = reservation_service.get_reservations_by_date_range(
         current_user.tenant_id,
         start_date,
         end_date,
         property_id=property_id,
-        status_filter=status_filter
+        status_filter=status_filter  # Agora suporta multi-select
     )
     
     return [ReservationResponse.model_validate(reservation) for reservation in reservations]
+
 
 # ===== ESTATÍSTICAS =====
 
@@ -1924,9 +1892,9 @@ def get_dashboard_stats_original(
         'total_reservations': general_stats.get('total_reservations', 0),
         'total_revenue': general_stats.get('total_revenue', 0),
         'occupancy_rate': general_stats.get('occupancy_rate', 0),
-        'pending_checkins': 0,  # Será calculado quando necessário
-        'pending_checkouts': 0, # Será calculado quando necessário
-        'overdue_payments': 0   # Será calculado quando necessário
+        'pending_checkins': 0,
+        'pending_checkouts': 0,
+        'overdue_payments': 0
     }
 
 
@@ -1969,22 +1937,22 @@ def get_dashboard_stats_expanded(
             func.sum(Reservation.total_amount)
         ).scalar() or 0
         
-        # Pagamentos em atraso (mock - seria necessário integrar com sistema de pagamentos)
+        # Pagamentos em atraso (mock)
         overdue_payments = 0
         
-        # Taxa de ocupação (mock - seria necessário calcular baseado em disponibilidade)
+        # Taxa de ocupação (mock)
         occupancy_rate = 75.0
         
         # Estatísticas adicionais
-        avg_nights = 2.5  # Mock
-        avg_guests = 2.0  # Mock
+        avg_nights = 2.5
+        avg_guests = 2.0
         avg_amount = float(total_revenue_query) / total_reservations if total_reservations > 0 else 0
         
         # Distribuições por status e fonte
         status_distribution = {}
         source_distribution = {}
         
-        for reservation in base_query.limit(1000):  # Limitar para performance
+        for reservation in base_query.limit(1000):
             status_distribution[reservation.status] = status_distribution.get(reservation.status, 0) + 1
             source_distribution[reservation.source] = source_distribution.get(reservation.source, 0) + 1
         
@@ -1998,18 +1966,18 @@ def get_dashboard_stats_expanded(
             "avg_nights": avg_nights,
             "avg_guests": avg_guests,
             "avg_amount": round(avg_amount, 2),
-            "this_month_reservations": total_reservations,  # Mock
-            "this_month_revenue": float(total_revenue_query),  # Mock
-            "last_month_reservations": total_reservations,  # Mock
-            "last_month_revenue": float(total_revenue_query),  # Mock
+            "this_month_reservations": total_reservations,
+            "this_month_revenue": float(total_revenue_query),
+            "last_month_reservations": total_reservations,
+            "last_month_revenue": float(total_revenue_query),
             "status_distribution": status_distribution,
             "source_distribution": source_distribution,
-            "recent_activity": []  # Mock - seria populado com atividades recentes
+            "recent_activity": []
         }
         
     except Exception as e:
         logger.error(f"Erro ao carregar estatísticas do dashboard: {str(e)}")
-        # Retornar dados padrão em caso de erro para não quebrar o frontend
+        # Retornar dados padrão em caso de erro
         return {
             "total_reservations": 0,
             "total_revenue": 0,
@@ -2065,7 +2033,6 @@ def get_occupancy_analysis(
     occupied_room_nights = 0
     
     # TODO: Implementar cálculo real de ocupação baseado nos quartos disponíveis
-    # Por enquanto, retornar dados básicos
     
     return {
         'period': {
@@ -2076,7 +2043,7 @@ def get_occupancy_analysis(
         'reservations_count': len(reservations),
         'total_room_nights': total_room_nights,
         'occupied_room_nights': occupied_room_nights,
-        'occupancy_rate': 0.0,  # Será calculado quando tivermos dados de quartos
+        'occupancy_rate': 0.0,
         'average_stay_length': sum(r.nights for r in reservations) / len(reservations) if reservations else 0
     }
 
@@ -2091,9 +2058,11 @@ def export_reservations(
     current_user: User = Depends(get_current_active_user),
     format: str = Query("xlsx", description="Formato de exportação (xlsx, csv)"),
     
-    # Reutilizar os mesmos filtros do endpoint detailed
+    # Reutilizar os mesmos filtros incluindo multi-select
     status: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
+    status_list: Optional[str] = Query(None, description="Múltiplos status (separados por vírgula)"),
+    source_list: Optional[str] = Query(None, description="Múltiplas origens (separadas por vírgula)"),
     property_id: Optional[int] = Query(None),
     guest_id: Optional[int] = Query(None),
     search: Optional[str] = Query(None),
@@ -2101,8 +2070,8 @@ def export_reservations(
     check_in_to: Optional[date] = Query(None),
     check_out_from: Optional[date] = Query(None),
     check_out_to: Optional[date] = Query(None),
-    created_from: Optional[datetime] = Query(None),
-    created_to: Optional[datetime] = Query(None),
+    created_from: Optional[str] = Query(None),
+    created_to: Optional[str] = Query(None),
     guest_email: Optional[str] = Query(None),
     guest_phone: Optional[str] = Query(None),
     min_amount: Optional[float] = Query(None),
@@ -2119,21 +2088,23 @@ def export_reservations(
     include_payment_details: bool = Query(True),
     include_property_details: bool = Query(False),
 ):
-    """Exporta reservas com filtros personalizados"""
+    """Exporta reservas com filtros personalizados - COM SUPORTE A MULTI-SELECT"""
     try:
-        # Por ora, retornar uma resposta mock para não quebrar o frontend
-        # TODO: Implementar exportação real usando pandas ou similar
+        # Por ora, retornar uma resposta mock
+        # TODO: Implementar exportação real usando pandas
         
         return {
             "message": "Exportação em desenvolvimento",
             "filters_applied": {
                 "status": status,
                 "source": source,
+                "status_list": status_list,  # NOVO
+                "source_list": source_list,  # NOVO
                 "property_id": property_id,
                 "format": format,
                 "timestamp": datetime.utcnow().isoformat()
             },
-            "file_url": "/tmp/reservations_export.xlsx",  # URL mockada
+            "file_url": "/tmp/reservations_export.xlsx",
             "file_name": f"reservas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{format}",
             "total_records": 0,
             "generated_at": datetime.utcnow().isoformat(),
@@ -2155,9 +2126,9 @@ def export_reservations_post(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Exporta reservas para CSV com filtros personalizados via POST"""
+    """Exporta reservas para CSV com filtros personalizados via POST - COM MULTI-SELECT"""
     
-    # Por enquanto, retornar dados simulados até implementar no service
+    # O ReservationExportFilters já herda de ReservationFilters que suporta multi-select
     return ReservationExportResponse(
         file_url="http://exemplo.com/export.csv",
         file_name="reservations_export.csv",
