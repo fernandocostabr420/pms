@@ -30,7 +30,8 @@ import {
   LogOut,
   Loader2,
   DollarSign,
-  MessageSquare
+  MessageSquare,
+  FileText
 } from 'lucide-react';
 import { MapReservationResponse, MapRoomData } from '@/types/room-map';
 import { cn } from '@/lib/utils';
@@ -142,6 +143,7 @@ export function ReservationQuickView({
 
   const guestPhone = fullReservationData?.guest?.phone;
   const createdDate = fullReservationData?.created_date;
+  const guestRequests = fullReservationData?.guest_requests;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -321,6 +323,37 @@ export function ReservationQuickView({
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Pedidos do Hóspede */}
+          {guestRequests && (
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <FileText className="h-4 w-4 text-orange-600" />
+                <span className="text-sm font-semibold text-orange-900">Pedidos do Hóspede</span>
+                {loadingDetails && (
+                  <Loader2 className="h-3 w-3 animate-spin text-orange-600" />
+                )}
+              </div>
+              <p className="text-xs text-orange-800 leading-relaxed">
+                {guestRequests}
+              </p>
+            </div>
+          )}
+
+          {/* Loading placeholder para pedidos do hóspede */}
+          {loadingDetails && !guestRequests && (
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <FileText className="h-4 w-4 text-orange-600" />
+                <span className="text-sm font-semibold text-orange-900">Pedidos do Hóspede</span>
+                <Loader2 className="h-3 w-3 animate-spin text-orange-600" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-3 bg-orange-200 rounded animate-pulse"></div>
+                <div className="h-3 bg-orange-200 rounded w-3/4 animate-pulse"></div>
+              </div>
             </div>
           )}
 

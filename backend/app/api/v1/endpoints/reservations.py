@@ -1436,27 +1436,34 @@ def confirm_reservation_expanded(
         if not reservation:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
-                detail="Reserva não encontrada"
+                detail="Reserva não encontrada"  # ← COMPLETE ESTA LINHA
             )
         
-        # Confirmar reserva
-        reservation.status = 'confirmed'
-        reservation.confirmed_date = datetime.utcnow()
-        db.commit()
-        
-        # Retornar response expandido
-        base_data = ReservationResponse.model_validate(reservation)
-        
-        return ReservationResponseWithGuestDetails(
-            **base_data.model_dump(),
-            guest_phone=reservation.guest.phone if reservation.guest else None,
-            guest_document_type=reservation.guest.document_type if reservation.guest else None,
-            property_address=reservation.property_obj.address_line1 if reservation.property_obj else None,
-            property_phone=reservation.property_obj.phone if reservation.property_obj else None,
-            deposit_paid=reservation.deposit_paid,
-            is_group_reservation=reservation.is_group_reservation,
-            requires_deposit=reservation.requires_deposit,
+        # Confirmar a reserva
+        confirmed_reservation = reservation_service.confirm_reservation(
+            reservation_id, 
+            current_user.tenant_id, 
+            current_user, 
+            request
         )
+        
+        if not confirmed_reservation:
+            raise HTTPException(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                detail="Não foi possível confirmar a reserva"
+            )
+        
+        # Recarregar com todos os dados necessários
+        confirmed_reservation = db.query(Reservation).options(
+            joinedload(Reservation.guest),
+            joinedload(Reservation.property_obj),
+            joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room)
+        ).filter(
+            Reservation.id == reservation_id,
+            Reservation.tenant_id == current_user.tenant_id
+        ).first()
+        
+        return ReservationResponseWithGuestDetails.model_validate(confirmed_reservation)
         
     except HTTPException:
         raise
@@ -1464,7 +1471,7 @@ def confirm_reservation_expanded(
         logger.error(f"Erro ao confirmar reserva {reservation_id}: {str(e)}")
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erro ao confirmar reserva: {str(e)}"
+            detail="Erro interno do servidor"
         )
 
 

@@ -1535,7 +1535,7 @@ class ReservationService:
             'can_edit': current_status in ['pending', 'confirmed'],
             'can_confirm': current_status == 'pending',
             'can_check_in': current_status == 'confirmed' and reservation.check_in_date <= today,
-            'can_check_out': current_status == 'checked_in',
+            'can_check_in': current_status in ['pending', 'confirmed'] and reservation.check_in_date <= today,
             'can_cancel': current_status in ['pending', 'confirmed'],
             'can_add_payment': balance_due > 0,
             'can_modify_rooms': current_status in ['pending', 'confirmed'],
