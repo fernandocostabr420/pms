@@ -1,7 +1,7 @@
 //frontend/src/components/reservations/CheckInModal.tsx
 
 import React, { useState, useEffect } from 'react';
-import { X, MapPin, User, Phone, Mail, Calendar, Globe } from 'lucide-react';
+import { X, MapPin, User, Phone, Mail, Calendar, Globe, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 import apiClient from '@/lib/api';
 
 // Interfaces TypeScript
@@ -44,6 +44,12 @@ interface ViaCepResponse {
   localidade: string;
   uf: string;
   erro?: boolean;
+}
+
+interface FieldValidation {
+  isValid: boolean;
+  error: string;
+  touched: boolean;
 }
 
 // Estados brasileiros
@@ -108,7 +114,9 @@ const CheckInModal: React.FC<CheckInModalProps> = ({
 
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingCep, setIsLoadingCep] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [fieldValidations, setFieldValidations] = useState<Record<string, FieldValidation>>({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   // Pré-preenchimento com dados existentes
   useEffect(() => {
@@ -146,7 +154,9 @@ const CheckInModal: React.FC<CheckInModalProps> = ({
           neighborhood: ''
         }
       });
-      setErrors({});
+      setFieldValidations({});
+      setSubmitAttempted(false);
+      setApiError(null);
     }
   }, [isOpen]);
 
@@ -175,7 +185,60 @@ const CheckInModal: React.FC<CheckInModalProps> = ({
       .replace(/(-\d{3})\d+?$/, '$1');
   };
 
-  // Validações
+  // Validações individuais
+  const validateField = (field: string, value: string): FieldValidation => {
+    switch (field) {
+      case 'first_name':
+        if (!value.trim()) {
+          return { isValid: false, error: 'Nome é obrigatório', touched: true };
+        }
+        if (value.trim().length < 2) {
+          return { isValid: false, error: 'Nome deve ter pelo menos 2 caracteres', touched: true };
+        }
+        return { isValid: true, error: '', touched: true };
+
+      case 'last_name':
+        if (!value.trim()) {
+          return { isValid: false, error: 'Sobrenome é obrigatório', touched: true };
+        }
+        if (value.trim().length < 2) {
+          return { isValid: false, error: 'Sobrenome deve ter pelo menos 2 caracteres', touched: true };
+        }
+        return { isValid: true, error: '', touched: true };
+
+      case 'document_number':
+        if (!value.trim()) {
+          return { isValid: false, error: 'CPF é obrigatório', touched: true };
+        }
+        if (!validateCPF(value)) {
+          return { isValid: false, error: 'CPF inválido', touched: true };
+        }
+        return { isValid: true, error: '', touched: true };
+
+      case 'email':
+        if (!value.trim()) {
+          return { isValid: false, error: 'Email é obrigatório', touched: true };
+        }
+        if (!validateEmail(value)) {
+          return { isValid: false, error: 'Email inválido', touched: true };
+        }
+        return { isValid: true, error: '', touched: true };
+
+      case 'phone':
+        if (!value.trim()) {
+          return { isValid: false, error: 'Telefone é obrigatório', touched: true };
+        }
+        const phoneNumbers = value.replace(/\D/g, '');
+        if (phoneNumbers.length < 10) {
+          return { isValid: false, error: 'Telefone deve ter pelo menos 10 dígitos', touched: true };
+        }
+        return { isValid: true, error: '', touched: true };
+
+      default:
+        return { isValid: true, error: '', touched: true };
+    }
+  };
+
   const validateCPF = (cpf: string) => {
     const numbers = cpf.replace(/\D/g, '');
     if (numbers.length !== 11) return false;
@@ -205,31 +268,21 @@ const CheckInModal: React.FC<CheckInModalProps> = ({
   };
 
   const validateForm = () => {
-    const newErrors: Record<string, string> = {};
+    const requiredFields = ['first_name', 'last_name', 'document_number', 'email', 'phone'];
+    const newValidations: Record<string, FieldValidation> = {};
+    let isFormValid = true;
 
-    // Campos obrigatórios
-    if (!formData.guest_data.first_name.trim()) {
-      newErrors.first_name = 'Nome é obrigatório';
-    }
-    if (!formData.guest_data.last_name.trim()) {
-      newErrors.last_name = 'Sobrenome é obrigatório';
-    }
-    if (!formData.guest_data.document_number.trim()) {
-      newErrors.document_number = 'CPF é obrigatório';
-    } else if (!validateCPF(formData.guest_data.document_number)) {
-      newErrors.document_number = 'CPF inválido';
-    }
-    if (!formData.guest_data.email.trim()) {
-      newErrors.email = 'Email é obrigatório';
-    } else if (!validateEmail(formData.guest_data.email)) {
-      newErrors.email = 'Email inválido';
-    }
-    if (!formData.guest_data.phone.trim()) {
-      newErrors.phone = 'Telefone é obrigatório';
-    }
+    requiredFields.forEach(field => {
+      const value = formData.guest_data[field as keyof GuestData] || '';
+      const validation = validateField(field, value);
+      newValidations[field] = validation;
+      if (!validation.isValid) {
+        isFormValid = false;
+      }
+    });
 
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    setFieldValidations(newValidations);
+    return isFormValid;
   };
 
   // Busca CEP
@@ -264,26 +317,62 @@ const CheckInModal: React.FC<CheckInModalProps> = ({
   // Envio do formulário
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitAttempted(true);
+    setApiError(null);
     
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      return;
+    }
 
     setIsLoading(true);
+    
     try {
-      await apiClient.checkInReservation(parseInt(reservationId), {
-  notes: formData.notes,
-  guest_data: {
-    ...formData.guest_data,
-    document_number: formData.guest_data.document_number.replace(/\D/g, ''),
-    phone: formData.guest_data.phone.replace(/\D/g, ''),
-    postal_code: formData.guest_data.postal_code?.replace(/\D/g, '')
-  }
-});
+      // Log dos dados para debug
+      console.log('Dados sendo enviados para check-in:', {
+        notes: formData.notes,
+        guest_data: {
+          ...formData.guest_data,
+          document_number: formData.guest_data.document_number.replace(/\D/g, ''),
+          phone: formData.guest_data.phone.replace(/\D/g, ''),
+          postal_code: formData.guest_data.postal_code?.replace(/\D/g, '')
+        }
+      });
 
-onSuccess?.();
-onClose();
-    } catch (error) {
-      console.error('Erro ao realizar check-in:', error);
-      // Aqui você pode adicionar uma notificação de erro
+      await apiClient.checkInReservation(parseInt(reservationId), {
+        notes: formData.notes,
+        guest_data: {
+          ...formData.guest_data,
+          document_number: formData.guest_data.document_number.replace(/\D/g, ''),
+          phone: formData.guest_data.phone.replace(/\D/g, ''),
+          postal_code: formData.guest_data.postal_code?.replace(/\D/g, '')
+        }
+      });
+
+      onSuccess?.();
+      onClose();
+    } catch (error: any) {
+      console.error('Erro completo do check-in:', error);
+      console.error('Response data:', error.response?.data);
+      console.error('Response status:', error.response?.status);
+      
+      // Tratar diferentes tipos de erro
+      if (error.response?.status === 400) {
+        if (error.response?.data?.detail) {
+          setApiError(`Erro de validação: ${error.response.data.detail}`);
+        } else if (error.response?.data?.errors) {
+          // Erros de validação específicos
+          const errorMessages = error.response.data.errors.map((err: any) => err.msg).join(', ');
+          setApiError(`Dados inválidos: ${errorMessages}`);
+        } else {
+          setApiError('Dados inválidos. Verifique os campos obrigatórios e tente novamente.');
+        }
+      } else if (error.response?.status === 404) {
+        setApiError('Reserva não encontrada.');
+      } else if (error.response?.status === 403) {
+        setApiError('Check-in não permitido para esta reserva.');
+      } else {
+        setApiError('Erro interno do servidor. Tente novamente em alguns instantes.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -298,13 +387,52 @@ onClose();
       }
     }));
     
-    // Remove erro do campo quando usuário começa a digitar
-    if (errors[field]) {
-      setErrors(prev => ({
+    // Validação em tempo real para campos obrigatórios
+    if (['first_name', 'last_name', 'document_number', 'email', 'phone'].includes(field)) {
+      const validation = validateField(field, value);
+      setFieldValidations(prev => ({
         ...prev,
-        [field]: ''
+        [field]: validation
       }));
     }
+    
+    // Limpar erro da API quando usuário modifica dados
+    if (apiError) {
+      setApiError(null);
+    }
+  };
+
+  // Função para obter classe CSS do campo baseado no estado de validação
+  const getFieldClassName = (field: string, baseClass: string = '') => {
+    const validation = fieldValidations[field];
+    const hasError = submitAttempted && validation && !validation.isValid;
+    const hasSuccess = validation && validation.isValid && validation.touched;
+    
+    let className = `w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 transition-all duration-200 ${baseClass}`;
+    
+    if (hasError) {
+      className += ' border-red-500 bg-red-50 focus:ring-red-500 focus:border-red-500';
+    } else if (hasSuccess) {
+      className += ' border-green-500 focus:ring-green-500 focus:border-green-500';
+    } else {
+      className += ' border-gray-300 focus:ring-blue-500 focus:border-blue-500';
+    }
+    
+    return className;
+  };
+
+  // Componente para ícone de validação
+  const ValidationIcon = ({ field }: { field: string }) => {
+    const validation = fieldValidations[field];
+    const hasError = submitAttempted && validation && !validation.isValid;
+    const hasSuccess = validation && validation.isValid && validation.touched;
+    
+    if (hasError) {
+      return <AlertCircle className="h-5 w-5 text-red-500 absolute right-3 top-1/2 transform -translate-y-1/2" />;
+    } else if (hasSuccess) {
+      return <CheckCircle className="h-5 w-5 text-green-500 absolute right-3 top-1/2 transform -translate-y-1/2" />;
+    }
+    return null;
   };
 
   if (!isOpen) return null;
@@ -326,6 +454,16 @@ onClose();
           </button>
         </div>
 
+        {/* Erro da API */}
+        {apiError && (
+          <div className="mx-6 mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+              <p className="text-red-700 text-sm">{apiError}</p>
+            </div>
+          </div>
+        )}
+
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6">
           {/* Dados Pessoais */}
@@ -335,7 +473,7 @@ onClose();
               Dados Pessoais
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
+              <div className="relative">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Nome *
                 </label>
@@ -343,15 +481,19 @@ onClose();
                   type="text"
                   value={formData.guest_data.first_name}
                   onChange={(e) => handleInputChange('first_name', e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.first_name ? 'border-red-500' : 'border-gray-300'
-                  }`}
+                  className={getFieldClassName('first_name', 'pr-10')}
                   placeholder="João"
                 />
-                {errors.first_name && <p className="text-red-500 text-xs mt-1">{errors.first_name}</p>}
+                <ValidationIcon field="first_name" />
+                {submitAttempted && fieldValidations.first_name && !fieldValidations.first_name.isValid && (
+                  <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    {fieldValidations.first_name.error}
+                  </p>
+                )}
               </div>
               
-              <div>
+              <div className="relative">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Sobrenome *
                 </label>
@@ -359,15 +501,19 @@ onClose();
                   type="text"
                   value={formData.guest_data.last_name}
                   onChange={(e) => handleInputChange('last_name', e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.last_name ? 'border-red-500' : 'border-gray-300'
-                  }`}
+                  className={getFieldClassName('last_name', 'pr-10')}
                   placeholder="Silva"
                 />
-                {errors.last_name && <p className="text-red-500 text-xs mt-1">{errors.last_name}</p>}
+                <ValidationIcon field="last_name" />
+                {submitAttempted && fieldValidations.last_name && !fieldValidations.last_name.isValid && (
+                  <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    {fieldValidations.last_name.error}
+                  </p>
+                )}
               </div>
 
-              <div>
+              <div className="relative">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   CPF *
                 </label>
@@ -375,13 +521,17 @@ onClose();
                   type="text"
                   value={formData.guest_data.document_number}
                   onChange={(e) => handleInputChange('document_number', formatCPF(e.target.value))}
-                  className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.document_number ? 'border-red-500' : 'border-gray-300'
-                  }`}
+                  className={getFieldClassName('document_number', 'pr-10')}
                   placeholder="123.456.789-00"
                   maxLength={14}
                 />
-                {errors.document_number && <p className="text-red-500 text-xs mt-1">{errors.document_number}</p>}
+                <ValidationIcon field="document_number" />
+                {submitAttempted && fieldValidations.document_number && !fieldValidations.document_number.isValid && (
+                  <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    {fieldValidations.document_number.error}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -409,7 +559,7 @@ onClose();
                   <option value="M">Masculino</option>
                   <option value="F">Feminino</option>
                   <option value="O">Outro</option>
-                  <option value="N">Não informado</option>
+                  <option value="NI">Não informado</option>
                 </select>
               </div>
 
@@ -435,7 +585,7 @@ onClose();
               Contato
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
+              <div className="relative">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Email *
                 </label>
@@ -443,15 +593,19 @@ onClose();
                   type="email"
                   value={formData.guest_data.email}
                   onChange={(e) => handleInputChange('email', e.target.value)}
-                  className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.email ? 'border-red-500' : 'border-gray-300'
-                  }`}
+                  className={getFieldClassName('email', 'pr-10')}
                   placeholder="joao@email.com"
                 />
-                {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
+                <ValidationIcon field="email" />
+                {submitAttempted && fieldValidations.email && !fieldValidations.email.isValid && (
+                  <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    {fieldValidations.email.error}
+                  </p>
+                )}
               </div>
 
-              <div>
+              <div className="relative">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Telefone *
                 </label>
@@ -459,13 +613,17 @@ onClose();
                   type="text"
                   value={formData.guest_data.phone}
                   onChange={(e) => handleInputChange('phone', formatPhone(e.target.value))}
-                  className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.phone ? 'border-red-500' : 'border-gray-300'
-                  }`}
+                  className={getFieldClassName('phone', 'pr-10')}
                   placeholder="(11) 99999-9999"
                   maxLength={15}
                 />
-                {errors.phone && <p className="text-red-500 text-xs mt-1">{errors.phone}</p>}
+                <ValidationIcon field="phone" />
+                {submitAttempted && fieldValidations.phone && !fieldValidations.phone.isValid && (
+                  <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    {fieldValidations.phone.error}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -477,7 +635,7 @@ onClose();
               Endereço
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
+              <div className="relative">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   CEP
                 </label>
@@ -491,10 +649,13 @@ onClose();
                       fetchCEP(value);
                     }
                   }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10"
                   placeholder="12345-678"
                   maxLength={9}
                 />
+                {isLoadingCep && (
+                  <Loader2 className="h-4 w-4 text-blue-500 absolute right-3 top-1/2 transform -translate-y-1/2 animate-spin" />
+                )}
                 {isLoadingCep && <p className="text-blue-500 text-xs mt-1">Buscando CEP...</p>}
               </div>
 
@@ -614,7 +775,7 @@ onClose();
             >
               {isLoading ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin" />
                   Realizando Check-in...
                 </>
               ) : (

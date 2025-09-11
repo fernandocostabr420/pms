@@ -1,5 +1,3 @@
-// frontend/src/components/room-map/ReservationQuickView.tsx
-
 import React from 'react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
@@ -383,7 +381,7 @@ export function ReservationQuickView({
 
           <Separator />
 
-          {/* ✅ BOTÕES DE AÇÃO ATUALIZADOS - Com Check-in e Check-out */}
+          {/* ✅ BOTÕES DE AÇÃO ATUALIZADOS - Com Check-out diferenciado */}
           <div className="flex gap-3">
             {/* Botão Ver Detalhes - sempre presente */}
             <Button
@@ -394,8 +392,9 @@ export function ReservationQuickView({
               Ver Detalhes
             </Button>
             
-            {/* Botão de Check-in - para reservas pendentes e confirmadas */}
-            {(reservation.status === 'confirmed' || reservation.status === 'pending') && (
+            {/* Botão de Check-in - para reservas pendentes e confirmadas E data é hoje ou passado */}
+            {(reservation.status === 'confirmed' || reservation.status === 'pending') && 
+             new Date(reservation.check_in_date) <= new Date(new Date().toDateString()) && (
               <Button
                 onClick={handleCheckIn}
                 className="flex-1 gap-2 h-10 text-sm font-semibold bg-emerald-600 hover:bg-emerald-700"
@@ -405,11 +404,11 @@ export function ReservationQuickView({
               </Button>
             )}
 
-            {/* ✅ NOVO: Botão de Check-out - apenas para reservas com check-in realizado */}
+            {/* ✅ MODIFICADO: Botão de Check-out diferenciado - cor laranja */}
             {reservation.status === 'checked_in' && (
               <Button
                 onClick={handleCheckOut}
-                className="flex-1 gap-2 h-10 text-sm font-semibold bg-blue-600 hover:bg-blue-700"
+                className="flex-1 gap-2 h-10 text-sm font-semibold bg-orange-600 hover:bg-orange-700 text-white"
               >
                 <LogOut className="h-4 w-4" />
                 Check-out

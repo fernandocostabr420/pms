@@ -1,4 +1,3 @@
-// frontend/src/app/dashboard/reservations/[id]/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -756,7 +755,7 @@ const ConfirmReservationModal = ({
   );
 };
 
-// Componente Header melhorado - COMPACTADO
+// ✅ COMPONENTE Header CORRIGIDO - Com validação de data para check-in
 function ImprovedReservationHeader({ data, onAction }: { data: any; onAction: (action: string) => void }) {
   const getStatusColor = (status: string) => {
     const colors = {
@@ -825,7 +824,7 @@ function ImprovedReservationHeader({ data, onAction }: { data: any; onAction: (a
             </Badge>
             
             <div className="flex gap-2 flex-wrap">
-              {/* Botão de Confirmar - apenas para reservas pendentes */}
+              {/* ✅ CORRIGIDO: Botão de Confirmar - apenas para reservas pendentes */}
               {data.status === 'pending' && (
                 <Button 
                   onClick={() => onAction('confirm')} 
@@ -837,35 +836,48 @@ function ImprovedReservationHeader({ data, onAction }: { data: any; onAction: (a
                 </Button>
               )}
               
-              {data.actions.can_check_in && (
+              {/* ✅ CORRIGIDO: Check-in - para reservas pendentes ou confirmadas E data é hoje ou passado */}
+              {(data.status === 'pending' || data.status === 'confirmed') && 
+               new Date(data.check_in_date) <= new Date(new Date().toDateString()) && (
                 <Button onClick={() => onAction('checkin')} className="bg-green-600 hover:bg-green-700" size="sm">
+                  <LogIn className="h-4 w-4 mr-2" />
                   Check-in
                 </Button>
               )}
-              {data.actions.can_check_out && (
-                <Button onClick={() => onAction('checkout')} className="bg-blue-600 hover:bg-blue-700" size="sm">
+              
+              {/* ✅ CORRIGIDO: Check-out - SEMPRE visível após check-in ter sido realizado */}
+              {data.status === 'checked_in' && (
+                <Button onClick={() => onAction('checkout')} className="bg-orange-600 hover:bg-orange-700" size="sm">
+                  <LogOut className="h-4 w-4 mr-2" />
                   Check-out
                 </Button>
               )}
-              {data.actions.can_edit && (
+              
+              {/* ✅ CORRIGIDO: Editar - SEMPRE visível independente do status */}
+              {data.status !== 'cancelled' && (
                 <Button variant="outline" onClick={() => onAction('edit')} size="sm">
                   <Edit2 className="h-4 w-4 mr-2" />
                   Editar
                 </Button>
               )}
-              {data.actions.can_add_payment && (
+              
+              {/* ✅ CORRIGIDO: Pagamento - SEMPRE visível independente do status */}
+              {data.status !== 'cancelled' && (
                 <Button variant="outline" onClick={() => onAction('payment')} className="border-green-200 text-green-700 hover:bg-green-50" size="sm">
                   <DollarSign className="h-4 w-4 mr-2" />
                   Pagamento
                 </Button>
               )}
-              {data.actions.can_cancel && (
+              
+              {/* ✅ CORRIGIDO: Cancelar - SEMPRE visível independente do status (exceto cancelada) */}
+              {data.status !== 'cancelled' && (
                 <Button 
                   variant="destructive" 
                   onClick={() => onAction('cancel')}
                   className="bg-red-600 hover:bg-red-700"
                   size="sm"
                 >
+                  <Ban className="h-4 w-4 mr-2" />
                   Cancelar
                 </Button>
               )}
@@ -928,17 +940,25 @@ export default function ReservationDetailsPage() {
 
     // ✅ IMPLEMENTAÇÃO CONDICIONAL: Check-in APENAS se vier do QuickView
     if (searchParams.get('checkin') === 'true') {
-      // Verificar se a reserva permite check-in
-      if (data.status === 'confirmed' || data.status === 'pending') {
+      // Verificar se a reserva permite check-in (status + data)
+      const isStatusValid = data.status === 'confirmed' || data.status === 'pending';
+      const isDateValid = new Date(data.check_in_date) <= new Date(new Date().toDateString());
+      
+      if (isStatusValid && isDateValid) {
         setCheckInModalOpen(true);
         // Limpar o parâmetro da URL
         const newUrl = window.location.pathname;
         window.history.replaceState({}, '', newUrl);
       } else {
         // Mostrar toast informativo se não pode fazer check-in
+        let message = `Não é possível fazer check-in para reservas com status: ${getStatusLabel(data.status)}`;
+        if (isStatusValid && !isDateValid) {
+          message = 'Check-in só é permitido na data da reserva ou após.';
+        }
+        
         toast({
           title: "Check-in não disponível",
-          description: `Não é possível fazer check-in para reservas com status: ${getStatusLabel(data.status)}`,
+          description: message,
           variant: "destructive",
         });
       }
@@ -1211,7 +1231,7 @@ export default function ReservationDetailsPage() {
         <span className="font-medium text-sm">{data.guest?.full_name || data.reservation_number}</span>
       </div>
 
-      {/* Header melhorado */}
+      {/* Header melhorado e corrigido */}
       <ImprovedReservationHeader data={data} onAction={handleAction} />
 
       {/* Grid principal - COMPACTADO */}

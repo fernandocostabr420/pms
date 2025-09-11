@@ -1,17 +1,27 @@
-# backend/app/api/v1/endpoints/reservations.py - ARQUIVO COMPLETO COM MULTI-SELECT E REFATORADO
+# backend/app/api/v1/endpoints/reservations.py - ARQUIVO COMPLETO COM MULTI-SELECT E VOUCHER
 
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi import status as http_status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import and_, or_, func, text, desc, asc, not_
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 import math
 import logging
+import io
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 from app.core.database import get_db
 from app.services.reservation_service import ReservationService
+from app.services.voucher_service import VoucherService
+from app.services.voucher_service import VoucherService
 from app.schemas.reservation import (
     ReservationCreate, 
     ReservationUpdate, 
@@ -44,6 +54,224 @@ from datetime import timezone
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+# ===== FUNÇÃO AUXILIAR PARA GERAR VOUCHER PDF =====
+
+def generate_voucher_pdf(reservation_data: dict) -> bytes:
+    """
+    Gera um PDF de voucher da reserva com as informações principais
+    """
+    buffer = io.BytesIO()
+    
+    # Configuração do documento
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=20*mm,
+        leftMargin=20*mm,
+        topMargin=20*mm,
+        bottomMargin=20*mm
+    )
+    
+    # Estilos
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        spaceAfter=20,
+        alignment=TA_CENTER,
+        textColor=colors.darkblue
+    )
+    
+    header_style = ParagraphStyle(
+        'CustomHeader',
+        parent=styles['Heading2'],
+        fontSize=14,
+        spaceAfter=12,
+        textColor=colors.darkblue
+    )
+    
+    normal_style = ParagraphStyle(
+        'CustomNormal',
+        parent=styles['Normal'],
+        fontSize=10,
+        spaceAfter=6
+    )
+    
+    # Elementos do documento
+    elements = []
+    
+    # Título
+    elements.append(Paragraph("VOUCHER DE RESERVA", title_style))
+    elements.append(Spacer(1, 10*mm))
+    
+    # Informações da reserva
+    elements.append(Paragraph("DADOS DA RESERVA", header_style))
+    
+    reservation_data_table = [
+        ["Número da Reserva:", reservation_data.get('reservation_number', 'N/A')],
+        ["Status:", reservation_data.get('status', 'N/A').upper()],
+        ["Data de Criação:", reservation_data.get('created_date', 'N/A')],
+        ["Canal:", reservation_data.get('source', 'Direto').capitalize()],
+    ]
+    
+    reservation_table = Table(reservation_data_table, colWidths=[60*mm, 100*mm])
+    reservation_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    elements.append(reservation_table)
+    elements.append(Spacer(1, 8*mm))
+    
+    # Informações do hóspede
+    guest_data = reservation_data.get('guest', {})
+    elements.append(Paragraph("DADOS DO HÓSPEDE", header_style))
+    
+    guest_data_table = [
+        ["Nome Completo:", guest_data.get('full_name', 'N/A')],
+        ["E-mail:", guest_data.get('email', 'N/A')],
+        ["Telefone:", guest_data.get('phone', 'N/A')],
+        ["Documento:", f"{guest_data.get('document_type', 'N/A')}: {guest_data.get('document_number', 'N/A')}"],
+    ]
+    
+    guest_table = Table(guest_data_table, colWidths=[60*mm, 100*mm])
+    guest_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    elements.append(guest_table)
+    elements.append(Spacer(1, 8*mm))
+    
+    # Informações da estadia
+    elements.append(Paragraph("DADOS DA ESTADIA", header_style))
+    
+    stay_data_table = [
+        ["Check-in:", reservation_data.get('check_in_date', 'N/A')],
+        ["Check-out:", reservation_data.get('check_out_date', 'N/A')],
+        ["Noites:", str(reservation_data.get('nights', 0))],
+        ["Adultos:", str(reservation_data.get('adults', 0))],
+        ["Crianças:", str(reservation_data.get('children', 0))],
+        ["Total de Hóspedes:", str(reservation_data.get('total_guests', 0))],
+    ]
+    
+    stay_table = Table(stay_data_table, colWidths=[60*mm, 100*mm])
+    stay_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    elements.append(stay_table)
+    elements.append(Spacer(1, 8*mm))
+    
+    # Informações dos quartos
+    rooms = reservation_data.get('rooms', [])
+    if rooms:
+        elements.append(Paragraph("QUARTOS RESERVADOS", header_style))
+        
+        for i, room in enumerate(rooms, 1):
+            room_info = f"Quarto {i}: {room.get('room_number', 'N/A')}"
+            if room.get('room_type_name'):
+                room_info += f" - {room.get('room_type_name')}"
+            elements.append(Paragraph(room_info, normal_style))
+        
+        elements.append(Spacer(1, 6*mm))
+    
+    # Informações financeiras
+    elements.append(Paragraph("INFORMAÇÕES FINANCEIRAS", header_style))
+    
+    financial_data_table = [
+        ["Valor Total:", f"R$ {reservation_data.get('total_amount', 0):.2f}"],
+        ["Valor Pago:", f"R$ {reservation_data.get('paid_amount', 0):.2f}"],
+        ["Saldo Devedor:", f"R$ {reservation_data.get('balance_due', 0):.2f}"],
+    ]
+    
+    financial_table = Table(financial_data_table, colWidths=[60*mm, 100*mm])
+    financial_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    elements.append(financial_table)
+    elements.append(Spacer(1, 8*mm))
+    
+    # Informações da propriedade
+    property_data = reservation_data.get('property', {})
+    if property_data:
+        elements.append(Paragraph("INFORMAÇÕES DA PROPRIEDADE", header_style))
+        
+        property_data_table = [
+            ["Nome:", property_data.get('name', 'N/A')],
+            ["Endereço:", property_data.get('address_line1', 'N/A')],
+            ["Cidade:", property_data.get('city', 'N/A')],
+            ["Telefone:", property_data.get('phone', 'N/A')],
+        ]
+        
+        property_table = Table(property_data_table, colWidths=[60*mm, 100*mm])
+        property_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        
+        elements.append(property_table)
+        elements.append(Spacer(1, 8*mm))
+    
+    # Observações
+    if reservation_data.get('guest_requests'):
+        elements.append(Paragraph("SOLICITAÇÕES ESPECIAIS", header_style))
+        elements.append(Paragraph(reservation_data.get('guest_requests'), normal_style))
+        elements.append(Spacer(1, 6*mm))
+    
+    if reservation_data.get('internal_notes'):
+        elements.append(Paragraph("OBSERVAÇÕES INTERNAS", header_style))
+        elements.append(Paragraph(reservation_data.get('internal_notes'), normal_style))
+        elements.append(Spacer(1, 6*mm))
+    
+    # Rodapé
+    elements.append(Spacer(1, 10*mm))
+    footer_style = ParagraphStyle(
+        'Footer',
+        parent=styles['Normal'],
+        fontSize=8,
+        alignment=TA_CENTER,
+        textColor=colors.grey
+    )
+    
+    elements.append(Paragraph(f"Voucher gerado em {datetime.now().strftime('%d/%m/%Y às %H:%M')}", footer_style))
+    elements.append(Paragraph("Este documento é válido como comprovante de reserva.", footer_style))
+    
+    # Gerar PDF
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
 # ===== FUNÇÃO AUXILIAR PARA PROCESSAR FILTROS MULTI-SELECT =====
@@ -1335,6 +1563,64 @@ def get_reservation_detailed(
         )
 
 
+# ===== NOVO ENDPOINT PARA VOUCHER =====
+
+@router.get("/{reservation_id}/voucher")
+def download_reservation_voucher(
+    reservation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Gera e retorna o voucher da reserva em PDF para download
+    """
+    try:
+        # Usar o VoucherService para gerar o PDF
+        voucher_service = VoucherService(db)
+        pdf_content = voucher_service.generate_reservation_voucher(
+            reservation_id, 
+            current_user.tenant_id
+        )
+        
+        # Buscar dados básicos para o nome do arquivo
+        reservation_service = ReservationService(db)
+        reservation = reservation_service.get_reservation_by_id(reservation_id, current_user.tenant_id)
+        
+        if not reservation:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail="Reserva não encontrada"
+            )
+        
+        # Gerar nome do arquivo usando o serviço
+        filename = voucher_service.get_voucher_filename(reservation.reservation_number)
+        
+        # Retornar PDF como response
+        return StreamingResponse(
+            io.BytesIO(pdf_content),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Type": "application/pdf"
+            }
+        )
+        
+    except ValueError as e:
+        # Erro específico do serviço (reserva não encontrada)
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao gerar voucher da reserva {reservation_id}: {str(e)}")
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro ao gerar voucher da reserva"
+        )
+
+
 @router.get("/number/{reservation_number}", response_model=ReservationResponse)
 def get_reservation_by_number(
     reservation_number: str,
@@ -1436,7 +1722,7 @@ def confirm_reservation_expanded(
         if not reservation:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
-                detail="Reserva não encontrada"  # ← COMPLETE ESTA LINHA
+                detail="Reserva não encontrada"
             )
         
         # Confirmar a reserva
