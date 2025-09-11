@@ -287,7 +287,7 @@ class Reservation(BaseModel, TenantMixin):
         """Verifica se pode fazer check-in"""
         today = date.today()
         return (
-            self.status == "confirmed" and 
+            self.status in ["pending", "confirmed"] and 
             self.check_in_date <= today and
             self.is_active
         )
@@ -296,7 +296,6 @@ class Reservation(BaseModel, TenantMixin):
     def can_check_out(self):
         """Verifica se pode fazer check-out"""
         return self.status == "checked_in" and self.is_active
-    
     @property
     def can_cancel(self):
         """Verifica se pode ser cancelada"""

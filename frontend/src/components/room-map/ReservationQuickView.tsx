@@ -113,6 +113,7 @@ export function ReservationQuickView({
   const statusConfig = getStatusConfig(reservation.status);
   const StatusIcon = statusConfig.icon;
 
+  // ✅ HANDLERS - Todos definidos corretamente
   const handleViewDetails = () => {
     onClose();
     router.push(`/dashboard/reservations/${reservation.id}`);
@@ -121,6 +122,16 @@ export function ReservationQuickView({
   const handleEdit = () => {
     onClose();
     router.push(`/dashboard/reservations/${reservation.id}?edit=true`);
+  };
+
+  const handleCheckIn = () => {
+    onClose();
+    router.push(`/dashboard/reservations/${reservation.id}?checkin=true`);
+  };
+
+  const handleCheckOut = () => {
+    onClose();
+    router.push(`/dashboard/reservations/${reservation.id}?checkout=true`);
   };
 
   // Cálculos financeiros
@@ -372,8 +383,9 @@ export function ReservationQuickView({
 
           <Separator />
 
-          {/* Botões de Ação */}
+          {/* ✅ BOTÕES DE AÇÃO ATUALIZADOS - Com Check-in e Check-out */}
           <div className="flex gap-3">
+            {/* Botão Ver Detalhes - sempre presente */}
             <Button
               onClick={handleViewDetails}
               className="flex-1 gap-2 h-10 text-sm font-semibold bg-blue-600 hover:bg-blue-700"
@@ -381,6 +393,30 @@ export function ReservationQuickView({
               <Eye className="h-4 w-4" />
               Ver Detalhes
             </Button>
+            
+            {/* Botão de Check-in - para reservas pendentes e confirmadas */}
+            {(reservation.status === 'confirmed' || reservation.status === 'pending') && (
+              <Button
+                onClick={handleCheckIn}
+                className="flex-1 gap-2 h-10 text-sm font-semibold bg-emerald-600 hover:bg-emerald-700"
+              >
+                <UserCheck className="h-4 w-4" />
+                Check-in
+              </Button>
+            )}
+
+            {/* ✅ NOVO: Botão de Check-out - apenas para reservas com check-in realizado */}
+            {reservation.status === 'checked_in' && (
+              <Button
+                onClick={handleCheckOut}
+                className="flex-1 gap-2 h-10 text-sm font-semibold bg-blue-600 hover:bg-blue-700"
+              >
+                <LogOut className="h-4 w-4" />
+                Check-out
+              </Button>
+            )}
+            
+            {/* Botão Editar - sempre presente */}
             <Button
               onClick={handleEdit}
               className="flex-1 gap-2 h-10 text-sm font-semibold"

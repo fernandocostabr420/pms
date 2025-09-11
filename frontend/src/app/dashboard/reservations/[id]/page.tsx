@@ -1,7 +1,8 @@
+// frontend/src/app/dashboard/reservations/[id]/page.tsx
 'use client';
 
-import { useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useReservationDetails } from '@/hooks/useReservationDetails';
@@ -900,6 +901,7 @@ function ImprovedReservationHeader({ data, onAction }: { data: any; onAction: (a
 export default function ReservationDetailsPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const reservationId = parseInt(params.id as string);
   
   const { data, loading, error, refresh } = useReservationDetails(reservationId);
@@ -911,6 +913,72 @@ export default function ReservationDetailsPage() {
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
+
+  // ✅ IMPLEMENTAÇÃO CONDICIONAL: Detectar parâmetros da URL e abrir modais APENAS do QuickView
+  useEffect(() => {
+    if (!data || loading) return;
+
+    // ✅ NOVO: Detectar ?edit=true
+    if (searchParams.get('edit') === 'true') {
+      setEditModalOpen(true);
+      // Limpar o parâmetro da URL
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, '', newUrl);
+    }
+
+    // ✅ IMPLEMENTAÇÃO CONDICIONAL: Check-in APENAS se vier do QuickView
+    if (searchParams.get('checkin') === 'true') {
+      // Verificar se a reserva permite check-in
+      if (data.status === 'confirmed' || data.status === 'pending') {
+        setCheckInModalOpen(true);
+        // Limpar o parâmetro da URL
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, '', newUrl);
+      } else {
+        // Mostrar toast informativo se não pode fazer check-in
+        toast({
+          title: "Check-in não disponível",
+          description: `Não é possível fazer check-in para reservas com status: ${getStatusLabel(data.status)}`,
+          variant: "destructive",
+        });
+      }
+    }
+
+    // ✅ BONUS: Detectar outros parâmetros também
+    if (searchParams.get('checkout') === 'true') {
+      if (data.status === 'checked_in') {
+        setCheckOutModalOpen(true);
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, '', newUrl);
+      } else {
+        toast({
+          title: "Check-out não disponível",
+          description: `Não é possível fazer check-out para reservas com status: ${getStatusLabel(data.status)}`,
+          variant: "destructive",
+        });
+      }
+    }
+
+    if (searchParams.get('payment') === 'true') {
+      setPaymentModalOpen(true);
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, '', newUrl);
+    }
+
+  }, [data, loading, searchParams]);
+
+  // ✅ FUNÇÃO AUXILIAR: Obter label do status
+  const getStatusLabel = (status: string) => {
+    const statusLabels = {
+      'pending': 'Pendente',
+      'confirmed': 'Confirmada',
+      'checked_in': 'Check-in realizado',
+      'checked_out': 'Check-out realizado',
+      'cancelled': 'Cancelada',
+      'no_show': 'No Show'
+    };
+    return statusLabels[status as keyof typeof statusLabels] || status;
+  };
 
   // Função para formatação correta de moeda brasileira
   const formatCurrency = (value: string | number | null | undefined): string => {
@@ -1434,7 +1502,7 @@ export default function ReservationDetailsPage() {
         reservation={data}
       />
 
-      {/* Modal de Check-in */}
+      {/* ✅ Modal de Check-in - Abertura condicional implementada */}
       <CheckInModal
         isOpen={checkInModalOpen}
         onClose={() => setCheckInModalOpen(false)}
