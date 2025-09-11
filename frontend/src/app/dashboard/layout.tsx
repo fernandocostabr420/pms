@@ -1,10 +1,11 @@
 // frontend/src/app/dashboard/layout.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   DropdownMenu,
@@ -28,9 +29,13 @@ import {
   Menu,
   Map,
   DollarSign,
-  X
+  X,
+  Search,
+  Loader2
 } from 'lucide-react';
 import Link from 'next/link';
+import { cn } from '@/lib/utils';
+import { apiClient } from '@/lib/api';
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -42,6 +47,19 @@ const navigation = [
   { name: 'Disponibilidade', href: '/dashboard/room-availability', icon: Calendar },
 ];
 
+// Tipo para resultados da busca
+interface SearchResult {
+  id: number;
+  reservation_number: string;
+  guest_name: string;
+  guest_email: string;
+  check_in_date: string;
+  check_out_date: string;
+  status: string;
+  total_amount: number;
+  room_info?: string;
+}
+
 export default function DashboardLayout({
   children,
 }: {
@@ -50,6 +68,17 @@ export default function DashboardLayout({
   const { user, tenant, isAuthenticated, isLoading, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const router = useRouter();
+
+  // Estados para busca global
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  
+  // Refs para controle de foco e clique fora
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     console.log('Layout Debug:', { user, tenant, isAuthenticated, isLoading });
@@ -60,6 +89,120 @@ export default function DashboardLayout({
       router.push('/login');
     }
   }, [isAuthenticated, isLoading, router]);
+
+  // Fechar busca ao clicar fora
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setSearchOpen(false);
+      }
+    }
+
+    if (searchOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [searchOpen]);
+
+  // Focar no input quando abrir a busca
+  useEffect(() => {
+    if (searchOpen && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [searchOpen]);
+
+  // Debounce para busca
+  useEffect(() => {
+    if (!searchTerm.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      performSearch(searchTerm);
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm]);
+
+  // Função para realizar a busca
+  const performSearch = async (term: string) => {
+    if (!term.trim()) return;
+
+    setSearchLoading(true);
+    setSearchError(null);
+
+    try {
+      const response = await apiClient.getReservations({
+        search: term,
+        page: 1,
+        per_page: 10
+      });
+
+      // Mapear resultados para o formato esperado
+      const results: SearchResult[] = response.reservations.map((reservation: any) => ({
+        id: reservation.id,
+        reservation_number: reservation.reservation_number,
+        guest_name: reservation.guest_name || `${reservation.guest?.first_name || ''} ${reservation.guest?.last_name || ''}`.trim(),
+        guest_email: reservation.guest?.email || '',
+        check_in_date: reservation.check_in_date,
+        check_out_date: reservation.check_out_date,
+        status: reservation.status,
+        total_amount: reservation.total_amount || 0,
+        room_info: reservation.room_info || ''
+      }));
+
+      setSearchResults(results);
+    } catch (error) {
+      console.error('Erro na busca:', error);
+      setSearchError('Erro ao buscar reservas');
+      setSearchResults([]);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  // Função para abrir busca
+  const handleSearchClick = () => {
+    setSearchOpen(true);
+    setSearchTerm('');
+    setSearchResults([]);
+    setSearchError(null);
+  };
+
+  // Função para selecionar uma reserva
+  const handleSelectReservation = (reservation: SearchResult) => {
+    setSearchOpen(false);
+    setSearchTerm('');
+    setSearchResults([]);
+    router.push(`/dashboard/reservations/${reservation.id}`);
+  };
+
+  // Função para formatar status
+  const getStatusLabel = (status: string) => {
+    const statusMap: Record<string, string> = {
+      pending: 'Pendente',
+      confirmed: 'Confirmada',
+      checked_in: 'Check-in',
+      checked_out: 'Check-out',
+      cancelled: 'Cancelada',
+      no_show: 'No Show'
+    };
+    return statusMap[status] || status;
+  };
+
+  // Função para formatar valor
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL'
+    }).format(value);
+  };
+
+  // Função para formatar data
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('pt-BR');
+  };
 
   if (isLoading) {
     return (
@@ -121,8 +264,117 @@ export default function DashboardLayout({
               </h1>
             </div>
 
-            {/* User menu */}
-            <div className="flex items-center space-x-4">
+            {/* Busca Global e User menu */}
+            <div className="flex items-center space-x-3">
+              {/* Busca Global */}
+              <div className="relative" ref={searchContainerRef}>
+                {!searchOpen ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleSearchClick}
+                    className="text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                  >
+                    <Search className="h-5 w-5" />
+                  </Button>
+                ) : (
+                  <div className="relative">
+                    {/* Input de busca */}
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <Input
+                        ref={searchInputRef}
+                        placeholder="Buscar reservas..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-80 pl-10 pr-10 h-9 text-sm border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSearchOpen(false)}
+                        className="absolute right-1 top-1/2 transform -translate-y-1/2 h-7 w-7 p-0 text-gray-400 hover:text-gray-600"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    {/* Dropdown de resultados */}
+                    {searchOpen && (searchTerm.length > 0 || searchLoading) && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg z-50 max-h-96 overflow-y-auto">
+                        {searchLoading && (
+                          <div className="flex items-center justify-center py-4">
+                            <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                            <span className="ml-2 text-sm text-gray-600">Buscando...</span>
+                          </div>
+                        )}
+
+                        {searchError && (
+                          <div className="px-4 py-3 text-sm text-red-600">
+                            {searchError}
+                          </div>
+                        )}
+
+                        {!searchLoading && !searchError && searchResults.length === 0 && searchTerm.length > 0 && (
+                          <div className="px-4 py-3 text-sm text-gray-600">
+                            Nenhuma reserva encontrada
+                          </div>
+                        )}
+
+                        {!searchLoading && searchResults.length > 0 && (
+                          <div className="py-1">
+                            {searchResults.map((result) => (
+                              <button
+                                key={result.id}
+                                onClick={() => handleSelectReservation(result)}
+                                className="w-full px-4 py-3 text-left hover:bg-gray-50 border-b border-gray-100 last:border-b-0 focus:outline-none focus:bg-gray-50"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <span className="text-sm font-medium text-gray-900">
+                                        #{result.reservation_number}
+                                      </span>
+                                      <span className={cn(
+                                        "px-2 py-0.5 text-xs font-medium rounded-full",
+                                        result.status === 'confirmed' && "bg-green-100 text-green-700",
+                                        result.status === 'pending' && "bg-yellow-100 text-yellow-700",
+                                        result.status === 'checked_in' && "bg-blue-100 text-blue-700",
+                                        result.status === 'checked_out' && "bg-gray-100 text-gray-700",
+                                        result.status === 'cancelled' && "bg-red-100 text-red-700"
+                                      )}>
+                                        {getStatusLabel(result.status)}
+                                      </span>
+                                    </div>
+                                    <div className="text-sm text-gray-600 truncate">
+                                      {result.guest_name}
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-1">
+                                      {formatDate(result.check_in_date)} - {formatDate(result.check_out_date)}
+                                    </div>
+                                  </div>
+                                  <div className="text-right ml-4">
+                                    <div className="text-sm font-medium text-gray-900">
+                                      {formatCurrency(result.total_amount)}
+                                    </div>
+                                    {result.room_info && (
+                                      <div className="text-xs text-gray-500">
+                                        {result.room_info}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* User menu */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button 

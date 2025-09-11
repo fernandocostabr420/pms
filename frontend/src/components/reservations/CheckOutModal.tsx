@@ -62,6 +62,9 @@ const CheckOutModal: React.FC<CheckOutModalProps> = ({
   
   // Verificar se o check-out é permitido
   const isCheckOutAllowed = finalDebt <= maxAllowedDebt;
+  
+  // Verificar se há dívida (para mostrar ou não as informações de limite)
+  const hasDebt = finalDebt > 0;
 
   // Reset do formulário quando o modal abre
   useEffect(() => {
@@ -185,10 +188,9 @@ const CheckOutModal: React.FC<CheckOutModalProps> = ({
                   {formatCurrency(currentDebt)}
                 </p>
               </div>
-              <div>
-                <p className="text-gray-600">Limite Permitido (10%):</p>
-                <p className="font-medium">{formatCurrency(maxAllowedDebt)}</p>
-              </div>
+              
+
+              
               <div>
                 <p className="text-gray-600">Taxas Finais:</p>
                 <p className="font-medium">{formatCurrency(finalChargesValue)}</p>
@@ -207,8 +209,8 @@ const CheckOutModal: React.FC<CheckOutModalProps> = ({
             )}
           </div>
 
-          {/* Alerta de validação */}
-          {!isCheckOutAllowed && (
+          {/* ✅ CORRIGIDO: Só mostrar alerta se há dívida bloqueante E mensagem válida */}
+          {!isCheckOutAllowed && hasDebt && validationError && (
             <Alert variant="destructive" className="mb-6">
               <AlertTriangle className="h-4 w-4" />
               <AlertDescription className="font-medium">
@@ -217,19 +219,8 @@ const CheckOutModal: React.FC<CheckOutModalProps> = ({
             </Alert>
           )}
 
-          {/* Status do check-out */}
-          {isCheckOutAllowed ? (
-            <div className="mb-6 p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="bg-green-100 text-green-800 border-green-200">
-                  ✅ Check-out Liberado
-                </Badge>
-                <span className="text-sm text-green-700">
-                  Saldo dentro do limite permitido
-                </span>
-              </div>
-            </div>
-          ) : (
+          {/* Status do check-out - só mostrar se há dívida e está bloqueado */}
+          {hasDebt && !isCheckOutAllowed && (
             <div className="mb-6 p-3 bg-red-50 border border-red-200 rounded-lg">
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className="bg-red-100 text-red-800 border-red-200">
