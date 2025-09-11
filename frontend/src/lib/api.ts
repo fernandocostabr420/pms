@@ -1,4 +1,4 @@
-// src/lib/api.ts - ARQUIVO COMPLETO + NOVAS FUNCIONALIDADES
+// src/lib/api.ts - ARQUIVO COMPLETO + SISTEMA DE REFRESH PROATIVO + TODAS AS FUNCIONALIDADES ORIGINAIS
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import Cookies from 'js-cookie';
 import type { 
@@ -153,6 +153,11 @@ export interface TodaysReservationsImproved {
   current_guests: any[];
 }
 
+// Tipo adicional para compatibilidade (mantido do código original)
+interface ReservationDetailedResponse {
+  [key: string]: any;
+}
+
 // ✅ NOVOS IMPORTS PARA FUNCIONALIDADES ADMINISTRATIVAS DE PAGAMENTOS
 import {
   PaymentResponse,
@@ -170,6 +175,18 @@ import {
 class PMSApiClient {
   private client: AxiosInstance;
   private baseURL: string;
+  
+  // ===== ✅ NOVAS PROPRIEDADES PARA SISTEMA DE REFRESH PROATIVO =====
+  private refreshTimer: NodeJS.Timeout | null = null;
+  private activityTimer: NodeJS.Timeout | null = null;
+  private lastActivity: number = Date.now();
+  private isUserActive: boolean = true;
+  private activityListeners: (() => void)[] = [];
+  
+  // Configurações do sistema proativo
+  private readonly REFRESH_BUFFER_MINUTES = 5; // Renovar 5 min antes de expirar
+  private readonly ACTIVITY_TIMEOUT_MINUTES = 15; // Considerar inativo após 15 min
+  private readonly MIN_REFRESH_INTERVAL_MINUTES = 5; // Mínimo entre renovações
 
   constructor() {
     this.baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://72.60.50.223:8000';
@@ -183,6 +200,40 @@ class PMSApiClient {
     });
 
     this.setupInterceptors();
+    this.setupActivityDetection();
+  }
+
+  // ===== ✅ NOVO SISTEMA DE DETECÇÃO DE ATIVIDADE =====
+  private setupActivityDetection() {
+    if (typeof window === 'undefined') return; // SSR safety
+
+    const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    
+    const updateActivity = () => {
+      this.lastActivity = Date.now();
+      this.isUserActive = true;
+      
+      // Reset activity timer
+      if (this.activityTimer) {
+        clearTimeout(this.activityTimer);
+      }
+      
+      // Set user as inactive after timeout
+      this.activityTimer = setTimeout(() => {
+        this.isUserActive = false;
+        console.log('👤 Usuário considerado inativo - pausando refresh automático');
+      }, this.ACTIVITY_TIMEOUT_MINUTES * 60 * 1000);
+    };
+
+    // Add event listeners
+    activityEvents.forEach(event => {
+      const listener = () => updateActivity();
+      document.addEventListener(event, listener, true);
+      this.activityListeners.push(() => document.removeEventListener(event, listener, true));
+    });
+
+    // Initial activity
+    updateActivity();
   }
 
   private setupInterceptors() {
@@ -198,7 +249,7 @@ class PMSApiClient {
       (error) => Promise.reject(error)
     );
 
-    // Response interceptor - trata erros e refresh token
+    // Response interceptor - trata erros e refresh token (mantém sistema reativo como fallback)
     this.client.interceptors.response.use(
       (response) => response,
       async (error) => {
@@ -208,11 +259,13 @@ class PMSApiClient {
           originalRequest._retry = true;
           
           try {
+            console.log('🔄 Refresh reativo acionado (fallback)');
             await this.refreshToken();
             const token = this.getToken();
             originalRequest.headers.Authorization = `Bearer ${token}`;
             return this.client(originalRequest);
           } catch (refreshError) {
+            console.log('❌ Refresh falhou - redirecionando para login');
             this.logout();
             window.location.href = '/login';
             return Promise.reject(refreshError);
@@ -224,7 +277,54 @@ class PMSApiClient {
     );
   }
 
-  // ===== TOKEN MANAGEMENT =====
+  // ===== ✅ SISTEMA DE REFRESH PROATIVO =====
+  private startProactiveRefresh(expiresInSeconds: number) {
+    // Limpar timer anterior se existir
+    this.stopProactiveRefresh();
+
+    // Calcular quando deve renovar (buffer antes da expiração)
+    const refreshInMs = Math.max(
+      (expiresInSeconds - (this.REFRESH_BUFFER_MINUTES * 60)) * 1000,
+      this.MIN_REFRESH_INTERVAL_MINUTES * 60 * 1000 // Mínimo de 5 minutos
+    );
+
+    console.log(`⏰ Refresh proativo agendado para ${Math.round(refreshInMs / 1000 / 60)} minutos`);
+
+    this.refreshTimer = setTimeout(async () => {
+      // Só renovar se usuário estiver ativo
+      if (!this.isUserActive) {
+        console.log('😴 Usuário inativo - pulando refresh automático');
+        return;
+      }
+
+      try {
+        console.log('🔄 Executando refresh proativo automático');
+        await this.refreshToken();
+        console.log('✅ Token renovado automaticamente');
+      } catch (error) {
+        console.error('❌ Erro no refresh proativo:', error);
+        // O interceptor vai lidar com isso na próxima requisição
+      }
+    }, refreshInMs);
+  }
+
+  private stopProactiveRefresh() {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    if (this.activityTimer) {
+      clearTimeout(this.activityTimer);
+      this.activityTimer = null;
+    }
+  }
+
+  private cleanupActivityListeners() {
+    this.activityListeners.forEach(removeListener => removeListener());
+    this.activityListeners = [];
+  }
+
+  // ===== TOKEN MANAGEMENT (MODIFICADO) =====
   private getToken(): string | null {
     return Cookies.get('access_token') || null;
   }
@@ -233,6 +333,7 @@ class PMSApiClient {
     return Cookies.get('refresh_token') || null;
   }
 
+  // ✅ MÉTODO MODIFICADO: setTokens agora inicia o refresh proativo
   private setTokens(accessToken: string, refreshToken: string, expiresIn: number) {
     // Access token expira em expiresIn segundos
     const accessExpires = new Date(Date.now() + expiresIn * 1000);
@@ -250,13 +351,20 @@ class PMSApiClient {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax'
     });
+
+    // ✅ INICIAR SISTEMA PROATIVO
+    this.startProactiveRefresh(expiresIn);
   }
 
+  // ✅ MÉTODO MODIFICADO: removeTokens agora limpa timers
   private removeTokens() {
     Cookies.remove('access_token');
     Cookies.remove('refresh_token');
     Cookies.remove('user_data');
     Cookies.remove('tenant_data');
+    
+    // ✅ LIMPAR SISTEMA PROATIVO
+    this.stopProactiveRefresh();
   }
 
   // ===== AUTH METHODS =====
@@ -265,13 +373,14 @@ class PMSApiClient {
       const response = await this.client.post<AuthResponse>('/auth/login', credentials);
       const { user, tenant, token } = response.data;
       
-      // Salvar tokens
+      // Salvar tokens (vai iniciar sistema proativo automaticamente)
       this.setTokens(token.access_token, token.refresh_token, token.expires_in);
       
       // Salvar dados do usuário e tenant
       Cookies.set('user_data', JSON.stringify(user), { expires: 7 });
       Cookies.set('tenant_data', JSON.stringify(tenant), { expires: 7 });
       
+      console.log('✅ Login realizado - sistema de refresh proativo ativado');
       return response.data;
     } catch (error) {
       console.error('Login error:', error);
@@ -291,15 +400,22 @@ class PMSApiClient {
       });
       
       const { access_token, refresh_token: newRefreshToken, expires_in } = response.data;
+      
+      // Salvar novos tokens (vai resetar o timer proativo automaticamente)
       this.setTokens(access_token, newRefreshToken, expires_in);
+      
+      console.log('🔄 Token renovado - timer proativo resetado');
     } catch (error) {
       console.error('Token refresh error:', error);
       throw error;
     }
   }
 
+  // ✅ MÉTODO MODIFICADO: logout agora limpa tudo
   logout(): void {
+    console.log('👋 Logout - limpando sistema proativo');
     this.removeTokens();
+    this.cleanupActivityListeners();
   }
 
   isAuthenticated(): boolean {
@@ -332,6 +448,42 @@ class PMSApiClient {
       console.error('Erro ao verificar permissões de admin:', error);
       return false;
     }
+  }
+
+  // ===== ✅ NOVOS MÉTODOS PARA CONTROLE MANUAL DO SISTEMA =====
+  
+  /**
+   * Força uma renovação manual do token (útil para debugging)
+   */
+  async forceTokenRefresh(): Promise<void> {
+    console.log('🔧 Forçando renovação manual do token');
+    await this.refreshToken();
+  }
+
+  /**
+   * Verifica o status do sistema de refresh proativo
+   */
+  getRefreshStatus(): {
+    hasActiveTimer: boolean;
+    isUserActive: boolean;
+    lastActivity: string;
+    secondsSinceActivity: number;
+  } {
+    return {
+      hasActiveTimer: this.refreshTimer !== null,
+      isUserActive: this.isUserActive,
+      lastActivity: new Date(this.lastActivity).toLocaleString(),
+      secondsSinceActivity: Math.round((Date.now() - this.lastActivity) / 1000)
+    };
+  }
+
+  /**
+   * Reinicia a detecção de atividade (útil se necessário)
+   */
+  resetActivityDetection(): void {
+    console.log('🔄 Reiniciando detecção de atividade');
+    this.cleanupActivityListeners();
+    this.setupActivityDetection();
   }
 
   // ===== GENERIC HTTP METHODS =====
@@ -425,6 +577,81 @@ class PMSApiClient {
     return encoded;
   }
 
+  // ===== RESERVATIONS API (MÉTODOS ORIGINAIS MANTIDOS + EXPANDIDOS) =====
+
+  async getReservations(params?: { 
+    page?: number; 
+    per_page?: number; 
+    status?: string;
+    source?: string;
+    property_id?: number;
+    guest_id?: number;
+    check_in_from?: string;
+    check_in_to?: string;
+    check_out_from?: string;
+    check_out_to?: string;
+    created_from?: string;
+    created_to?: string;
+    min_amount?: number;
+    max_amount?: number;
+    is_paid?: boolean;
+    requires_deposit?: boolean;
+    is_group_reservation?: boolean;
+    search?: string;
+    
+    // ===== NOVOS PARÂMETROS ADICIONADOS =====
+    guest_email?: string;
+    guest_phone?: string;
+    guest_nationality?: string;
+    guest_city?: string;
+    guest_country?: string;
+    cancelled_from?: string;
+    cancelled_to?: string;
+    confirmed_from?: string;
+    confirmed_to?: string;
+    actual_checkin_from?: string;
+    actual_checkin_to?: string;
+    actual_checkout_from?: string;
+    actual_checkout_to?: string;
+    min_guests?: number;
+    max_guests?: number;
+    min_nights?: number;
+    max_nights?: number;
+    room_type_id?: number;
+    room_number?: string;
+    has_special_requests?: boolean;
+    has_internal_notes?: boolean;
+    deposit_paid?: boolean;
+    payment_status?: string;
+    include_guest_details?: boolean;
+    include_room_details?: boolean;
+    include_payment_summary?: boolean;
+  }): Promise<ReservationListResponse | ReservationListResponseWithDetails> {
+    // ✅ APLICAR ENCODING AQUI TAMBÉM
+    const encodedParams = this.encodeSearchParams(params || {});
+    
+    // Limpar parâmetros nulos/vazios para os novos filtros
+    const cleanParams = Object.fromEntries(
+      Object.entries(encodedParams).filter(([_, value]) => 
+        value !== null && value !== undefined && value !== '' && value !== 'all'
+      )
+    );
+
+    // Se tem parâmetros expandidos, usar a nova interface
+    const hasExpandedParams = cleanParams.include_guest_details || 
+                              cleanParams.include_room_details || 
+                              cleanParams.guest_email ||
+                              cleanParams.guest_phone;
+    
+    if (hasExpandedParams) {
+      const response = await this.client.get<ReservationListResponseWithDetails>('/reservations/', { params: cleanParams });
+      return response.data;
+    } else {
+      const response = await this.client.get<ReservationListResponse>('/reservations/', { params: cleanParams });
+      return response.data;
+    }
+  }
+
   // ✅ MÉTODO CORRIGIDO: getReservationsWithDetails
   async getReservationsWithDetails(params?: {
     page?: number;
@@ -516,269 +743,6 @@ class PMSApiClient {
       } catch (fallbackError) {
         console.error('Erro no fallback:', fallbackError);
         throw fallbackError;
-      }
-    }
-  }
-
-  // ✅ CORREÇÃO APLICADA AO MÉTODO ORIGINAL TAMBÉM
-  async getReservations(params?: { 
-    page?: number; 
-    per_page?: number; 
-    status?: string;
-    source?: string;
-    property_id?: number;
-    guest_id?: number;
-    check_in_from?: string;
-    check_in_to?: string;
-    check_out_from?: string;
-    check_out_to?: string;
-    created_from?: string;
-    created_to?: string;
-    min_amount?: number;
-    max_amount?: number;
-    is_paid?: boolean;
-    requires_deposit?: boolean;
-    is_group_reservation?: boolean;
-    search?: string;
-    
-    // ===== NOVOS PARÂMETROS ADICIONADOS =====
-    guest_email?: string;
-    guest_phone?: string;
-    guest_nationality?: string;
-    guest_city?: string;
-    guest_country?: string;
-    cancelled_from?: string;
-    cancelled_to?: string;
-    confirmed_from?: string;
-    confirmed_to?: string;
-    actual_checkin_from?: string;
-    actual_checkin_to?: string;
-    actual_checkout_from?: string;
-    actual_checkout_to?: string;
-    min_guests?: number;
-    max_guests?: number;
-    min_nights?: number;
-    max_nights?: number;
-    room_type_id?: number;
-    room_number?: string;
-    has_special_requests?: boolean;
-    has_internal_notes?: boolean;
-    deposit_paid?: boolean;
-    payment_status?: string;
-    include_guest_details?: boolean;
-    include_room_details?: boolean;
-    include_payment_summary?: boolean;
-  }): Promise<ReservationListResponse | ReservationListResponseWithDetails> {
-    // ✅ APLICAR ENCODING AQUI TAMBÉM
-    const encodedParams = this.encodeSearchParams(params || {});
-    
-    // Limpar parâmetros nulos/vazios
-    const cleanParams = Object.fromEntries(
-      Object.entries(encodedParams).filter(([_, value]) => 
-        value !== null && value !== undefined && value !== '' && value !== 'all'
-      )
-    );
-
-    // Se tem parâmetros expandidos, usar a nova interface
-    const hasExpandedParams = cleanParams.include_guest_details || 
-                              cleanParams.include_room_details || 
-                              cleanParams.guest_email ||
-                              cleanParams.guest_phone;
-    
-    if (hasExpandedParams) {
-      const response = await this.client.get<ReservationListResponseWithDetails>('/reservations/', { params: cleanParams });
-      return response.data;
-    } else {
-      const response = await this.client.get<ReservationListResponse>('/reservations/', { params: cleanParams });
-      return response.data;
-    }
-  }
-
-   // ===== RESERVATIONS API (MÉTODOS ORIGINAIS MANTIDOS + EXPANDIDOS) =====
-
-  async getReservations(params?: { 
-    page?: number; 
-    per_page?: number; 
-    status?: string;
-    source?: string;
-    property_id?: number;
-    guest_id?: number;
-    check_in_from?: string;
-    check_in_to?: string;
-    check_out_from?: string;
-    check_out_to?: string;
-    created_from?: string;
-    created_to?: string;
-    min_amount?: number;
-    max_amount?: number;
-    is_paid?: boolean;
-    requires_deposit?: boolean;
-    is_group_reservation?: boolean;
-    search?: string;
-    
-    // ===== NOVOS PARÂMETROS ADICIONADOS =====
-    guest_email?: string;
-    guest_phone?: string;
-    guest_nationality?: string;
-    guest_city?: string;
-    guest_country?: string;
-    cancelled_from?: string;
-    cancelled_to?: string;
-    confirmed_from?: string;
-    confirmed_to?: string;
-    actual_checkin_from?: string;
-    actual_checkin_to?: string;
-    actual_checkout_from?: string;
-    actual_checkout_to?: string;
-    min_guests?: number;
-    max_guests?: number;
-    min_nights?: number;
-    max_nights?: number;
-    room_type_id?: number;
-    room_number?: string;
-    has_special_requests?: boolean;
-    has_internal_notes?: boolean;
-    deposit_paid?: boolean;
-    payment_status?: string;
-    include_guest_details?: boolean;
-    include_room_details?: boolean;
-    include_payment_summary?: boolean;
-  }): Promise<ReservationListResponse | ReservationListResponseWithDetails> {
-    // Limpar parâmetros nulos/vazios para os novos filtros
-    const cleanParams = Object.fromEntries(
-      Object.entries(params || {}).filter(([_, value]) => 
-        value !== null && value !== undefined && value !== '' && value !== 'all'
-      )
-    );
-
-    // Se tem parâmetros expandidos, usar a nova interface
-    const hasExpandedParams = cleanParams.include_guest_details || 
-                              cleanParams.include_room_details || 
-                              cleanParams.guest_email ||
-                              cleanParams.guest_phone;
-    
-    if (hasExpandedParams) {
-      const response = await this.client.get<ReservationListResponseWithDetails>('/reservations/', { params: cleanParams });
-      return response.data;
-    } else {
-      const response = await this.client.get<ReservationListResponse>('/reservations/', { params: cleanParams });
-      return response.data;
-    }
-  }
-
-  // ===== NOVO MÉTODO PRINCIPAL PARA A TABELA =====
-  async getReservationsWithDetails(params?: {
-    page?: number;
-    per_page?: number;
-    status?: string;
-    source?: string;
-    property_id?: number;
-    guest_id?: number;
-    check_in_from?: string;
-    check_in_to?: string;
-    check_out_from?: string;
-    check_out_to?: string;
-    created_from?: string;
-    created_to?: string;
-    search?: string;
-    guest_email?: string;
-    guest_phone?: string;
-    guest_document_type?: string;
-    guest_nationality?: string;
-    guest_city?: string;
-    guest_state?: string;
-    guest_country?: string;
-    cancelled_from?: string;
-    cancelled_to?: string;
-    confirmed_from?: string;
-    confirmed_to?: string;
-    actual_checkin_from?: string;
-    actual_checkin_to?: string;
-    actual_checkout_from?: string;
-    actual_checkout_to?: string;
-    min_guests?: number;
-    max_guests?: number;
-    min_nights?: number;
-    max_nights?: number;
-    room_type_id?: number;
-    room_number?: string;
-    has_special_requests?: boolean;
-    has_internal_notes?: boolean;
-    deposit_paid?: boolean;
-    payment_status?: string;
-    marketing_source?: string;
-    is_current?: boolean;
-    can_check_in?: boolean;
-    can_check_out?: boolean;
-    can_cancel?: boolean;
-    min_amount?: number;
-    max_amount?: number;
-    is_paid?: boolean;
-    requires_deposit?: boolean;
-    is_group_reservation?: boolean;
-  }): Promise<ReservationListResponseWithDetails> {
-    // Limpar parâmetros nulos/vazios
-    const cleanParams = Object.fromEntries(
-      Object.entries(params || {}).filter(([_, value]) => 
-        value !== null && value !== undefined && value !== '' && value !== 'all'
-      )
-    );
-
-    // Sempre incluir detalhes para este método
-    cleanParams.include_guest_details = true;
-    cleanParams.include_room_details = true;
-    cleanParams.include_payment_details = true;
-
-    try {
-      const response = await this.client.get<ReservationListResponseWithDetails>('/reservations/detailed', { params: cleanParams });
-      return response.data;
-    } catch (error: any) {
-      console.error('Erro ao carregar reservas detalhadas:', error);
-      
-      // Fallback: tentar o endpoint padrão se o detalhado não existir
-      try {
-        const fallbackResponse = await this.getReservations({
-          ...cleanParams,
-          include_guest_details: true,
-          include_room_details: true,
-        });
-        
-        // Converter para o formato expandido se necessário
-        if ('reservations' in fallbackResponse && Array.isArray(fallbackResponse.reservations)) {
-          return {
-            reservations: fallbackResponse.reservations.map(reservation => ({
-              ...reservation,
-              guest_phone: reservation.guest?.phone || undefined,
-              guest_document_type: reservation.guest?.document_type || undefined,
-              guest_document_number: reservation.guest?.document_number || undefined,
-              guest_nationality: reservation.guest?.nationality || undefined,
-              guest_city: reservation.guest?.city || undefined,
-              guest_state: reservation.guest?.state || undefined,
-              guest_country: reservation.guest?.country || undefined,
-              property_address: reservation.property?.address || undefined,
-              property_phone: reservation.property?.phone || undefined,
-              property_city: reservation.property?.city || undefined,
-            })) as ReservationResponseWithGuestDetails[],
-            total: fallbackResponse.total,
-            page: fallbackResponse.page,
-            pages: fallbackResponse.pages,
-            per_page: fallbackResponse.per_page,
-            summary: {
-              total_amount: 0,
-              total_paid: 0,
-              total_pending: 0,
-              status_counts: {},
-              source_counts: {},
-              avg_nights: 0,
-              avg_guests: 0,
-              avg_amount: 0,
-            }
-          };
-        }
-        
-        throw new Error('Formato de resposta inválido');
-      } catch (fallbackError) {
-        throw error; // Lançar o erro original se o fallback também falhar
       }
     }
   }
