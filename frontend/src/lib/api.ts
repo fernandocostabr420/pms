@@ -556,26 +556,33 @@ class PMSApiClient {
   }
 
   // ===== CORREÇÃO: MÉTODO PARA CODIFICAR PARÂMETROS DE BUSCA =====
-  private encodeSearchParams(params: Record<string, any>): Record<string, any> {
-    const encoded = { ...params };
+  // ===== CORREÇÃO: MÉTODO PARA CODIFICAR PARÂMETROS DE BUSCA =====
+private encodeSearchParams(params: Record<string, any>): Record<string, any> {
+  const encoded = { ...params };
+  
+  // ✅ CORREÇÃO ESPECÍFICA: Encodar parâmetro search se contém email (evitar dupla codificação)
+  if (encoded.search && typeof encoded.search === 'string') {
+    const searchValue = encoded.search.trim();
     
-    // ✅ CORREÇÃO ESPECÍFICA: Encodar parâmetro search se contém email
-    if (encoded.search && typeof encoded.search === 'string') {
-      const searchValue = encoded.search.trim();
-      
-      // Detectar se é email (contém @) e encodar
-      if (searchValue.includes('@')) {
-        encoded.search = encodeURIComponent(searchValue);
-      }
+    // Detectar se é email (contém @) e ainda não foi encodado
+    if (searchValue.includes('@') && !searchValue.includes('%40')) {
+      encoded.search = encodeURIComponent(searchValue);
+      console.log(`🔍 Email encodado: ${searchValue} → ${encoded.search}`); // DEBUG
+    } else if (searchValue.includes('@')) {
+      console.log(`🔍 Email já encodado: ${searchValue}`); // DEBUG
     }
-    
-    // Encodar outros parâmetros que podem conter caracteres especiais
-    if (encoded.guest_email && typeof encoded.guest_email === 'string') {
-      encoded.guest_email = encodeURIComponent(encoded.guest_email.trim());
-    }
-    
-    return encoded;
   }
+  
+  // Aplicar mesma lógica para guest_email
+  if (encoded.guest_email && typeof encoded.guest_email === 'string') {
+    const emailValue = encoded.guest_email.trim();
+    if (emailValue.includes('@') && !emailValue.includes('%40')) {
+      encoded.guest_email = encodeURIComponent(emailValue);
+    }
+  }
+  
+  return encoded;
+}
 
   // ===== RESERVATIONS API (MÉTODOS ORIGINAIS MANTIDOS + EXPANDIDOS) =====
 

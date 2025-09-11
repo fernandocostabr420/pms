@@ -7,6 +7,7 @@ from sqlalchemy import and_, or_, func, not_, desc
 from fastapi import Request, HTTPException, status
 from datetime import datetime, date
 from decimal import Decimal
+import urllib.parse  # ✅ NOVO: Para decodificar URLs
 
 from app.models.reservation import Reservation, ReservationRoom
 from app.models.guest import Guest
@@ -329,9 +330,17 @@ class ReservationService:
             if filters.is_group_reservation is not None:
                 query = query.filter(Reservation.is_group_reservation == filters.is_group_reservation)
             
-            # ===== BUSCA TEXTUAL MELHORADA =====
+            # ===== BUSCA TEXTUAL MELHORADA COM DECODIFICAÇÃO =====
             if filters.search:
-                search_term = f"%{filters.search.strip()}%"
+                # ✅ CORREÇÃO: Decodificar parâmetro antes de usar na busca
+                raw_search = filters.search.strip()
+                decoded_search = urllib.parse.unquote(raw_search)
+                
+                print(f"🔍 BUSCA RAW: '{raw_search}'")
+                print(f"🔍 BUSCA DECODED: '{decoded_search}'")
+                
+                search_term = f"%{decoded_search}%"
+                
                 query = query.join(Guest).filter(
                     or_(
                         # Busca por número da reserva
@@ -341,7 +350,7 @@ class ReservationService:
                         Guest.last_name.ilike(search_term),
                         # Busca por nome completo
                         func.concat(Guest.first_name, ' ', Guest.last_name).ilike(search_term),
-                        # Busca por email
+                        # Busca por email (agora decodificado)
                         Guest.email.ilike(search_term),
                         # Busca por telefone
                         Guest.phone.ilike(search_term),
@@ -407,9 +416,17 @@ class ReservationService:
             if filters.check_in_to:
                 query = query.filter(Reservation.check_in_date <= filters.check_in_to)
             
-            # ===== BUSCA TEXTUAL NO COUNT TAMBÉM =====
+            # ===== BUSCA TEXTUAL NO COUNT TAMBÉM COM DECODIFICAÇÃO =====
             if filters.search:
-                search_term = f"%{filters.search.strip()}%"
+                # ✅ CORREÇÃO: Decodificar parâmetro antes de usar na busca
+                raw_search = filters.search.strip()
+                decoded_search = urllib.parse.unquote(raw_search)
+                
+                print(f"🔍 COUNT BUSCA RAW: '{raw_search}'")
+                print(f"🔍 COUNT BUSCA DECODED: '{decoded_search}'")
+                
+                search_term = f"%{decoded_search}%"
+                
                 query = query.join(Guest).filter(
                     or_(
                         Reservation.reservation_number.ilike(search_term),
