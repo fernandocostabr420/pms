@@ -125,8 +125,8 @@ class ReservationService:
         
         return availability
 
-    # ✅ NOVO: Método para verificar disponibilidade de estacionamento
-    def check_parking_availability(
+    # ✅ CORRIGIDO: Método renomeado para ser consistente
+    def check_parking_availability_detailed(
         self,
         property_id: int,
         check_in_date: date,
@@ -631,8 +631,8 @@ class ReservationService:
         if not property_obj.parking_spots_total or property_obj.parking_spots_total <= 0:
             return "Propriedade não possui vagas de estacionamento configuradas"
         
-        # Verificar disponibilidade usando ParkingService
-        parking_availability = self.check_parking_availability(
+        # ✅ CORRIGIDO: Usar método correto
+        parking_availability = self.check_parking_availability_detailed(
             property_obj.id,
             reservation_data.check_in_date,
             reservation_data.check_out_date,
@@ -852,7 +852,7 @@ class ReservationService:
         if 'source' in update_data and update_data['source']:
             update_data['source'] = self._normalize_source_for_search(update_data['source'])
 
-        # ✅ NOVO: Validar estacionamento se alterado
+        # ✅ CORRIGIDO: Validar estacionamento se alterado
         if 'parking_requested' in update_data:
             property_obj = self.db.query(Property).filter(
                 Property.id == reservation_obj.property_id,
@@ -860,6 +860,16 @@ class ReservationService:
             ).first()
             
             if update_data['parking_requested'] and property_obj:
+                # ✅ CORRIGIDO: Obter quartos da reserva atual para validação
+                current_rooms = []
+                for rr in reservation_obj.reservation_rooms:
+                    current_rooms.append({
+                        'room_id': rr.room_id,
+                        'check_in_date': update_data.get('check_in_date', reservation_obj.check_in_date),
+                        'check_out_date': update_data.get('check_out_date', reservation_obj.check_out_date),
+                        'rate_per_night': rr.rate_per_night
+                    })
+                
                 # Criar objeto temporário para validação
                 temp_reservation_data = ReservationCreate(
                     guest_id=reservation_obj.guest_id,
@@ -869,7 +879,7 @@ class ReservationService:
                     adults=update_data.get('adults', reservation_obj.adults),
                     children=update_data.get('children', reservation_obj.children),
                     parking_requested=True,
-                    rooms=[]  # Não precisa para validação de estacionamento
+                    rooms=current_rooms  # ✅ CORRIGIDO: Usar quartos reais da reserva
                 )
                 
                 parking_validation = self._validate_parking_request(
@@ -1739,7 +1749,8 @@ class ReservationService:
         parking_conflicts = []
         if reservation.parking_requested:
             try:
-                parking_availability = self.check_parking_availability(
+                # ✅ CORRIGIDO: Usar método correto
+                parking_availability = self.check_parking_availability_detailed(
                     reservation.property_id,
                     reservation.check_in_date,
                     reservation.check_out_date,
