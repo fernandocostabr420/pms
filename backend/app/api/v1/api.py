@@ -5,10 +5,108 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     auth, users, tenants, audit, properties, 
     room_types, rooms, guests, reservations,
-    room_availability, map, payments  # ✅ NOVO IMPORT
+    room_availability, map, payments,  # ✅ NOVO IMPORT
+    payment_methods, sales_channels
 )
 
 api_router = APIRouter()
+
+# Incluir rotas de autenticação
+api_router.include_router(
+    auth.router, 
+    prefix="/auth", 
+    tags=["Autenticação"]
+)
+
+# Incluir rotas de usuários
+api_router.include_router(
+    users.router,
+    prefix="/users", 
+    tags=["Usuários"]
+)
+
+# Incluir rotas de tenants
+api_router.include_router(
+    tenants.router,
+    prefix="/tenants", 
+    tags=["Tenants"]
+)
+
+# Incluir rotas de auditoria
+api_router.include_router(
+    audit.router,
+    prefix="/audit", 
+    tags=["Auditoria"]
+)
+
+# Incluir rotas de propriedades
+api_router.include_router(
+    properties.router, 
+    prefix="/properties", 
+    tags=["Propriedades"]
+)
+
+# Incluir rotas de tipos de quarto
+api_router.include_router(
+    room_types.router,
+    prefix="/room-types", 
+    tags=["Tipos de Quarto"]
+)
+
+# Incluir rotas de quartos
+api_router.include_router(
+    rooms.router,
+    prefix="/rooms", 
+    tags=["Quartos"]
+)
+
+# Incluir rotas de disponibilidade de quartos
+api_router.include_router(
+    room_availability.router,
+    prefix="/room-availability", 
+    tags=["Disponibilidade de Quartos"]
+)
+
+# Incluir rotas do mapa de quartos
+api_router.include_router(
+    map.router,
+    prefix="/map", 
+    tags=["Mapa de Quartos"]
+)
+
+# Incluir rotas de hóspedes
+api_router.include_router(
+    guests.router,
+    prefix="/guests", 
+    tags=["Hóspedes"]
+)
+
+# Incluir rotas de reservas
+api_router.include_router(
+    reservations.router,
+    prefix="/reservations", 
+    tags=["Reservas"]
+)
+
+# Incluir rotas de pagamentos
+api_router.include_router(
+    payments.router,
+    prefix="/payments", 
+    tags=["Pagamentos"]
+)
+
+# ✅ NOVOS ROUTERS - ADMINISTRAÇÃO
+api_router.include_router(
+    payment_methods.router,
+    prefix="/payment-methods", 
+    tags=["Métodos de Pagamento"]
+)
+
+api_router.include_router(
+    sales_channels.router,
+    prefix="/sales-channels", 
+    tags=["Canais de Venda"]
+)
 
 # Incluir rotas de autenticação
 api_router.include_router(
