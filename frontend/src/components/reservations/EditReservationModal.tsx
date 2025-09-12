@@ -1,4 +1,4 @@
-// frontend/src/components/reservations/EditReservationModal.tsx - VERSÃO COM INPUT MONETÁRIO AUTOMÁTICO
+// frontend/src/components/reservations/EditReservationModal.tsx - VERSÃO COM ESTACIONAMENTO E INPUT MONETÁRIO AUTOMÁTICO
 
 'use client';
 
@@ -13,53 +13,54 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 // Hook personalizado para propriedade única
 import { useProperty } from '@/hooks/useProperty';
 
-// Imports condicionais com fallbacks
-let Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter;
-let Badge, Card, CardContent, Alert, AlertDescription;
-
-try {
-  const dialogComponents = require('@/components/ui/dialog');
-  Dialog = dialogComponents.Dialog;
-  DialogContent = dialogComponents.DialogContent;
-  DialogHeader = dialogComponents.DialogHeader;
-  DialogTitle = dialogComponents.DialogTitle;
-  DialogFooter = dialogComponents.DialogFooter;
-} catch (e) {
-  Dialog = ({ open, onOpenChange, children }) => open ? <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => onOpenChange(false)}>{children}</div> : null;
-  DialogContent = ({ children, className }) => <div className={`bg-white rounded-lg p-6 max-w-4xl max-h-[90vh] overflow-y-auto ${className || ''}`} onClick={(e) => e.stopPropagation()}>{children}</div>;
-  DialogHeader = ({ children }) => <div className="mb-6">{children}</div>;
-  DialogTitle = ({ children, className }) => <h2 className={`text-xl font-bold ${className || ''}`}>{children}</h2>;
-  DialogFooter = ({ children, className }) => <div className={`flex justify-end gap-2 mt-6 ${className || ''}`}>{children}</div>;
+// ===== COMPONENTE CHECKBOX SIMPLES =====
+interface CheckboxProps {
+  checked?: boolean;
+  onCheckedChange?: (checked: boolean) => void;
+  disabled?: boolean;
+  id?: string;
+  className?: string;
 }
 
-try {
-  const otherComponents = require('@/components/ui/badge');
-  Badge = otherComponents.Badge;
-} catch (e) {
-  Badge = ({ children, className, variant }) => <span className={`px-2 py-1 text-xs rounded ${variant === 'outline' ? 'border' : 'bg-gray-200'} ${className || ''}`}>{children}</span>;
-}
-
-try {
-  const cardComponents = require('@/components/ui/card');
-  Card = cardComponents.Card;
-  CardContent = cardComponents.CardContent;
-} catch (e) {
-  Card = ({ children, className }) => <div className={`border rounded-lg ${className || ''}`}>{children}</div>;
-  CardContent = ({ children, className }) => <div className={`p-4 ${className || ''}`}>{children}</div>;
-}
-
-try {
-  const alertComponents = require('@/components/ui/alert');
-  Alert = alertComponents.Alert;
-  AlertDescription = alertComponents.AlertDescription;
-} catch (e) {
-  Alert = ({ children, variant }) => <div className={`p-4 rounded border ${variant === 'destructive' ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>{children}</div>;
-  AlertDescription = ({ children }) => <div>{children}</div>;
-}
+const Checkbox = ({ 
+  checked = false, 
+  onCheckedChange, 
+  disabled = false, 
+  id,
+  className = ''
+}: CheckboxProps) => {
+  return (
+    <input
+      type="checkbox"
+      id={id}
+      checked={checked}
+      onChange={(e) => onCheckedChange?.(e.target.checked)}
+      disabled={disabled}
+      className={`h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 focus:ring-2 ${className}`}
+    />
+  );
+};
 
 // Icons
 import { 
@@ -71,7 +72,10 @@ import {
   Phone,
   Mail,
   Loader2,
-  BedDouble
+  BedDouble,
+  Car,
+  Check,
+  X
 } from 'lucide-react';
 
 // Utils
@@ -340,7 +344,7 @@ const AutoCurrencyInput: React.FC<AutoCurrencyInputProps> = ({
   );
 };
 
-// ===== SCHEMA PARA EDIÇÃO =====
+// ===== SCHEMA PARA EDIÇÃO ATUALIZADO COM ESTACIONAMENTO =====
 const editReservationSchema = z.object({
   property_id: z.number().min(1, 'Propriedade é obrigatória'),
   check_in_date: z.string().min(1, 'Data de check-in é obrigatória'),
@@ -355,6 +359,8 @@ const editReservationSchema = z.object({
   source: z.string().optional(),
   requires_deposit: z.boolean().optional(),
   is_group_reservation: z.boolean().optional(),
+  // ESTACIONAMENTO
+  parking_requested: z.boolean().optional(),
 });
 
 type EditReservationFormData = z.infer<typeof editReservationSchema>;
@@ -385,9 +391,17 @@ export default function EditReservationModal({
   const [initialized, setInitialized] = useState(false);
   const [fullReservation, setFullReservation] = useState<any>(null);
 
-  // ✅ NOVO: Estados para canais de venda dinâmicos
+  // Estados para canais de venda dinâmicos
   const [salesChannels, setSalesChannels] = useState<any[]>([]);
   const [loadingChannels, setLoadingChannels] = useState(false);
+
+  // ESTADOS PARA ESTACIONAMENTO
+  const [parkingAvailability, setParkingAvailability] = useState<any>(null);
+  const [parkingStatus, setParkingStatus] = useState<{
+    type: 'success' | 'warning' | 'error' | null;
+    message: string;
+  }>({ type: null, message: '' });
+  const [checkingParking, setCheckingParking] = useState(false);
 
   // ===== FORM =====
   const {
@@ -407,6 +421,7 @@ export default function EditReservationModal({
       source: 'direct',
       requires_deposit: false,
       is_group_reservation: false,
+      parking_requested: false,
     },
   });
 
@@ -417,7 +432,7 @@ export default function EditReservationModal({
   // Carregar reserva completa ao abrir modal
   useEffect(() => {
     if (isOpen && reservation && !initialized) {
-      console.log('🔄 Iniciando carregamento da reserva completa...', reservation);
+      console.log('Iniciando carregamento da reserva completa...', reservation);
       Promise.all([
         loadSalesChannels(),
         loadFullReservation()
@@ -426,12 +441,15 @@ export default function EditReservationModal({
     
     // Reset quando modal fecha
     if (!isOpen) {
-      console.log('🔄 Resetando modal...');
+      console.log('Resetando modal...');
       reset();
       setAvailableRooms([]);
       setInitialized(false);
       setFullReservation(null);
-      setSalesChannels([]); // ✅ NOVO: Limpar canais
+      setSalesChannels([]);
+      // Limpar estados de estacionamento
+      setParkingAvailability(null);
+      setParkingStatus({ type: null, message: '' });
     }
   }, [isOpen, reservation]);
 
@@ -445,7 +463,7 @@ export default function EditReservationModal({
       watchedValues.check_out_date &&
       watchedValues.adults
     ) {
-      console.log('📅 Carregando quartos disponíveis...');
+      console.log('Carregando quartos disponíveis...');
       loadAvailableRooms();
     }
   }, [
@@ -458,9 +476,26 @@ export default function EditReservationModal({
     watchedValues.children
   ]);
 
+  // Verificar estacionamento quando datas mudarem
+  useEffect(() => {
+    if (
+      initialized &&
+      tenantProperty?.parking_enabled &&
+      watchedValues.check_in_date &&
+      watchedValues.check_out_date
+    ) {
+      checkParkingAvailability();
+    }
+  }, [
+    initialized,
+    tenantProperty,
+    watchedValues.check_in_date,
+    watchedValues.check_out_date
+  ]);
+
   // ===== FUNÇÕES =====
 
-  // ✅ NOVO: Carregar canais de venda
+  // Carregar canais de venda
   const loadSalesChannels = async () => {
     try {
       setLoadingChannels(true);
@@ -483,22 +518,105 @@ export default function EditReservationModal({
     }
   };
 
+  // FUNÇÃO PARA VERIFICAR DISPONIBILIDADE DE ESTACIONAMENTO
+  const checkParkingAvailability = async () => {
+    if (!tenantProperty?.parking_enabled || !watchedValues.check_in_date || !watchedValues.check_out_date) {
+      setParkingAvailability(null);
+      setParkingStatus({ type: null, message: '' });
+      return;
+    }
+
+    setCheckingParking(true);
+    try {
+      const response = await apiClient.post(`/properties/${tenantProperty.id}/parking/check-availability`, {
+        property_id: tenantProperty.id,
+        check_in_date: watchedValues.check_in_date,
+        check_out_date: watchedValues.check_out_date,
+        exclude_reservation_id: fullReservation?.id
+      });
+      
+      setParkingAvailability(response.data);
+      
+      // Determinar status baseado nos dados reais
+      const { 
+        spots_available_all_days, 
+        spots_available_partial, 
+        can_reserve_integral, 
+        can_reserve_flexible, 
+        parking_policy,
+        conflicts = []
+      } = response.data;
+      
+      console.log('Dados de estacionamento:', {
+        spots_available_all_days,
+        spots_available_partial,
+        can_reserve_integral,
+        can_reserve_flexible,
+        parking_policy,
+        conflicts
+      });
+      
+      // Determinar status e mensagem
+      if (!can_reserve_flexible) {
+        // Não há vagas em nenhum dia
+        setParkingStatus({
+          type: 'error',
+          message: 'Sem vagas disponíveis para o período selecionado'
+        });
+      } else if (!can_reserve_integral && parking_policy === 'integral') {
+        // Política integral mas não há vagas todos os dias
+        setParkingStatus({
+          type: 'error',
+          message: 'Política Integral: vagas devem estar disponíveis para toda a estadia'
+        });
+      } else if (!can_reserve_integral && parking_policy === 'flexible') {
+        // Política flexível com vagas limitadas
+        setParkingStatus({
+          type: 'warning',
+          message: 'Vagas limitadas: não há disponibilidade para todos os dias da estadia'
+        });
+      } else if (can_reserve_integral) {
+        // Tudo OK
+        setParkingStatus({
+          type: 'success',
+          message: 'Vaga disponível para toda a estadia'
+        });
+      } else {
+        // Caso edge
+        setParkingStatus({
+          type: 'warning',
+          message: 'Disponibilidade limitada de estacionamento'
+        });
+      }
+      
+    } catch (error: any) {
+      console.error('Erro ao verificar estacionamento:', error);
+      setParkingAvailability(null);
+      setParkingStatus({
+        type: 'error',
+        message: 'Erro ao verificar disponibilidade de estacionamento'
+      });
+    } finally {
+      setCheckingParking(false);
+    }
+  };
+
   // Carregar reserva completa
   const loadFullReservation = async () => {
     try {
       setLoading(true);
-      console.log('📋 Carregando reserva completa para ID:', reservation.id);
+      console.log('Carregando reserva completa para ID:', reservation.id);
       
       // Carregar reserva completa com todos os detalhes
       const response = await apiClient.getReservation(reservation.id);
-      console.log('📊 Reserva completa carregada:', response);
+      console.log('Reserva completa carregada:', response);
       
       setFullReservation(response);
       initializeForm(response);
       setInitialized(true);
       
     } catch (error: any) {
-      console.error('❌ Erro ao carregar reserva completa:', error);
+      console.error('Erro ao carregar reserva completa:', error);
       toast({
         title: "Erro",
         description: "Erro ao carregar dados da reserva",
@@ -517,7 +635,7 @@ export default function EditReservationModal({
   const initializeForm = (reservationData: any) => {
     if (!reservationData) return;
     
-    console.log('📝 Inicializando formulário com dados da reserva:', reservationData);
+    console.log('Inicializando formulário com dados da reserva:', reservationData);
     
     // Múltiplas estratégias para obter room_id
     let roomIds: number[] = [];
@@ -531,7 +649,7 @@ export default function EditReservationModal({
         })
         .filter((id: any) => id !== null && id !== undefined);
       
-      console.log('🔍 Room IDs encontrados (estratégia 1 - rooms):', roomIds);
+      console.log('Room IDs encontrados (estratégia 1 - rooms):', roomIds);
     }
     
     // Estratégia 2: Campo reservation_rooms (backend pode usar esse nome)
@@ -540,21 +658,21 @@ export default function EditReservationModal({
         .map((room: any) => room.room_id || room.id || null)
         .filter((id: any) => id !== null && id !== undefined);
       
-      console.log('🔍 Room IDs encontrados (estratégia 2 - reservation_rooms):', roomIds);
+      console.log('Room IDs encontrados (estratégia 2 - reservation_rooms):', roomIds);
     }
     
     // Estratégia 3: Fallback - tentar propriedades alternativas
     if (roomIds.length === 0) {
-      console.log('⚠️ Nenhum room_id encontrado nas estratégias anteriores');
-      console.log('📋 Estrutura completa da reserva:', JSON.stringify(reservationData, null, 2));
+      console.log('Nenhum room_id encontrado nas estratégias anteriores');
+      console.log('Estrutura completa da reserva:', JSON.stringify(reservationData, null, 2));
     }
     
     // Obter taxa atual
     const currentRatePerNight = parseFloat(
-  reservationData.rooms?.[0]?.rate_per_night || 
-  reservationData.reservation_rooms?.[0]?.rate_per_night || 
-  0
-) || 0;
+      reservationData.rooms?.[0]?.rate_per_night || 
+      reservationData.reservation_rooms?.[0]?.rate_per_night || 
+      0
+    ) || 0;
     
     // Preencher formulário
     const formData: EditReservationFormData = {
@@ -571,9 +689,10 @@ export default function EditReservationModal({
       internal_notes: reservationData.internal_notes || '',
       requires_deposit: reservationData.requires_deposit || false,
       is_group_reservation: reservationData.is_group_reservation || false,
+      parking_requested: reservationData.parking_requested || false, // ESTACIONAMENTO
     };
     
-    console.log('📋 Dados do formulário inicializado:', formData);
+    console.log('Dados do formulário inicializado:', formData);
     reset(formData);
   };
 
@@ -583,8 +702,8 @@ export default function EditReservationModal({
     setCheckingAvailability(true);
     
     try {
-      console.log('🔍 Buscando quartos disponíveis...');
-      console.log('📊 Parâmetros de busca:', {
+      console.log('Buscando quartos disponíveis...');
+      console.log('Parâmetros de busca:', {
         property_id: tenantProperty.id,
         check_in_date: watchedValues.check_in_date,
         check_out_date: watchedValues.check_out_date,
@@ -603,13 +722,13 @@ export default function EditReservationModal({
         exclude_reservation_id: fullReservation?.id
       });
       
-      console.log('📊 Resposta da API:', response);
+      console.log('Resposta da API:', response);
       
       const roomsAvailable = response.available_rooms || [];
       
       // Obter quartos atuais da reserva
       const currentRoomIds = getValues('selected_rooms') || [];
-      console.log('🔍 Quartos selecionados no formulário:', currentRoomIds);
+      console.log('Quartos selecionados no formulário:', currentRoomIds);
       
       // Marcar quartos atuais como disponíveis (forçar inclusão)
       const enhancedRooms = [...roomsAvailable];
@@ -619,7 +738,7 @@ export default function EditReservationModal({
         const roomExists = enhancedRooms.find(room => room.id === roomId);
         
         if (!roomExists) {
-          console.log(`🔧 Adicionando quarto atual ${roomId} na lista (não estava disponível)`);
+          console.log(`Adicionando quarto atual ${roomId} na lista (não estava disponível)`);
           
           // Buscar dados do quarto atual
           try {
@@ -635,7 +754,7 @@ export default function EditReservationModal({
               isCurrentReservation: true
             });
           } catch (error) {
-            console.warn(`⚠️ Erro ao buscar dados do quarto ${roomId}:`, error);
+            console.warn(`Erro ao buscar dados do quarto ${roomId}:`, error);
             
             // Fallback - adicionar com dados básicos
             enhancedRooms.push({
@@ -655,27 +774,27 @@ export default function EditReservationModal({
         }
       }
       
-      console.log('🏠 Quartos disponíveis (incluindo atuais):', enhancedRooms);
+      console.log('Quartos disponíveis (incluindo atuais):', enhancedRooms);
       setAvailableRooms(enhancedRooms);
       
       // Garantir seleção dos quartos atuais
       if (currentRoomIds.length > 0) {
-        console.log('🎯 Garantindo seleção dos quartos atuais:', currentRoomIds);
+        console.log('Garantindo seleção dos quartos atuais:', currentRoomIds);
         setValue('selected_rooms', currentRoomIds);
         
         // Verificar se funcionou
         setTimeout(() => {
           const finalSelection = getValues('selected_rooms');
-          console.log('✅ Seleção final confirmada:', finalSelection);
+          console.log('Seleção final confirmada:', finalSelection);
         }, 100);
       }
       
     } catch (error: any) {
-      console.error('❌ Erro ao verificar disponibilidade:', error);
+      console.error('Erro ao verificar disponibilidade:', error);
       
       // Fallback: Carregar quartos da propriedade sem verificação de disponibilidade
       try {
-        console.log('🔄 Tentando fallback - carregando todos os quartos da propriedade...');
+        console.log('Tentando fallback - carregando todos os quartos da propriedade...');
         const roomsResponse = await apiClient.getRooms({ 
           property_id: tenantProperty.id,
           per_page: 100 
@@ -694,10 +813,10 @@ export default function EditReservationModal({
         }));
         
         setAvailableRooms(allRooms);
-        console.log('🏠 Fallback: Carregados todos os quartos da propriedade:', allRooms);
+        console.log('Fallback: Carregados todos os quartos da propriedade:', allRooms);
         
       } catch (fallbackError) {
-        console.error('❌ Erro no fallback:', fallbackError);
+        console.error('Erro no fallback:', fallbackError);
         toast({
           title: "Erro",
           description: "Erro ao carregar quartos. Tente novamente.",
@@ -770,7 +889,7 @@ export default function EditReservationModal({
   const handleDateChange = (type: 'checkin' | 'checkout', dateString: string) => {
     if (!dateString) return;
     
-    console.log(`📅 Alterando ${type}:`, dateString);
+    console.log(`Alterando ${type}:`, dateString);
     
     if (type === 'checkin') {
       setValue('check_in_date', dateString);
@@ -792,7 +911,30 @@ export default function EditReservationModal({
   const onSubmit = async (data: EditReservationFormData) => {
     try {
       setLoading(true);
-      console.log('💾 Salvando reserva com dados:', data);
+      console.log('Salvando reserva com dados:', data);
+
+      // VALIDAÇÃO DE ESTACIONAMENTO (mesma lógica do modal de criação)
+      if (data.parking_requested && parkingAvailability) {
+        const { can_reserve_flexible, can_reserve_integral, parking_policy } = parkingAvailability;
+        
+        if (!can_reserve_flexible) {
+          toast({
+            title: "Estacionamento Indisponível",
+            description: "Não há vagas de estacionamento disponíveis para o período selecionado. Desmarque a opção de estacionamento ou escolha outras datas.",
+            variant: "destructive",
+          });
+          return;
+        }
+        
+        if (!can_reserve_integral && parking_policy === 'integral') {
+          toast({
+            title: "Política de Estacionamento",
+            description: "A propriedade exige vagas disponíveis para toda a estadia (Política Integral), mas não há disponibilidade completa. Desmarque estacionamento ou escolha outras datas.",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
 
       // Validação financeira adicional
       if (data.total_amount && !AutoCurrencyUtils.validate(data.total_amount, 0, 999999.99)) {
@@ -825,6 +967,7 @@ export default function EditReservationModal({
         internal_notes: data.internal_notes,
         requires_deposit: data.requires_deposit || false,
         is_group_reservation: data.is_group_reservation || false,
+        parking_requested: data.parking_requested || false, // ESTACIONAMENTO
         
         rooms: data.selected_rooms.map(roomId => ({
           room_id: roomId,
@@ -834,7 +977,7 @@ export default function EditReservationModal({
         })),
       };
 
-      console.log('📤 Enviando para API:', reservationData);
+      console.log('Enviando para API:', reservationData);
       await apiClient.updateReservation(fullReservation.id, reservationData);
       
       toast({
@@ -846,7 +989,7 @@ export default function EditReservationModal({
       onClose();
 
     } catch (error: any) {
-      console.error('❌ Erro ao salvar reserva:', error);
+      console.error('Erro ao salvar reserva:', error);
       toast({
         title: "Erro",
         description: error.response?.data?.detail || 'Erro ao salvar reserva',
@@ -887,7 +1030,7 @@ export default function EditReservationModal({
 
   // ===== RENDER PRINCIPAL =====
 
-  // ✅ NOVO: Gerar opções de origem dinamicamente
+  // Gerar opções de origem dinamicamente
   const sourceOptions = salesChannels.map(channel => ({
     value: channel.code,
     label: channel.name
@@ -963,24 +1106,27 @@ export default function EditReservationModal({
                 Informações da Reserva
               </h3>
 
-              {/* Canal de Origem - ✅ ATUALIZADO para usar dados dinâmicos */}
+              {/* Canal de Origem - usando dados dinâmicos */}
               <div className="grid grid-cols-1 gap-4 px-2">
                 <div>
                   <Label htmlFor="source" className="text-sm font-medium">Canal</Label>
                   <div className="mt-1 p-1">
-                    <select
+                    <Select
                       value={watchedValues.source || ''}
-                      onChange={(e) => setValue('source', e.target.value)}
+                      onValueChange={(value) => setValue('source', value)}
                       disabled={loading || loadingChannels}
-                      className="w-full p-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      <option value="">{loadingChannels ? 'Carregando canais...' : 'Selecione o canal'}</option>
-                      {sourceOptions.map((source) => (
-                        <option key={source.value} value={source.value}>
-                          {source.label}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="text-sm h-9">
+                        <SelectValue placeholder={loadingChannels ? 'Carregando canais...' : 'Selecione o canal'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sourceOptions.map((source) => (
+                          <SelectItem key={source.value} value={source.value}>
+                            {source.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               </div>
@@ -1069,24 +1215,27 @@ export default function EditReservationModal({
                 <div className="px-2">
                   <Label className="text-sm font-medium">Selecione o quarto *</Label>
                   <div className="mt-1 p-1">
-                    <select
-                      value={watchedValues.selected_rooms[0] || ''}
-                      onChange={(e) => {
-                        const roomId = parseInt(e.target.value);
+                    <Select
+                      value={watchedValues.selected_rooms[0]?.toString() || ''}
+                      onValueChange={(value) => {
+                        const roomId = parseInt(value);
                         setValue('selected_rooms', roomId ? [roomId] : []);
                       }}
                       disabled={loading}
-                      className="w-full p-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      <option value="">Selecione um quarto</option>
-                      {availableRooms.map((room: any) => (
-                        <option key={`room-${room.id}`} value={room.id}>
-                          Quarto {room.room_number} - {room.room_type_name || 'Quarto'} (até {room.max_occupancy} pessoas)
-                          {room.rate_per_night ? ` - ${AutoCurrencyUtils.formatWithSymbol(room.rate_per_night)}/noite` : ''}
-                          {room.isCurrentReservation ? ' [ATUAL]' : ''}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="text-sm h-9">
+                        <SelectValue placeholder="Selecione um quarto" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableRooms.map((room: any) => (
+                          <SelectItem key={`room-${room.id}`} value={room.id.toString()}>
+                            Quarto {room.room_number} - {room.room_type_name || 'Quarto'} (até {room.max_occupancy} pessoas)
+                            {room.rate_per_night ? ` - ${AutoCurrencyUtils.formatWithSymbol(room.rate_per_night)}/noite` : ''}
+                            {room.isCurrentReservation ? ' [ATUAL]' : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   {errors.selected_rooms && (
                     <p className="text-xs text-red-600 mt-1 px-1">{errors.selected_rooms.message}</p>
@@ -1106,6 +1255,88 @@ export default function EditReservationModal({
                 </div>
               )}
             </div>
+
+            {/* SEÇÃO DE ESTACIONAMENTO */}
+            {tenantProperty?.parking_enabled && (
+              <div className="space-y-3">
+                <h3 className="text-sm font-medium flex items-center gap-2">
+                  <Car className="h-4 w-4" />
+                  Estacionamento
+                </h3>
+
+                <div className="px-2">
+                  {/* Informações da propriedade */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Car className="h-4 w-4 text-blue-600" />
+                        <span className="text-sm text-blue-800 font-medium">
+                          {tenantProperty.parking_spots_total} vagas disponíveis
+                        </span>
+                      </div>
+                      <Badge variant="outline" className="text-xs">
+                        {tenantProperty.parking_policy === 'integral' ? 'Política Integral' : 'Política Flexível'}
+                      </Badge>
+                    </div>
+                    
+                    <p className="text-xs text-blue-700 mt-1">
+                      {tenantProperty.parking_policy === 'integral' 
+                        ? 'Vagas devem estar disponíveis para toda a estadia'
+                        : 'Permite reservar mesmo com vagas limitadas'
+                      }
+                    </p>
+                  </div>
+
+                  {/* Checkbox para solicitar estacionamento */}
+                  <div className="flex items-center space-x-3 p-2 border rounded-md">
+                    <Checkbox
+                      id="parking_requested"
+                      checked={watchedValues.parking_requested || false}
+                      onCheckedChange={(checked) => setValue('parking_requested', checked)}
+                      disabled={loading || checkingParking}
+                    />
+                    <div className="flex-1">
+                      <Label htmlFor="parking_requested" className="text-sm font-medium cursor-pointer">
+                        Solicitar vaga de estacionamento
+                      </Label>
+                      {checkingParking && (
+                        <div className="flex items-center gap-1 mt-1">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          <span className="text-xs text-gray-500">Verificando disponibilidade...</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Alertas de disponibilidade */}
+                  {watchedValues.parking_requested && parkingStatus.type && (
+                    <div className="mt-3">
+                      <Alert variant={parkingStatus.type === 'error' ? 'destructive' : 'default'}>
+                        {parkingStatus.type === 'success' && <Check className="h-4 w-4" />}
+                        {parkingStatus.type === 'warning' && <AlertCircle className="h-4 w-4" />}
+                        {parkingStatus.type === 'error' && <X className="h-4 w-4" />}
+                        <AlertDescription className={`text-sm ${parkingStatus.type === 'success' ? 'text-green-700' : ''}`}>
+                          {parkingStatus.type === 'success' && '✅ '}
+                          {parkingStatus.type === 'warning' && '⚠️ '}
+                          {parkingStatus.type === 'error' && '❌ '}
+                          {parkingStatus.message}
+                        </AlertDescription>
+                      </Alert>
+                      
+                      {/* Detalhes da disponibilidade */}
+                      {parkingAvailability && (
+                        <div className="mt-2 text-xs text-gray-600 bg-gray-50 p-2 rounded">
+                          <div className="grid grid-cols-2 gap-2">
+                            <span>Vagas livres (todos os dias): <strong>{parkingAvailability.spots_available_all_days || 0}</strong></span>
+                            <span>Vagas livres (alguns dias): <strong>{parkingAvailability.spots_available_partial || 0}</strong></span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Valores e Observações */}
             <div className="space-y-4">
@@ -1127,6 +1358,13 @@ export default function EditReservationModal({
                         <span>Hóspedes:</span>
                         <span className="font-medium">{(watchedValues.adults || 0) + (watchedValues.children || 0)}</span>
                       </div>
+                      {/* Mostrar estacionamento no resumo */}
+                      {watchedValues.parking_requested && (
+                        <div className="flex justify-between">
+                          <span>Estacionamento:</span>
+                          <span className="font-medium text-blue-600">Sim</span>
+                        </div>
+                      )}
                       <div className="flex justify-between font-medium text-sm border-t pt-2 mt-2">
                         <span>Total Estimado:</span>
                         <span className="text-green-600">{AutoCurrencyUtils.formatWithSymbol(estimatedTotal)}</span>
