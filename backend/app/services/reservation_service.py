@@ -1,4 +1,4 @@
-# backend/app/services/reservation_service.py - COMPLETO COM MULTI-SELECT PARA STATUS E CANAL
+# backend/app/services/reservation_service.py - COMPLETO COM MULTI-SELECT PARA STATUS E CANAL + ESTACIONAMENTO
 
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -19,7 +19,8 @@ from app.models.audit_log import AuditLog
 from app.schemas.reservation import (
     ReservationCreate, ReservationUpdate, ReservationFilters,
     CheckInRequest, CheckOutRequest, CancelReservationRequest,
-    AvailabilityRequest, AvailabilityResponse
+    AvailabilityRequest, AvailabilityResponse,
+    ParkingAvailabilityRequest, ParkingAvailabilityResponse  # ✅ NOVO
 )
 from app.services.guest_service import GuestService
 from app.schemas.guest import GuestCheckInData, GuestUpdate
@@ -39,7 +40,7 @@ from app.services.audit_formatting_service import AuditFormattingService
 
 
 class ReservationService:
-    """Serviço para operações com reservas - COM AUDITORIA COMPLETA E MULTI-SELECT PARA FILTROS"""
+    """Serviço para operações com reservas - COM AUDITORIA COMPLETA, MULTI-SELECT PARA FILTROS E SISTEMA DE ESTACIONAMENTO"""
     
     def __init__(self, db: Session):
         self.db = db
@@ -123,6 +124,32 @@ class ReservationService:
             availability[room_id] = room_id not in conflicting_room_ids
         
         return availability
+
+    # ✅ NOVO: Método para verificar disponibilidade de estacionamento
+    def check_parking_availability(
+        self,
+        property_id: int,
+        check_in_date: date,
+        check_out_date: date,
+        tenant_id: int,
+        exclude_reservation_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Verifica disponibilidade de estacionamento para um período.
+        Retorna informações detalhadas sobre disponibilidade.
+        """
+        from app.services.parking_service import ParkingService
+        
+        parking_service = ParkingService(self.db)
+        
+        request = ParkingAvailabilityRequest(
+            property_id=property_id,
+            check_in_date=check_in_date,
+            check_out_date=check_out_date,
+            exclude_reservation_id=exclude_reservation_id
+        )
+        
+        return parking_service.check_parking_availability(request, tenant_id)
 
     def get_available_rooms(
         self, 
@@ -209,7 +236,7 @@ class ReservationService:
             conflicting_reservations=conflicting_reservations if conflicting_reservations else None
         )
 
-    # ===== MÉTODO PRINCIPAL: GET_RESERVATIONS COM MULTI-SELECT =====
+    # ===== MÉTODO PRINCIPAL: GET_RESERVATIONS COM MULTI-SELECT E FILTRO DE ESTACIONAMENTO =====
     def get_reservations(
         self, 
         tenant_id: int, 
@@ -217,7 +244,7 @@ class ReservationService:
         skip: int = 0, 
         limit: int = 100
     ) -> List[Reservation]:
-        """Lista reservas com filtros opcionais - AGORA COM SUPORTE A MULTI-SELECT"""
+        """Lista reservas com filtros opcionais - AGORA COM SUPORTE A MULTI-SELECT E FILTRO DE ESTACIONAMENTO"""
         query = self.db.query(Reservation).options(
             joinedload(Reservation.guest),
             joinedload(Reservation.property_obj),
@@ -287,6 +314,11 @@ class ReservationService:
                 
                 query = query.filter(Reservation.source.in_(source_variations))
                 source_applied = True
+            
+            # ===== NOVO: FILTRO DE ESTACIONAMENTO =====
+            if filters.parking_requested is not None:
+                print(f"🅿️ Aplicando filtro de estacionamento: {filters.parking_requested}")
+                query = query.filter(Reservation.parking_requested == filters.parking_requested)
             
             # ===== DEMAIS FILTROS (INALTERADOS) =====
             if filters.property_id:
@@ -362,9 +394,9 @@ class ReservationService:
         
         return query.order_by(Reservation.created_at.desc()).offset(skip).limit(limit).all()
 
-    # ===== MÉTODO AUXILIAR: COUNT_RESERVATIONS COM MULTI-SELECT =====
+    # ===== MÉTODO AUXILIAR: COUNT_RESERVATIONS COM MULTI-SELECT E ESTACIONAMENTO =====
     def count_reservations(self, tenant_id: int, filters: Optional[ReservationFilters] = None) -> int:
-        """Conta total de reservas (para paginação) - AGORA COM SUPORTE A MULTI-SELECT"""
+        """Conta total de reservas (para paginação) - AGORA COM SUPORTE A MULTI-SELECT E ESTACIONAMENTO"""
         query = self.db.query(func.count(Reservation.id)).filter(
             Reservation.tenant_id == tenant_id,
             Reservation.is_active == True
@@ -405,6 +437,10 @@ class ReservationService:
                 normalized_source = self._normalize_source_for_search(filters.source)
                 source_variations = self._get_source_variations(normalized_source)
                 query = query.filter(Reservation.source.in_(source_variations))
+            
+            # ===== NOVO: FILTRO DE ESTACIONAMENTO NO COUNT =====
+            if filters.parking_requested is not None:
+                query = query.filter(Reservation.parking_requested == filters.parking_requested)
             
             # ===== DEMAIS FILTROS (IGUAL AO GET_RESERVATIONS) =====
             if filters.property_id:
@@ -574,7 +610,54 @@ class ReservationService:
         
         return query.order_by(Reservation.check_in_date).all()
 
-    # MÉTODO CREATE_RESERVATION COM AUDITORIA AUTOMÁTICA
+    # ===== VALIDAÇÃO DE ESTACIONAMENTO =====
+    def _validate_parking_request(
+        self,
+        reservation_data: ReservationCreate,
+        property_obj: Property,
+        tenant_id: int,
+        exclude_reservation_id: Optional[int] = None
+    ) -> Optional[str]:
+        """
+        Valida solicitação de estacionamento.
+        Retorna None se OK, ou string com aviso/erro.
+        """
+        if not reservation_data.parking_requested:
+            return None  # Sem estacionamento solicitado
+        
+        if not property_obj.parking_enabled:
+            return "Esta propriedade não oferece estacionamento"
+        
+        if not property_obj.parking_spots_total or property_obj.parking_spots_total <= 0:
+            return "Propriedade não possui vagas de estacionamento configuradas"
+        
+        # Verificar disponibilidade usando ParkingService
+        parking_availability = self.check_parking_availability(
+            property_obj.id,
+            reservation_data.check_in_date,
+            reservation_data.check_out_date,
+            tenant_id,
+            exclude_reservation_id
+        )
+        
+        if property_obj.parking_policy == "integral":
+            # Política integral: deve ter vaga disponível em todos os dias
+            if not parking_availability['can_reserve_integral']:
+                conflicts = ', '.join(parking_availability.get('conflicts', []))
+                return f"Não há vagas disponíveis para toda a estadia. Conflitos: {conflicts}"
+        
+        elif property_obj.parking_policy == "flexible":
+            # Política flexível: pode reservar mesmo se não tiver vaga em todos os dias
+            if not parking_availability['can_reserve_flexible']:
+                return "Não há vagas disponíveis em nenhum dia da estadia"
+            
+            # Se há conflitos parciais, retornar aviso (não erro)
+            if parking_availability.get('spots_available_all_days', 0) == 0:
+                return "AVISO: Não há vagas disponíveis para todos os dias da estadia"
+        
+        return None  # Tudo OK
+
+    # MÉTODO CREATE_RESERVATION COM AUDITORIA AUTOMÁTICA E VALIDAÇÃO DE ESTACIONAMENTO
     @audit_operation("reservations", "CREATE", "Nova reserva criada")
     def create_reservation(
         self, 
@@ -584,7 +667,7 @@ class ReservationService:
         request: Optional[Request] = None
     ) -> Reservation:
         """
-        Cria nova reserva com auditoria automática.
+        Cria nova reserva com auditoria automática e validação de estacionamento.
         O decorador @audit_operation captura automaticamente todos os dados da reserva criada.
         """
         
@@ -630,6 +713,23 @@ class ReservationService:
                 detail=f"Quartos não disponíveis no período: {unavailable_rooms}"
             )
 
+        # ✅ NOVO: Validar estacionamento
+        parking_validation = self._validate_parking_request(
+            reservation_data, property_obj, tenant_id
+        )
+        
+        if parking_validation:
+            if parking_validation.startswith("AVISO:"):
+                # É apenas um aviso, continuar mas logar
+                print(f"⚠️ Aviso de estacionamento: {parking_validation}")
+                # Poderia adicionar ao internal_notes da reserva
+            else:
+                # É um erro, abortar
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Problema com estacionamento: {parking_validation}"
+                )
+
         # Gerar número da reserva
         reservation_number = self.generate_reservation_number(tenant_id)
         
@@ -657,6 +757,7 @@ class ReservationService:
             taxes=reservation_data.taxes,
             source=normalized_source,  # ✅ NORMALIZADO
             source_reference=reservation_data.source_reference,
+            parking_requested=reservation_data.parking_requested,  # ✅ NOVO
             guest_requests=reservation_data.guest_requests,
             internal_notes=reservation_data.internal_notes,
             preferences=reservation_data.preferences,
@@ -701,7 +802,7 @@ class ReservationService:
                 detail="Erro ao criar reserva - dados duplicados ou conflito"
             )
 
-    # MÉTODO UPDATE_RESERVATION COM AUDITORIA AUTOMÁTICA - SOLUÇÃO DEFINITIVA
+    # MÉTODO UPDATE_RESERVATION COM AUDITORIA AUTOMÁTICA E VALIDAÇÃO DE ESTACIONAMENTO
     @auto_audit_update("reservations", "Reserva atualizada")
     def update_reservation(
         self, 
@@ -712,7 +813,7 @@ class ReservationService:
         request: Optional[Request] = None
     ) -> Optional[Reservation]:
         """
-        Atualiza reserva com auditoria automática.
+        Atualiza reserva com auditoria automática e validação de estacionamento.
         O decorador @auto_audit_update captura valores antes/depois automaticamente.
         """
         
@@ -750,6 +851,36 @@ class ReservationService:
         # ✅ NORMALIZAR ORIGEM SE FORNECIDA
         if 'source' in update_data and update_data['source']:
             update_data['source'] = self._normalize_source_for_search(update_data['source'])
+
+        # ✅ NOVO: Validar estacionamento se alterado
+        if 'parking_requested' in update_data:
+            property_obj = self.db.query(Property).filter(
+                Property.id == reservation_obj.property_id,
+                Property.tenant_id == tenant_id
+            ).first()
+            
+            if update_data['parking_requested'] and property_obj:
+                # Criar objeto temporário para validação
+                temp_reservation_data = ReservationCreate(
+                    guest_id=reservation_obj.guest_id,
+                    property_id=reservation_obj.property_id,
+                    check_in_date=update_data.get('check_in_date', reservation_obj.check_in_date),
+                    check_out_date=update_data.get('check_out_date', reservation_obj.check_out_date),
+                    adults=update_data.get('adults', reservation_obj.adults),
+                    children=update_data.get('children', reservation_obj.children),
+                    parking_requested=True,
+                    rooms=[]  # Não precisa para validação de estacionamento
+                )
+                
+                parking_validation = self._validate_parking_request(
+                    temp_reservation_data, property_obj, tenant_id, reservation_id
+                )
+                
+                if parking_validation and not parking_validation.startswith("AVISO:"):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Problema com estacionamento: {parking_validation}"
+                    )
 
         # Se as datas mudaram, verificar disponibilidade
         dates_changed = 'check_in_date' in update_data or 'check_out_date' in update_data
@@ -1013,6 +1144,10 @@ class ReservationService:
         if guest_updated:
             check_in_notes.append("Check-in: Dados do hóspede atualizados")
         
+        # ✅ NOVO: Adicionar nota sobre estacionamento se solicitado
+        if reservation_obj.parking_requested:
+            check_in_notes.append("Check-in: Vaga de estacionamento solicitada")
+        
         if check_in_notes:
             current_notes = reservation_obj.internal_notes or ""
             new_notes = "\n".join(check_in_notes)
@@ -1199,9 +1334,18 @@ class ReservationService:
             current_total = reservation_obj.total_amount or Decimal('0')
             reservation_obj.total_amount = current_total + check_out_request.final_charges
         
+        # ✅ NOVO: Adicionar nota sobre estacionamento liberado
+        checkout_notes = []
         if check_out_request.notes:
+            checkout_notes.append(f"Check-out: {check_out_request.notes}")
+        
+        if reservation_obj.parking_requested:
+            checkout_notes.append("Check-out: Vaga de estacionamento liberada")
+        
+        if checkout_notes:
             current_notes = reservation_obj.internal_notes or ""
-            reservation_obj.internal_notes = f"{current_notes}\nCheck-out: {check_out_request.notes}".strip()
+            new_notes = "\n".join(checkout_notes)
+            reservation_obj.internal_notes = f"{current_notes}\n{new_notes}".strip()
         
         # Atualizar status dos quartos
         for reservation_room in reservation_obj.reservation_rooms:
@@ -1262,9 +1406,18 @@ class ReservationService:
                 reservation_obj.paid_amount - cancel_request.refund_amount
             )
         
+        # ✅ NOVO: Adicionar nota sobre liberação de estacionamento
+        cancel_notes = []
         if cancel_request.notes:
+            cancel_notes.append(f"Cancelamento: {cancel_request.notes}")
+        
+        if reservation_obj.parking_requested:
+            cancel_notes.append("Cancelamento: Vaga de estacionamento liberada")
+        
+        if cancel_notes:
             current_notes = reservation_obj.internal_notes or ""
-            reservation_obj.internal_notes = f"{current_notes}\nCancelamento: {cancel_request.notes}".strip()
+            new_notes = "\n".join(cancel_notes)
+            reservation_obj.internal_notes = f"{current_notes}\n{new_notes}".strip()
         
         # Atualizar status dos quartos
         for reservation_room in reservation_obj.reservation_rooms:
@@ -1285,9 +1438,9 @@ class ReservationService:
                 detail="Erro ao cancelar reserva"
             )
 
-    # ===== MÉTODO GET_RESERVATION_STATS COM DISPLAY NAMES =====
+    # ===== MÉTODO GET_RESERVATION_STATS COM DISPLAY NAMES E ESTACIONAMENTO =====
     def get_reservation_stats(self, tenant_id: int, property_id: Optional[int] = None) -> Dict[str, Any]:
-        """Obtém estatísticas das reservas - USANDO DISPLAY NAMES"""
+        """Obtém estatísticas das reservas - USANDO DISPLAY NAMES E INCLUINDO ESTACIONAMENTO"""
         query = self.db.query(Reservation).filter(
             Reservation.tenant_id == tenant_id,
             Reservation.is_active == True
@@ -1314,6 +1467,13 @@ class ReservationService:
         departures_today = query.filter(Reservation.check_out_date == today).count()
         current_guests = query.filter(Reservation.status == 'checked_in').count()
         
+        # ✅ NOVO: Estatísticas de estacionamento
+        parking_requests = query.filter(Reservation.parking_requested == True).count()
+        parking_requests_today = query.filter(
+            Reservation.check_in_date == today,
+            Reservation.parking_requested == True
+        ).count()
+        
         # Receita
         revenue_query = query.filter(Reservation.status.in_(['checked_out', 'checked_in']))
         total_revenue = revenue_query.with_entities(
@@ -1333,14 +1493,17 @@ class ReservationService:
             'departures_today': departures_today,
             'current_guests': current_guests,
             'total_revenue': float(total_revenue or 0),
-            'pending_revenue': float(pending_revenue or 0)
+            'pending_revenue': float(pending_revenue or 0),
+            # ✅ NOVO: Estatísticas de estacionamento
+            'parking_requests': parking_requests,
+            'parking_requests_today': parking_requests_today
         }
 
-    # ===== GET_RESERVATION_DETAILED USANDO AUDITORIA FORMATADA =====
+    # ===== GET_RESERVATION_DETAILED USANDO AUDITORIA FORMATADA E ESTACIONAMENTO =====
     def get_reservation_detailed(self, reservation_id: int, tenant_id: int) -> Optional[Dict[str, Any]]:
         """
         Busca reserva com todos os detalhes para página individual
-        Inclui dados expandidos do hóspede, propriedade, quartos, pagamentos e auditoria FORMATADA
+        Inclui dados expandidos do hóspede, propriedade, quartos, pagamentos, estacionamento e auditoria FORMATADA
         """
         # Buscar reserva com relacionamentos
         reservation = self.db.query(Reservation).options(
@@ -1382,6 +1545,18 @@ class ReservationService:
             Reservation.status == 'cancelled',
             Reservation.is_active == True
         ).scalar() or 0
+        
+        # ✅ NOVO: Estatísticas de estacionamento do hóspede
+        parking_requests_count = self.db.query(func.count(Reservation.id)).filter(
+            Reservation.guest_id == reservation.guest_id,
+            Reservation.tenant_id == tenant_id,
+            Reservation.parking_requested == True,
+            Reservation.is_active == True
+        ).scalar() or 0
+        
+        parking_usage_rate = 0.0
+        if guest_stats.total_reservations and guest_stats.total_reservations > 0:
+            parking_usage_rate = (parking_requests_count / guest_stats.total_reservations) * 100
         
         # Calcular total de noites manualmente
         guest_reservations = self.db.query(Reservation.check_in_date, Reservation.check_out_date).filter(
@@ -1432,12 +1607,15 @@ class ReservationService:
             'total_nights': total_nights,
             'last_stay_date': guest_stats.last_stay_date,
             'total_spent': guest_stats.total_spent or Decimal('0.00'),
+            # ✅ NOVO: Estatísticas de estacionamento do hóspede
+            'parking_requests_count': parking_requests_count,
+            'parking_usage_rate': parking_usage_rate,
             'created_at': reservation.guest.created_at,
             'updated_at': reservation.guest.updated_at,
             'is_active': reservation.guest.is_active,
         }
         
-        # === 2. DADOS DA PROPRIEDADE EXPANDIDOS ===
+        # === 2. DADOS DA PROPRIEDADE EXPANDIDOS COM ESTACIONAMENTO ===
         property_address_parts = [
             reservation.property_obj.address_line1,
             reservation.property_obj.address_line2,
@@ -1470,6 +1648,12 @@ class ReservationService:
             'phone': reservation.property_obj.phone,
             'email': reservation.property_obj.email,
             'website': reservation.property_obj.website,
+            # ✅ NOVO: Informações de estacionamento da propriedade
+            'parking_enabled': getattr(reservation.property_obj, 'parking_enabled', False),
+            'parking_spots_total': getattr(reservation.property_obj, 'parking_spots_total', 0),
+            'parking_policy': getattr(reservation.property_obj, 'parking_policy', 'integral'),
+            'parking_policy_display': reservation.property_obj.parking_policy_display if hasattr(reservation.property_obj, 'parking_policy_display') else None,
+            'has_parking': reservation.property_obj.has_parking if hasattr(reservation.property_obj, 'has_parking') else False,
             'total_rooms': property_stats.total_rooms or 0,
             'total_reservations': property_stats.total_reservations or 0,
             'created_at': reservation.property_obj.created_at,
@@ -1527,7 +1711,7 @@ class ReservationService:
             'payment_status': reservation.payment_status,
         }
         
-        # === 5. AÇÕES CONTEXTUAIS ===
+        # === 5. AÇÕES CONTEXTUAIS COM ESTACIONAMENTO ===
         today = date.today()
         current_status = reservation.status
         
@@ -1540,14 +1724,33 @@ class ReservationService:
             'can_add_payment': balance_due > 0,
             'can_modify_rooms': current_status in ['pending', 'confirmed'],
             'can_send_confirmation': current_status in ['confirmed', 'pending'],
+            # ✅ NOVO: Ação para modificar estacionamento
+            'can_modify_parking': current_status in ['pending', 'confirmed'] and getattr(reservation.property_obj, 'parking_enabled', False),
             'edit_blocked_reason': None if current_status in ['pending', 'confirmed'] else f'Não é possível editar reservas com status: {current_status}',
             'confirm_blocked_reason': None if current_status == 'pending' else f'Reserva já está {current_status}',
             'checkin_blocked_reason': None if (current_status == 'confirmed' and reservation.check_in_date <= today) else 'Check-in ainda não disponível',
             'checkout_blocked_reason': None if current_status == 'checked_in' else 'Hóspede ainda não fez check-in',
             'cancel_blocked_reason': None if current_status in ['pending', 'confirmed'] else f'Não é possível cancelar reservas com status: {current_status}',
+            # ✅ NOVO: Razão bloqueio estacionamento
+            'parking_blocked_reason': None if getattr(reservation.property_obj, 'parking_enabled', False) else 'Propriedade não oferece estacionamento',
         }
         
-        # === 6. HISTÓRICO DE AUDITORIA MELHORADO ===
+        # === 6. VERIFICAR CONFLITOS DE ESTACIONAMENTO ===
+        parking_conflicts = []
+        if reservation.parking_requested:
+            try:
+                parking_availability = self.check_parking_availability(
+                    reservation.property_id,
+                    reservation.check_in_date,
+                    reservation.check_out_date,
+                    tenant_id,
+                    reservation.id
+                )
+                parking_conflicts = parking_availability.get('conflicts', [])
+            except Exception as e:
+                print(f"⚠️ Erro ao verificar conflitos de estacionamento: {e}")
+        
+        # === 7. HISTÓRICO DE AUDITORIA MELHORADO ===
         # MODIFICADO: Usar o novo serviço de formatação
         payment_ids = [p.id for p in reservation.payments] if reservation.payments else []
         
@@ -1569,7 +1772,7 @@ class ReservationService:
             formatted_entry = self.audit_formatter.format_audit_entry(log)
             audit_history.append(formatted_entry)
         
-        # === 7. CAMPOS COMPUTADOS ===
+        # === 8. CAMPOS COMPUTADOS ===
         nights = (reservation.check_out_date - reservation.check_in_date).days
         
         # Calcular dias até check-in ou desde check-out
@@ -1581,7 +1784,7 @@ class ReservationService:
         elif current_status == 'checked_out':
             days_since_checkout = (today - reservation.check_out_date).days
         
-        # === 8. MONTAR RESPOSTA FINAL ===
+        # === 9. MONTAR RESPOSTA FINAL ===
         detailed_response = {
             # Dados básicos
             'id': reservation.id,
@@ -1607,6 +1810,11 @@ class ReservationService:
             'source_reference': reservation.source_reference,
             'guest_requests': reservation.guest_requests,
             'internal_notes': reservation.internal_notes,
+            
+            # ✅ NOVO: Informações de estacionamento
+            'parking_requested': reservation.parking_requested,
+            'parking_display': reservation.parking_display,  # Usa o property do modelo
+            'parking_conflicts': parking_conflicts,
             
             # Flags
             'is_group_reservation': reservation.is_group_reservation,

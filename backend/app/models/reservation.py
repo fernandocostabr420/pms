@@ -46,6 +46,9 @@ class Reservation(BaseModel, TenantMixin):
     source = Column(String(50), nullable=True, index=True)   # direct, booking, airbnb, room_map, etc.
     source_reference = Column(String(100), nullable=True)   # ID externo da reserva
     
+    # ✅ NOVO: Estacionamento
+    parking_requested = Column(Boolean, default=False, nullable=False)  # Solicita estacionamento
+    
     # Datas importantes
     created_date = Column(DateTime, default=datetime.utcnow, nullable=False)
     confirmed_date = Column(DateTime, nullable=True)
@@ -296,6 +299,7 @@ class Reservation(BaseModel, TenantMixin):
     def can_check_out(self):
         """Verifica se pode fazer check-out"""
         return self.status == "checked_in" and self.is_active
+    
     @property
     def can_cancel(self):
         """Verifica se pode ser cancelada"""
@@ -310,6 +314,12 @@ class Reservation(BaseModel, TenantMixin):
             self.check_in_date <= today <= self.check_out_date and
             self.is_active
         )
+    
+    # ✅ NOVO: Propriedade para identificação visual de estacionamento
+    @property
+    def parking_display(self):
+        """Status do estacionamento formatado para exibição"""
+        return "Solicitado" if self.parking_requested else None
     
     # ✅ NOVOS MÉTODOS PARA SUPORTE A FILTROS FLEXÍVEIS
     

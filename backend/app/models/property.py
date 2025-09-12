@@ -42,6 +42,11 @@ class Property(BaseModel, TenantMixin):
     check_in_time = Column(String(10), default="14:00")   # Horário check-in padrão
     check_out_time = Column(String(10), default="12:00")  # Horário check-out padrão
     
+    # ✅ NOVO: Configurações de Estacionamento
+    parking_enabled = Column(Boolean, default=False, nullable=False)  # Se estacionamento está disponível
+    parking_spots_total = Column(Integer, nullable=True)  # Número total de vagas
+    parking_policy = Column(String(20), default="integral", nullable=True)  # "integral" ou "flexible"
+    
     # Metadados flexíveis (amenities, políticas, etc.)
     amenities = Column(JSON, nullable=True)        # ["wifi", "piscina", "cafe"]
     policies = Column(JSON, nullable=True)         # {"pets": true, "smoking": false}
@@ -77,3 +82,29 @@ class Property(BaseModel, TenantMixin):
     def is_available_for_booking(self):
         """Verifica se propriedade está disponível para reservas"""
         return self.is_active and self.is_operational
+    
+    # ✅ NOVO: Propriedades para Estacionamento
+    @property
+    def has_parking(self):
+        """Verifica se a propriedade possui estacionamento configurado"""
+        return self.parking_enabled and self.parking_spots_total and self.parking_spots_total > 0
+    
+    @property
+    def parking_policy_display(self):
+        """Política de estacionamento formatada para exibição"""
+        if not self.has_parking:
+            return "Indisponível"
+        
+        policy_map = {
+            'integral': 'Política Integral - vagas devem estar disponíveis para toda a estadia',
+            'flexible': 'Política Flexível - permite reservar mesmo sem vagas em todos os dias'
+        }
+        return policy_map.get(self.parking_policy, 'Não definida')
+    
+    def validate_parking_policy(self):
+        """Valida se a política de estacionamento está correta"""
+        if self.parking_enabled and not self.parking_policy:
+            self.parking_policy = "integral"  # Padrão
+        
+        if self.parking_policy not in ["integral", "flexible"]:
+            self.parking_policy = "integral"  # Fallback seguro

@@ -1,4 +1,4 @@
-// frontend/src/components/reservations/PaymentModal.tsx - VERSÃO COMPLETA COM CAMPO MONETÁRIO AUTOMÁTICO
+// frontend/src/components/reservations/PaymentModal.tsx - VERSÃO COMPLETA COM MÉTODOS DINÂMICOS
 
 'use client';
 
@@ -31,11 +31,18 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import apiClient from '@/lib/api';
-import { 
-  PaymentMethodEnum, 
-  PAYMENT_METHOD_LABELS,
-  PaymentCreate 
-} from '@/types/payment';
+import { PaymentCreate } from '@/types/payment';
+
+// ===== INTERFACE PARA MÉTODOS DE PAGAMENTO DINÂMICOS =====
+interface PaymentMethodOption {
+  code: string;
+  name: string;
+  is_active: boolean;
+  requires_reference?: boolean;
+  has_fees?: boolean;
+  icon?: string;
+  color?: string;
+}
 
 // ===== UTILITÁRIOS FINANCEIROS COM ENTRADA AUTOMÁTICA =====
 
@@ -305,9 +312,7 @@ const AutoCurrencyInput: React.FC<AutoCurrencyInputProps> = ({
 // ===== SCHEMA COMPLETO =====
 const paymentSchema = z.object({
   amount: z.number().min(0.01, 'Valor deve ser maior que zero').max(999999.99, 'Valor muito alto'),
-  payment_method: z.nativeEnum(PaymentMethodEnum, {
-    errorMap: () => ({ message: 'Método de pagamento é obrigatório' })
-  }),
+  payment_method: z.string().min(1, 'Método de pagamento é obrigatório'),
   payment_date: z.string().min(1, 'Data de pagamento é obrigatória'),
   payer_name: z.string().optional(),
   reference_number: z.string().optional(),
@@ -343,6 +348,8 @@ export default function PaymentModal({
 
   // ===== ESTADOS =====
   const [loading, setLoading] = useState(false);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodOption[]>([]);
+  const [loadingMethods, setLoadingMethods] = useState(false);
 
   // ===== FORM =====
   const {
@@ -363,7 +370,53 @@ export default function PaymentModal({
 
   const watchedValues = watch();
 
+  // ===== FUNÇÕES =====
+
+  // 🆕 Carregar métodos de pagamento dinâmicos
+  const loadPaymentMethods = async () => {
+    try {
+      setLoadingMethods(true);
+      console.log('🔄 Carregando métodos de pagamento...');
+      
+      const response = await apiClient.get('/payment-methods/active');
+      const methods = response.data || [];
+      
+      console.log('✅ Métodos carregados:', methods);
+      setPaymentMethods(methods);
+      
+    } catch (error: any) {
+      console.error('❌ Erro ao carregar métodos de pagamento:', error);
+      
+      // 🔄 Fallback para métodos estáticos em caso de erro
+      const fallbackMethods: PaymentMethodOption[] = [
+        { code: 'pix', name: 'PIX', is_active: true },
+        { code: 'credit_card', name: 'Cartão de Crédito', is_active: true },
+        { code: 'debit_card', name: 'Cartão de Débito', is_active: true },
+        { code: 'cash', name: 'Dinheiro', is_active: true },
+        { code: 'bank_transfer', name: 'Transferência Bancária', is_active: true },
+        { code: 'boleto', name: 'Boleto Bancário', is_active: true },
+      ];
+      
+      setPaymentMethods(fallbackMethods);
+      
+      toast({
+        title: 'Aviso',
+        description: 'Usando métodos de pagamento padrão. Alguns métodos podem não estar disponíveis.',
+        variant: 'default',
+      });
+    } finally {
+      setLoadingMethods(false);
+    }
+  };
+
   // ===== EFEITOS =====
+
+  // Carregar métodos de pagamento quando modal abre
+  useEffect(() => {
+    if (isOpen) {
+      loadPaymentMethods();
+    }
+  }, [isOpen]);
 
   // Reset quando modal abre
   useEffect(() => {
@@ -592,26 +645,41 @@ export default function PaymentModal({
                 )}
               </div>
 
-              {/* Método de Pagamento */}
+              {/* 🆕 Método de Pagamento Dinâmico */}
               <div className="space-y-2">
                 <Label htmlFor="payment_method">
                   Método de Pagamento *
                 </Label>
-                <select
-                  id="payment_method"
-                  disabled={loading}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  {...register('payment_method')}
-                >
-                  <option value="">Selecione o método</option>
-                  {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
+                {loadingMethods ? (
+                  <div className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 items-center">
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    <span className="text-sm text-gray-500">Carregando métodos...</span>
+                  </div>
+                ) : (
+                  <select
+                    id="payment_method"
+                    disabled={loading}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    {...register('payment_method')}
+                  >
+                    <option value="">Selecione o método</option>
+                    {paymentMethods
+                      .filter(method => method.is_active)
+                      .map((method) => (
+                        <option key={method.code} value={method.code}>
+                          {method.name}
+                        </option>
+                      ))
+                    }
+                  </select>
+                )}
                 {errors.payment_method && (
                   <p className="text-sm text-red-500">{errors.payment_method.message}</p>
+                )}
+                {paymentMethods.length === 0 && !loadingMethods && (
+                  <p className="text-xs text-amber-600">
+                    Nenhum método ativo encontrado. Configure métodos em Cadastros → Métodos de Pagamento.
+                  </p>
                 )}
               </div>
             </div>

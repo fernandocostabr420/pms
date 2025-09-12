@@ -38,12 +38,12 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { apiClient } from '@/lib/api';
 
+// ✅ MODIFICAÇÃO: Removido "Cadastros" do menu lateral
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Calendário', href: '/dashboard/calendar', icon: Calendar },
   { name: 'Mapa de Quartos', href: '/dashboard/room-map', icon: Map },
   { name: 'Reservas', href: '/dashboard/reservations', icon: Calendar },
-  { name: 'Cadastros', href: '/dashboard/cadastros', icon: FolderOpen },
   { name: 'Pagamentos', href: '/dashboard/payments', icon: DollarSign },
   { name: 'Hóspedes', href: '/dashboard/guests', icon: Users },
   { name: 'Disponibilidade', href: '/dashboard/room-availability', icon: Calendar },
@@ -415,6 +415,16 @@ export default function DashboardLayout({
                   <DropdownMenuItem onClick={() => alert('Funcionalidade em desenvolvimento')}>
                     <Settings className="mr-2 h-4 w-4" />
                     Configurações
+                  </DropdownMenuItem>
+                  
+                  <DropdownMenuSeparator />
+                  
+                  {/* ✅ MODIFICAÇÃO: Cadastros movido para o User Menu */}
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/cadastros" className="flex items-center">
+                      <FolderOpen className="mr-2 h-4 w-4" />
+                      Cadastros
+                    </Link>
                   </DropdownMenuItem>
                   
                   <DropdownMenuSeparator />

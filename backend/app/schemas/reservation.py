@@ -1,4 +1,4 @@
-# backend/app/schemas/reservation.py - ARQUIVO COMPLETO COM MULTI-SELECT PARA STATUS E CANAL
+# backend/app/schemas/reservation.py - ARQUIVO COMPLETO COM MULTI-SELECT PARA STATUS E CANAL + ESTACIONAMENTO
 
 from pydantic import BaseModel, field_validator, Field
 from typing import Optional, List, Dict, Any, Literal, Union
@@ -117,6 +117,9 @@ class ReservationBase(BaseModel):
     source: Optional[str] = Field(None, max_length=100, description="Canal de origem")
     source_reference: Optional[str] = Field(None, max_length=200, description="Referência no canal")
     
+    # ✅ NOVO: Campo de Estacionamento
+    parking_requested: bool = Field(default=False, description="Solicita vaga de estacionamento")
+    
     # Observações
     guest_requests: Optional[str] = Field(None, max_length=1000, description="Pedidos do hóspede")
     internal_notes: Optional[str] = Field(None, max_length=1000, description="Notas internas")
@@ -204,6 +207,9 @@ class ReservationUpdate(BaseModel):
     # ✅ CORRIGIDO: Campos de origem que estavam faltando
     source: Optional[str] = Field(None, max_length=100, description="Canal de origem")
     source_reference: Optional[str] = Field(None, max_length=200, description="Referência no canal")
+    
+    # ✅ NOVO: Campo de Estacionamento
+    parking_requested: Optional[bool] = Field(None, description="Solicita vaga de estacionamento")
     
     # Observações
     guest_requests: Optional[str] = Field(None, max_length=1000)
@@ -303,6 +309,9 @@ class ReservationResponse(ReservationBase):
     # ✅ NOVO: Display names para status e origem
     status_display: Optional[str] = None
     source_display: Optional[str] = None
+    
+    # ✅ NOVO: Campo para exibição do estacionamento
+    parking_display: Optional[str] = None
     
     # Campos computados
     nights: Optional[int] = None
@@ -438,6 +447,9 @@ class ReservationFilters(BaseModel):
         description="Lista de origens para filtrar (multi-seleção)",
         examples=[["booking", "direct"], ["airbnb", "expedia"]]
     )
+    
+    # ===== NOVO FILTRO PARA ESTACIONAMENTO =====
+    parking_requested: Optional[bool] = Field(None, description="Filtrar reservas que solicitaram estacionamento")
     
     # ===== FILTROS DE DATA =====
     check_in_from: Optional[date] = Field(None, description="Check-in a partir de")
@@ -609,6 +621,11 @@ class ReservationResponseWithGuestDetails(ReservationResponse):
     property_state: Optional[str] = None
     property_country: Optional[str] = None
     
+    # ✅ NOVO: Dados expandidos de estacionamento da propriedade
+    property_has_parking: Optional[bool] = None
+    property_parking_spots_total: Optional[int] = None
+    property_parking_policy: Optional[str] = None
+    
     # Estatísticas do hóspede
     guest_total_reservations: Optional[int] = None
     guest_completed_stays: Optional[int] = None
@@ -650,6 +667,7 @@ class ReservationExportFilters(ReservationFilters):
     include_room_details: bool = Field(True, description="Incluir detalhes dos quartos")
     include_payment_details: bool = Field(True, description="Incluir detalhes de pagamento")
     include_property_details: bool = Field(False, description="Incluir detalhes da propriedade")
+    include_parking_details: bool = Field(True, description="Incluir informações de estacionamento")  # ✅ NOVO
     
     # Formato da exportação
     date_format: str = Field("dd/mm/yyyy", description="Formato das datas")
@@ -680,6 +698,10 @@ class ReservationSummary(BaseModel):
     avg_guests: float
     avg_amount: Decimal
     
+    # ✅ NOVO: Estatísticas de estacionamento
+    parking_requests: int = 0
+    parking_request_rate: float = 0.0  # Percentual que solicita estacionamento
+    
     # Distribuições
     status_counts: Dict[str, int]
     source_counts: Dict[str, int]
@@ -705,6 +727,10 @@ class DashboardSummaryResponse(BaseModel):
     checked_in_with_pending_payment: int
     summary_date: str
     property_id: Optional[int] = None
+    
+    # ✅ NOVO: Estatísticas de estacionamento
+    parking_requests_today: int = 0
+    parking_spots_occupied: int = 0
 
 
 class TodaysReservationsResponse(BaseModel):
@@ -713,6 +739,10 @@ class TodaysReservationsResponse(BaseModel):
     arrivals_count: int
     pending_checkouts_count: int  # ALTERADO: era departures_count
     current_guests_count: int
+    
+    # ✅ NOVO: Contadores de estacionamento
+    parking_requests_arrivals: int = 0
+    parking_requests_current: int = 0
     
     # Dados detalhados (quando include_details=True)
     arrivals: Optional[List[Dict[str, Any]]] = None
@@ -733,6 +763,12 @@ class DashboardStatsResponse(BaseModel):
     pending_checkouts: int  # ALTERADO: era today_departures
     current_guests: int
     available_rooms_today: int
+    
+    # ✅ NOVO: Estatísticas de estacionamento
+    parking_requests_today: int = 0
+    parking_spots_available: int = 0
+    parking_spots_total: int = 0
+    parking_occupancy_rate: float = 0.0
     
     # Pendências
     pending_checkins: int
@@ -764,7 +800,8 @@ class ReservationReportFilters(BaseModel):
     status_list: Optional[List[str]] = None
     source_list: Optional[List[str]] = None
     include_cancelled: bool = False
-    group_by: Optional[str] = Field(None, description="Agrupar por: daily, monthly, yearly, status, source")
+    include_parking_only: Optional[bool] = Field(None, description="Incluir apenas reservas com estacionamento")  # ✅ NOVO
+    group_by: Optional[str] = Field(None, description="Agrupar por: daily, monthly, yearly, status, source, parking")
 
 
 # ===== SCHEMAS NOVOS PARA PÁGINA DE DETALHES =====
@@ -782,7 +819,7 @@ class AuditEntry(BaseModel):
     id: int
     timestamp: datetime
     user: Optional[AuditUser] = None
-    action: str  # reservation_created, payment_added, check_in_completed, etc.
+    action: str  # reservation_created, payment_added, check_in_completed, parking_requested, etc.
     description: str  # Descrição legível da ação
     table_name: str
     record_id: int
@@ -830,6 +867,10 @@ class GuestDetailsExpanded(BaseModel):
     last_stay_date: Optional[date] = None
     total_spent: Decimal = Decimal('0.00')
     
+    # ✅ NOVO: Estatísticas de estacionamento do hóspede
+    parking_requests_count: int = 0
+    parking_usage_rate: float = 0.0  # Percentual de reservas com estacionamento
+    
     # Metadados
     created_at: datetime
     updated_at: datetime
@@ -856,6 +897,13 @@ class PropertyDetailsExpanded(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     website: Optional[str] = None
+    
+    # ✅ NOVO: Informações de estacionamento expandidas
+    parking_enabled: bool = False
+    parking_spots_total: int = 0
+    parking_policy: str = "integral"
+    parking_policy_display: Optional[str] = None
+    has_parking: bool = False
     
     # Estatísticas
     total_rooms: int = 0
@@ -913,12 +961,16 @@ class ContextualActions(BaseModel):
     can_modify_rooms: bool = False
     can_send_confirmation: bool = False
     
+    # ✅ NOVO: Ações relacionadas ao estacionamento
+    can_modify_parking: bool = False
+    
     # Razões para ações bloqueadas
     edit_blocked_reason: Optional[str] = None
     confirm_blocked_reason: Optional[str] = None
     checkin_blocked_reason: Optional[str] = None
     checkout_blocked_reason: Optional[str] = None
     cancel_blocked_reason: Optional[str] = None
+    parking_blocked_reason: Optional[str] = None  # ✅ NOVO
 
 
 class ReservationDetailedResponse(BaseModel):
@@ -947,6 +999,11 @@ class ReservationDetailedResponse(BaseModel):
     source_reference: Optional[str] = None
     guest_requests: Optional[str] = None
     internal_notes: Optional[str] = None
+    
+    # ✅ NOVO: Informações de estacionamento
+    parking_requested: bool = False
+    parking_display: Optional[str] = None
+    parking_conflicts: Optional[List[str]] = None  # Alertas de conflitos de vagas
     
     # Flags especiais
     is_group_reservation: bool = False
@@ -977,6 +1034,59 @@ class ReservationDetailedResponse(BaseModel):
     tenant_id: int
 
 
+# ===== NOVOS SCHEMAS ESPECÍFICOS PARA ESTACIONAMENTO =====
+
+class ParkingAvailabilityRequest(BaseModel):
+    """Schema para verificar disponibilidade de estacionamento"""
+    property_id: int
+    check_in_date: date
+    check_out_date: date
+    exclude_reservation_id: Optional[int] = Field(None, description="Excluir reserva específica da verificação")
+    
+    @field_validator('check_out_date')
+    @classmethod
+    def validate_checkout_date(cls, v, info):
+        check_in = info.data.get('check_in_date')
+        if check_in and v <= check_in:
+            raise ValueError('Check-out deve ser posterior ao check-in')
+        return v
+
+
+class ParkingAvailabilityResponse(BaseModel):
+    """Schema para resposta de disponibilidade de estacionamento"""
+    property_id: int
+    property_name: str
+    parking_enabled: bool
+    parking_spots_total: int
+    parking_policy: str
+    
+    # Disponibilidade específica do período
+    period_start: date
+    period_end: date
+    spots_available_all_days: int  # Vagas livres em todos os dias
+    spots_available_partial: int   # Vagas livres em alguns dias
+    
+    # Conflitos por data
+    daily_availability: List[Dict[str, Any]]  # [{date: "2025-01-01", spots_available: 3, conflicts: []}]
+    
+    # Alertas e recomendações
+    can_reserve_integral: bool  # Se pode reservar com política integral
+    can_reserve_flexible: bool  # Se pode reservar com política flexível
+    conflicts: List[str]  # Lista de alertas sobre conflitos
+    
+    # Recomendações
+    alternative_dates: Optional[List[Dict[str, Any]]] = None
+
+
+class ParkingConflictAlert(BaseModel):
+    """Schema para alertas de conflito de estacionamento"""
+    severity: str  # "warning", "error", "info"
+    message: str
+    affected_dates: List[date]
+    conflicting_reservations: List[str]  # Números das reservas em conflito
+    suggested_action: Optional[str] = None
+
+
 # ===== NOVOS SCHEMAS PARA NORMALIZAÇÃO DE DADOS EXISTENTES =====
 
 class NormalizationReport(BaseModel):
@@ -985,6 +1095,7 @@ class NormalizationReport(BaseModel):
     records_updated: int
     status_changes: Dict[str, int]
     source_changes: Dict[str, int]
+    parking_fields_added: int  # ✅ NOVO
     errors: List[str]
     started_at: datetime
     completed_at: datetime

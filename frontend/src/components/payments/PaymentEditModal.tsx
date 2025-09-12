@@ -36,20 +36,28 @@ import {
   PaymentResponse, 
   PaymentUpdate,
   PaymentConfirmedUpdate,
-  PaymentMethodEnum, 
-  PAYMENT_METHOD_LABELS,
   validateAdminReason,
   ADMIN_REASON_MIN_LENGTH,
   ADMIN_REASON_MAX_LENGTH
 } from '@/types/payment';
 import { useToast } from '@/hooks/use-toast';
+import apiClient from '@/lib/api';
+
+// 🆕 Interface para métodos de pagamento dinâmicos
+interface PaymentMethodOption {
+  code: string;
+  name: string;
+  is_active: boolean;
+  requires_reference?: boolean;
+  has_fees?: boolean;
+  icon?: string;
+  color?: string;
+}
 
 // Schema único que sempre inclui admin_reason (será validado condicionalmente)
 const editPaymentSchema = z.object({
   amount: z.number().min(0.01, 'Valor deve ser maior que zero'),
-  payment_method: z.nativeEnum(PaymentMethodEnum, {
-    errorMap: () => ({ message: 'Método de pagamento é obrigatório' })
-  }),
+  payment_method: z.string().min(1, 'Método de pagamento é obrigatório'),
   payment_date: z.string().min(1, 'Data de pagamento é obrigatória'),
   reference_number: z.string().optional(),
   notes: z.string().optional(),
@@ -77,6 +85,8 @@ export default function PaymentEditModal({
   isAdmin = false
 }: PaymentEditModalProps) {
   const [loading, setLoading] = useState(false);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodOption[]>([]);
+  const [loadingMethods, setLoadingMethods] = useState(false);
   const { toast } = useToast();
 
   // Sempre chamar useForm primeiro, sem condições
@@ -92,7 +102,7 @@ export default function PaymentEditModal({
     resolver: zodResolver(editPaymentSchema),
     defaultValues: {
       amount: 0,
-      payment_method: PaymentMethodEnum.PIX,
+      payment_method: '',
       payment_date: new Date().toISOString().slice(0, 16),
       reference_number: '',
       notes: '',
@@ -103,6 +113,50 @@ export default function PaymentEditModal({
     }
   });
 
+  // 🆕 Carregar métodos de pagamento dinâmicos
+  const loadPaymentMethods = async () => {
+    try {
+      setLoadingMethods(true);
+      console.log('🔄 Carregando métodos de pagamento para edição...');
+      
+      const response = await apiClient.get('/payment-methods/active');
+      const methods = response.data || [];
+      
+      console.log('✅ Métodos carregados para edição:', methods);
+      setPaymentMethods(methods);
+      
+    } catch (error: any) {
+      console.error('❌ Erro ao carregar métodos de pagamento:', error);
+      
+      // 🔄 Fallback para métodos estáticos em caso de erro
+      const fallbackMethods: PaymentMethodOption[] = [
+        { code: 'pix', name: 'PIX', is_active: true },
+        { code: 'credit_card', name: 'Cartão de Crédito', is_active: true },
+        { code: 'debit_card', name: 'Cartão de Débito', is_active: true },
+        { code: 'cash', name: 'Dinheiro', is_active: true },
+        { code: 'bank_transfer', name: 'Transferência Bancária', is_active: true },
+        { code: 'boleto', name: 'Boleto Bancário', is_active: true },
+      ];
+      
+      setPaymentMethods(fallbackMethods);
+      
+      toast({
+        title: 'Aviso',
+        description: 'Usando métodos de pagamento padrão. Alguns métodos podem não estar disponíveis.',
+        variant: 'default',
+      });
+    } finally {
+      setLoadingMethods(false);
+    }
+  };
+
+  // Carregar métodos de pagamento quando modal abre
+  useEffect(() => {
+    if (isOpen) {
+      loadPaymentMethods();
+    }
+  }, [isOpen]);
+
   // Resetar form quando payment muda - HOOK SEMPRE CHAMADO
   useEffect(() => {
     if (payment && isOpen) {
@@ -110,7 +164,7 @@ export default function PaymentEditModal({
       
       reset({
         amount: payment.amount,
-        payment_method: payment.payment_method as PaymentMethodEnum,
+        payment_method: payment.payment_method,
         payment_date: paymentDate,
         reference_number: payment.reference_number || '',
         notes: payment.notes || '',
@@ -315,27 +369,42 @@ export default function PaymentEditModal({
               </div>
             </div>
 
-            {/* Método de Pagamento */}
+            {/* 🆕 Método de Pagamento Dinâmico */}
             <div className="space-y-2">
               <Label htmlFor="payment_method">Método de Pagamento *</Label>
-              <Select 
-                value={watch('payment_method')} 
-                onValueChange={(value) => setValue('payment_method', value as PaymentMethodEnum)}
-                disabled={loading}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecionar método" />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(PAYMENT_METHOD_LABELS).map(([key, label]) => (
-                    <SelectItem key={key} value={key}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {loadingMethods ? (
+                <div className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 items-center">
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  <span className="text-sm text-gray-500">Carregando métodos...</span>
+                </div>
+              ) : (
+                <Select 
+                  value={watch('payment_method')} 
+                  onValueChange={(value) => setValue('payment_method', value)}
+                  disabled={loading}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecionar método" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {paymentMethods
+                      .filter(method => method.is_active)
+                      .map((method) => (
+                        <SelectItem key={method.code} value={method.code}>
+                          {method.name}
+                        </SelectItem>
+                      ))
+                    }
+                  </SelectContent>
+                </Select>
+              )}
               {errors.payment_method && (
                 <p className="text-sm text-red-600">{errors.payment_method.message}</p>
+              )}
+              {paymentMethods.length === 0 && !loadingMethods && (
+                <p className="text-xs text-amber-600">
+                  Nenhum método ativo encontrado. Configure métodos em Cadastros → Métodos de Pagamento.
+                </p>
               )}
             </div>
 
