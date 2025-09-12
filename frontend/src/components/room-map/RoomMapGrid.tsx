@@ -406,8 +406,10 @@ export default function RoomMapGrid({
                   {reservation.guest_name}
                   {/* ✅ ÍCONE DE ESTACIONAMENTO */}
                   {reservation.parking_requested && (
-                    <Car className="h-2 w-2 flex-shrink-0 text-white opacity-90" title="Estacionamento solicitado" />
-                  )}
+  <div className="bg-white rounded-full w-4 h-4 flex items-center justify-center ml-1 border border-blue-300" title="Estacionamento solicitado">
+    <span className="text-blue-600 text-xs font-bold leading-none">E</span>
+  </div>
+)}
                 </span>
                 
                 {/* Indicadores existentes (chegada/partida) */}

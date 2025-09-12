@@ -122,6 +122,7 @@ class MapService:
                         total_guests=reservation.total_guests,
                         source=reservation.source,
                         notes=reservation.internal_notes,
+                        parking_requested=reservation.parking_requested or False,  # ✅ CORREÇÃO PRINCIPAL: Campo de estacionamento
                         is_arrival=reservation.check_in_date == date.today(),
                         is_departure=reservation.check_out_date == date.today(),
                         is_current=(reservation.status == 'checked_in')
