@@ -22,6 +22,8 @@ import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { ReservationFilters } from '@/types/reservation';
 import MultiSelect, { MultiSelectOption } from '@/components/ui/multi-select';
+import apiClient from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 
 interface ReservationFiltersProps {
   filters: ReservationFilters;
@@ -39,21 +41,6 @@ const statusOptions: MultiSelectOption[] = [
   { value: 'no_show', label: 'No-show' }
 ];
 
-const sourceOptions: MultiSelectOption[] = [
-  { value: 'direct', label: 'Direto' },
-  { value: 'booking', label: 'Booking.com' },
-  { value: 'airbnb', label: 'Airbnb' },
-  { value: 'expedia', label: 'Expedia' },
-  { value: 'hotels', label: 'Hotels.com' },
-  { value: 'agoda', label: 'Agoda' },
-  { value: 'phone', label: 'Telefone' },
-  { value: 'email', label: 'E-mail' },
-  { value: 'walk_in', label: 'Walk-in' },
-  { value: 'website', label: 'Site' },
-  { value: 'social_media', label: 'Redes Sociais' },
-  { value: 'referral', label: 'Indicação' }
-];
-
 export default function ReservationFiltersComponent({
   filters,
   onFiltersChange,
@@ -69,6 +56,44 @@ export default function ReservationFiltersComponent({
   const [checkInTo, setCheckInTo] = useState<Date>();
   const [checkOutFrom, setCheckOutFrom] = useState<Date>();
   const [checkOutTo, setCheckOutTo] = useState<Date>();
+
+  // ✅ NOVO: Estados para canais dinâmicos
+  const [salesChannels, setSalesChannels] = useState<any[]>([]);
+  const [loadingChannels, setLoadingChannels] = useState(false);
+  const { toast } = useToast();
+
+  // ✅ NOVO: Gerar opções de origem dinamicamente
+  const sourceOptions: MultiSelectOption[] = salesChannels.map(channel => ({
+    value: channel.code,
+    label: channel.name
+  }));
+
+  // ✅ NOVO: Carregar canais ativos
+  const loadSalesChannels = async () => {
+    try {
+      setLoadingChannels(true);
+      const response = await apiClient.get('/sales-channels/active');
+      setSalesChannels(response.data || []);
+    } catch (error: any) {
+      console.error('Erro ao carregar canais de venda:', error);
+      // Fallback para canais estáticos em caso de erro
+      setSalesChannels([
+        { code: 'direct', name: 'Direto' },
+        { code: 'booking', name: 'Booking.com' },
+        { code: 'airbnb', name: 'Airbnb' },
+        { code: 'phone', name: 'Telefone' },
+        { code: 'email', name: 'E-mail' },
+        { code: 'walk_in', name: 'Walk-in' },
+      ]);
+    } finally {
+      setLoadingChannels(false);
+    }
+  };
+
+  // ✅ NOVO: Carregar canais quando componente montar
+  useEffect(() => {
+    loadSalesChannels();
+  }, []);
 
   useEffect(() => {
     setLocalFilters(filters);
@@ -283,8 +308,8 @@ export default function ReservationFiltersComponent({
             options={sourceOptions}
             value={selectedSources}
             onChange={handleSourceChange}
-            placeholder="Selecione canais..."
-            disabled={loading}
+            placeholder={loadingChannels ? "Carregando canais..." : "Selecione canais..."}
+            disabled={loading || loadingChannels}
             allowSelectAll={true}
             searchable={true}
             className="h-8 text-sm border-gray-300 focus:border-blue-500"

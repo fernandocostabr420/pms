@@ -498,6 +498,10 @@ export default function StandardReservationModal({
   const [checkInDate, setCheckInDate] = useState<Date>();
   const [checkOutDate, setCheckOutDate] = useState<Date>();
 
+  // ✅ NOVO: Estados para canais de venda dinâmicos
+  const [salesChannels, setSalesChannels] = useState<any[]>([]);
+  const [loadingChannels, setLoadingChannels] = useState(false);
+
   const { toast } = useToast();
 
   // ===== CONFIGURAÇÃO POR MODO =====
@@ -585,6 +589,17 @@ export default function StandardReservationModal({
     }
   }, [checkInDate, checkOutDate, tenantProperty, watchedAdults, watchedChildren]);
 
+  // ✅ NOVO: Garantir recálculo quando datas mudarem no formulário
+  useEffect(() => {
+    if (watchedValues.check_in_date && watchedValues.check_out_date) {
+      const nights = calculateNights();
+      console.log('🌙 Noites recalculadas via useEffect:', nights, {
+        checkIn: watchedValues.check_in_date,
+        checkOut: watchedValues.check_out_date
+      });
+    }
+  }, [watchedValues.check_in_date, watchedValues.check_out_date]);
+
   // ===== FUNÇÕES DE CÁLCULO DE PREÇOS COM ENTRADA AUTOMÁTICA =====
   
   const handleTotalAmountChange = (value: number) => {
@@ -623,16 +638,45 @@ export default function StandardReservationModal({
 
   // ===== FUNÇÕES =====
 
+  // ✅ NOVO: Carregar canais de venda
+  const loadSalesChannels = async () => {
+    try {
+      setLoadingChannels(true);
+      const response = await apiClient.get('/sales-channels/active');
+      setSalesChannels(response.data || []);
+    } catch (error: any) {
+      console.error('Erro ao carregar canais de venda:', error);
+      // Fallback para canais estáticos em caso de erro
+      setSalesChannels([
+        { code: 'direct', name: 'Direto' },
+        { code: 'booking', name: 'Booking.com' },
+        { code: 'airbnb', name: 'Airbnb' },
+        { code: 'phone', name: 'Telefone' },
+        { code: 'email', name: 'E-mail' },
+        { code: 'walk_in', name: 'Walk-in' },
+        { code: 'room_map', name: 'Mapa de Quartos' },
+      ]);
+    } finally {
+      setLoadingChannels(false);
+    }
+  };
+
   const loadInitialData = async () => {
     try {
-      // Carregar apenas hóspedes (propriedade vem do hook useProperty)
-      const shouldLoadGuests = config.allowGuestSelection || mode === 'map';
-      
-      if (shouldLoadGuests) {
-        const guestsRes = await apiClient.getGuests({ per_page: 100 });
-        setGuests(guestsRes.guests || []);
-        console.log('Hóspedes carregados:', guestsRes.guests?.length || 0);
-      }
+      // ✅ NOVO: Carregar canais de venda junto com outros dados
+      await Promise.all([
+        loadSalesChannels(),
+        (async () => {
+          // Carregar apenas hóspedes (propriedade vem do hook useProperty)
+          const shouldLoadGuests = config.allowGuestSelection || mode === 'map';
+          
+          if (shouldLoadGuests) {
+            const guestsRes = await apiClient.getGuests({ per_page: 100 });
+            setGuests(guestsRes.guests || []);
+            console.log('Hóspedes carregados:', guestsRes.guests?.length || 0);
+          }
+        })()
+      ]);
       
       console.log('Modo atual:', mode);
       console.log('Config allowGuestSelection:', config.allowGuestSelection);
@@ -929,6 +973,7 @@ export default function StandardReservationModal({
       setCheckOutDate(undefined);
       setAvailableRooms([]);
       setGuestSearch('');
+      setSalesChannels([]); // ✅ NOVO: Limpar canais
       onClose();
     }
   };
@@ -991,16 +1036,11 @@ export default function StandardReservationModal({
 
   // ===== RENDER PRINCIPAL =====
 
-  const sourceOptions = [
-    { value: 'direct', label: 'Direto' },
-    { value: 'booking', label: 'Booking.com' },
-    { value: 'airbnb', label: 'Airbnb' },
-    { value: 'expedia', label: 'Expedia' },
-    { value: 'phone', label: 'Telefone' },
-    { value: 'email', label: 'E-mail' },
-    { value: 'walk_in', label: 'Walk-in' },
-    { value: 'room_map', label: 'Mapa de Quartos' },
-  ];
+  // ✅ NOVO: Gerar opções de origem dinamicamente
+  const sourceOptions = salesChannels.map(channel => ({
+    value: channel.code,
+    label: channel.name
+  }));
 
   const nights = calculateNights();
   const estimatedTotal = calculateTotal();
@@ -1222,17 +1262,17 @@ export default function StandardReservationModal({
               </h3>
 
               <div className="grid grid-cols-1 gap-4 px-2">
-                {/* Canal de Origem */}
+                {/* Canal de Origem - ✅ ATUALIZADO para usar dados dinâmicos */}
                 <div>
                   <Label htmlFor="source" className="text-sm font-medium">Canal</Label>
                   <div className="mt-1 p-1">
                     <select
                       value={watch('source') || ''}
                       onChange={(e) => setValue('source', e.target.value)}
-                      disabled={loading}
+                      disabled={loading || loadingChannels}
                       className="w-full p-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                     >
-                      <option value="">Selecione o canal</option>
+                      <option value="">{loadingChannels ? 'Carregando canais...' : 'Selecione o canal'}</option>
                       {sourceOptions.map((source) => (
                         <option key={source.value} value={source.value}>
                           {source.label}

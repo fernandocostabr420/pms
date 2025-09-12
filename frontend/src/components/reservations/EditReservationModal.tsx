@@ -385,6 +385,10 @@ export default function EditReservationModal({
   const [initialized, setInitialized] = useState(false);
   const [fullReservation, setFullReservation] = useState<any>(null);
 
+  // ✅ NOVO: Estados para canais de venda dinâmicos
+  const [salesChannels, setSalesChannels] = useState<any[]>([]);
+  const [loadingChannels, setLoadingChannels] = useState(false);
+
   // ===== FORM =====
   const {
     register,
@@ -414,7 +418,10 @@ export default function EditReservationModal({
   useEffect(() => {
     if (isOpen && reservation && !initialized) {
       console.log('🔄 Iniciando carregamento da reserva completa...', reservation);
-      loadFullReservation();
+      Promise.all([
+        loadSalesChannels(),
+        loadFullReservation()
+      ]);
     }
     
     // Reset quando modal fecha
@@ -424,6 +431,7 @@ export default function EditReservationModal({
       setAvailableRooms([]);
       setInitialized(false);
       setFullReservation(null);
+      setSalesChannels([]); // ✅ NOVO: Limpar canais
     }
   }, [isOpen, reservation]);
 
@@ -451,6 +459,29 @@ export default function EditReservationModal({
   ]);
 
   // ===== FUNÇÕES =====
+
+  // ✅ NOVO: Carregar canais de venda
+  const loadSalesChannels = async () => {
+    try {
+      setLoadingChannels(true);
+      const response = await apiClient.get('/sales-channels/active');
+      setSalesChannels(response.data || []);
+    } catch (error: any) {
+      console.error('Erro ao carregar canais de venda:', error);
+      // Fallback para canais estáticos em caso de erro
+      setSalesChannels([
+        { code: 'direct', name: 'Direto' },
+        { code: 'booking', name: 'Booking.com' },
+        { code: 'airbnb', name: 'Airbnb' },
+        { code: 'phone', name: 'Telefone' },
+        { code: 'email', name: 'E-mail' },
+        { code: 'walk_in', name: 'Walk-in' },
+        { code: 'room_map', name: 'Mapa de Quartos' },
+      ]);
+    } finally {
+      setLoadingChannels(false);
+    }
+  };
 
   // Carregar reserva completa
   const loadFullReservation = async () => {
@@ -856,16 +887,11 @@ export default function EditReservationModal({
 
   // ===== RENDER PRINCIPAL =====
 
-  const sourceOptions = [
-    { value: 'direct', label: 'Direto' },
-    { value: 'booking', label: 'Booking.com' },
-    { value: 'airbnb', label: 'Airbnb' },
-    { value: 'expedia', label: 'Expedia' },
-    { value: 'phone', label: 'Telefone' },
-    { value: 'email', label: 'E-mail' },
-    { value: 'walk_in', label: 'Walk-in' },
-    { value: 'room_map', label: 'Mapa de Quartos' },
-  ];
+  // ✅ NOVO: Gerar opções de origem dinamicamente
+  const sourceOptions = salesChannels.map(channel => ({
+    value: channel.code,
+    label: channel.name
+  }));
 
   const nights = calculateNights();
   const estimatedTotal = calculateTotal();
@@ -937,7 +963,7 @@ export default function EditReservationModal({
                 Informações da Reserva
               </h3>
 
-              {/* Canal de Origem */}
+              {/* Canal de Origem - ✅ ATUALIZADO para usar dados dinâmicos */}
               <div className="grid grid-cols-1 gap-4 px-2">
                 <div>
                   <Label htmlFor="source" className="text-sm font-medium">Canal</Label>
@@ -945,10 +971,10 @@ export default function EditReservationModal({
                     <select
                       value={watchedValues.source || ''}
                       onChange={(e) => setValue('source', e.target.value)}
-                      disabled={loading}
+                      disabled={loading || loadingChannels}
                       className="w-full p-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      <option value="">Selecione o canal</option>
+                      <option value="">{loadingChannels ? 'Carregando canais...' : 'Selecione o canal'}</option>
                       {sourceOptions.map((source) => (
                         <option key={source.value} value={source.value}>
                           {source.label}
