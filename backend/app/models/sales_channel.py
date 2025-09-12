@@ -77,7 +77,7 @@ class SalesChannel(BaseModel, TenantMixin):
     @property
     def requires_commission(self) -> bool:
         """Verifica se o canal cobra comissão"""
-        return self.commission_rate and self.commission_rate > 0
+        return bool(self.commission_rate and self.commission_rate > 0)
     
     @property
     def has_integration(self) -> bool:
