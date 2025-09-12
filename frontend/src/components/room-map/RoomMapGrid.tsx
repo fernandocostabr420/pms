@@ -17,8 +17,7 @@ import {
   AlertTriangle, 
   Wrench,
   Calendar,
-  DollarSign,
-  Car // ✅ NOVO ÍCONE - ESTACIONAMENTO
+  DollarSign
 } from 'lucide-react';
 // ✅ NOVAS IMPORTAÇÕES - Modal de reserva
 import { ReservationQuickView } from './ReservationQuickView';
@@ -233,113 +232,42 @@ export default function RoomMapGrid({
           {/* Grid das células de datas */}
           <div className="flex">
             {dateHeaders.map(header => {
-              const targetDate = new Date(header.date + 'T00:00:00');
-              
-              // Encontrar reserva para esta data
-              const activeReservation = room.reservations.find(res => {
-                const checkIn = new Date(res.check_in_date + 'T00:00:00');
-                const checkOut = new Date(res.check_out_date + 'T00:00:00');
-                return targetDate >= checkIn && targetDate < checkOut;
-              });
-
-              const isAvailable = !activeReservation && room.is_operational && !room.is_out_of_order;
-              const isWeekend = header.isWeekend;
               const isToday = header.isToday;
-
-              // ✅ VERIFICAR SE A RESERVA TEM ESTACIONAMENTO SOLICITADO
-              const hasParking = activeReservation?.parking_requested || false;
-
+              const isWeekend = header.isWeekend;
+              
               return (
                 <div
-                  key={`${room.id}-${header.date}`}
+                  key={header.date}
+                  onClick={() => onCellClick?.(room, header.date)}
                   className={cn(
-                    "border-r border-gray-200 flex items-center justify-center cursor-pointer relative group transition-all duration-150",
+                    "border-r border-gray-200 cursor-pointer transition-colors flex-shrink-0",
+                    "hover:bg-blue-50 flex items-center justify-center",
+                    isToday && "border-l-2 border-l-blue-500",
                     isWeekend && "room-map-cell-weekend",
-                    isToday && "ring-2 ring-orange-400 ring-inset",
-                    isAvailable && "bg-green-50 hover:bg-green-100",
-                    !isAvailable && activeReservation && "bg-blue-100 hover:bg-blue-200",
-                    !room.is_operational && "bg-gray-100",
-                    room.is_out_of_order && "bg-red-50"
+                    room.is_out_of_order && "bg-red-50 cursor-not-allowed",
+                    !room.is_operational && "bg-gray-100 cursor-not-allowed"
                   )}
                   style={{ 
                     width: `${gridDimensions.cellWidth}px`,
-                    height: '48px'
-                  }}
-                  onClick={() => {
-                    if (activeReservation) {
-                      handleReservationClick(activeReservation, room);
-                    } else {
-                      onCellClick?.(room, header.date);
-                    }
+                    height: '40px'
                   }}
                   title={
-                    activeReservation 
-                      ? `Reserva: ${activeReservation.guest_name} (${activeReservation.reservation_number})${hasParking ? ' - Estacionamento solicitado' : ''}`
-                      : isAvailable 
-                      ? `Disponível - ${room.room_number} em ${header.date}`
-                      : `Indisponível - ${room.room_number} em ${header.date}`
+                    room.is_out_of_order 
+                      ? "Quarto fora de funcionamento" 
+                      : !room.is_operational 
+                      ? "Quarto inativo" 
+                      : "Disponível - Clique para reservar"
                   }
                 >
-                  {/* Conteúdo da célula */}
-                  {activeReservation ? (
-                    <div className="flex flex-col items-center justify-center w-full h-full text-xs">
-                      {/* ✅ ÍCONE DE ESTACIONAMENTO - Aparece se parking_requested = true */}
-                      {hasParking ? (
-                        <div className="flex items-center justify-center w-6 h-6 bg-blue-600 rounded-full text-white">
-                          <Car className="h-3 w-3" />
-                        </div>
-                      ) : (
-                        <>
-                          <div className="font-medium text-blue-800 truncate w-full text-center px-1">
-                            {activeReservation.guest_name?.split(' ')[0] || 'Reserva'}
-                          </div>
-                          <div className="text-blue-600 text-[10px]">
-                            #{activeReservation.reservation_number?.slice(-3)}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  ) : room.is_out_of_order ? (
-                    <Wrench className="h-3 w-3 text-red-600" />
-                  ) : !room.is_operational ? (
-                    <AlertTriangle className="h-3 w-3 text-yellow-600" />
-                  ) : (
-                    <div className="w-2 h-2 bg-green-500 rounded-full opacity-60"></div>
+                  {room.is_out_of_order && (
+                    <Wrench className="h-3 w-3 text-red-500" />
                   )}
-
-                  {/* Indicador para hoje */}
-                  {isToday && (
-                    <div className="absolute top-0 left-0 w-full h-1 bg-orange-400"></div>
-                  )}
-
-                  {/* Tooltip on hover */}
-                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none z-10 whitespace-nowrap">
-                    {activeReservation ? (
-                      <div>
-                        <div className="font-medium">{activeReservation.guest_name}</div>
-                        <div>#{activeReservation.reservation_number}</div>
-                        <div>{activeReservation.check_in_date} - {activeReservation.check_out_date}</div>
-                        {/* ✅ NOVO: Indicador de estacionamento no tooltip */}
-                        {hasParking && (
-                          <div className="flex items-center gap-1 mt-1 text-blue-300">
-                            <Car className="h-3 w-3" />
-                            <span>Estacionamento</span>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div>
-                        <div>{room.room_number}</div>
-                        <div>{header.date}</div>
-                      </div>
-                    )}
-                  </div>
                 </div>
               );
             })}
           </div>
           
-          {/* ✅ BLOCOS CONTÍNUOS DE RESERVAS - Lógica existente mantida */}
+          {/* ✅ CORREÇÃO PRINCIPAL: Blocos contínuos de reservas com lógica corrigida */}
           {room.reservations.map(reservation => {
             const checkIn = new Date(reservation.check_in_date + 'T00:00:00');
             const checkOut = new Date(reservation.check_out_date + 'T00:00:00');
@@ -451,9 +379,6 @@ export default function RoomMapGrid({
                   return 'bg-gray-500 text-white';
               }
             };
-
-            // ✅ VERIFICAR SE A RESERVA TEM ESTACIONAMENTO SOLICITADO
-            const hasParking = reservation.parking_requested || false;
             
             return (
               <div
@@ -473,18 +398,12 @@ export default function RoomMapGrid({
                   clipPath: clipPath,
                   borderRadius: '0px'
                 }}
-                title={`${reservation.guest_name} - ${reservation.reservation_number}${hasParking ? ' - Estacionamento solicitado' : ''} - Clique para detalhes`}
+                title={`${reservation.guest_name} - ${reservation.reservation_number} - Clique para detalhes`}
               >
-                {/* ✅ CONTEÚDO MODIFICADO: Priorizar ícone de estacionamento */}
-                {hasParking ? (
-                  <div className="flex items-center justify-center w-full h-full">
-                    <Car className="h-3 w-3" />
-                  </div>
-                ) : (
-                  <span className="font-medium truncate leading-tight px-2">
-                    {reservation.guest_name}
-                  </span>
-                )}
+                {/* NOME COMPLETO DO HÓSPEDE */}
+                <span className="font-medium truncate leading-tight px-2">
+                  {reservation.guest_name}
+                </span>
                 
                 {reservation.is_arrival && (
                   <div className="absolute top-1 left-1 w-1.5 h-1.5 bg-green-400 rounded-full" />
