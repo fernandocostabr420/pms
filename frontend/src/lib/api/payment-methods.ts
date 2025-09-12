@@ -1,191 +1,140 @@
 // frontend/src/lib/api/payment-methods.ts
 
-import { apiClient } from '@/lib/api';
-import type {
-  PaymentMethod,
-  PaymentMethodCreate,
-  PaymentMethodUpdate,
-  PaymentMethodsListResponse,
-  PaymentMethodsActiveResponse,
-  PaymentMethodsFilters
-} from '@/types/payment-methods';
+import apiClient from '../api';
 
-// Base URL para métodos de pagamento
-const PAYMENT_METHODS_BASE_URL = '/api/v1/payment-methods';
+export interface PaymentMethodResponse {
+  id: number;
+  name: string;
+  code: string;
+  description?: string;
+  display_order: number;
+  icon?: string;
+  color?: string;
+  is_active: boolean;
+  requires_reference?: boolean;
+  has_fees?: boolean;
+  default_fee_rate?: number;
+  settings?: any;
+  validation_rules?: any;
+  created_at: string;
+  updated_at: string;
+  tenant_id: number;
+  // Campos computados
+  display_name?: string;
+  is_card_payment?: boolean;
+  is_electronic_payment?: boolean;
+  requires_external_validation?: boolean;
+}
+
+export interface PaymentMethodCreate {
+  name: string;
+  code: string;
+  description?: string;
+  display_order?: number;
+  icon?: string;
+  color?: string;
+  requires_reference?: boolean;
+  has_fees?: boolean;
+  default_fee_rate?: number;
+  settings?: any;
+  validation_rules?: any;
+}
+
+export interface PaymentMethodUpdate {
+  name?: string;
+  code?: string;
+  description?: string;
+  display_order?: number;
+  icon?: string;
+  color?: string;
+  requires_reference?: boolean;
+  has_fees?: boolean;
+  default_fee_rate?: number;
+  settings?: any;
+  validation_rules?: any;
+}
+
+export interface PaymentMethodListResponse {
+  payment_methods: PaymentMethodResponse[];
+  total: number;
+  page: number;
+  pages: number;
+  per_page: number;
+}
+
+export interface PaymentMethodFilters {
+  search?: string;
+  is_active?: boolean;
+  has_fees?: boolean;
+  requires_reference?: boolean;
+}
 
 export class PaymentMethodsAPI {
-  
-  /**
-   * Listar métodos de pagamento com paginação e filtros
-   */
-  static async list(filters: PaymentMethodsFilters = {}): Promise<PaymentMethodsListResponse> {
+  // ✅ IMPORTANTE: Usar apenas o endpoint sem /api/v1 pois o baseURL já tem
+  async list(params?: PaymentMethodFilters & { page?: number; per_page?: number }): Promise<PaymentMethodListResponse> {
     try {
-      const params = new URLSearchParams();
-      
-      if (filters.page) params.append('page', filters.page.toString());
-      if (filters.per_page) params.append('per_page', filters.per_page.toString());
-      if (filters.is_active !== undefined) params.append('is_active', filters.is_active.toString());
-      if (filters.has_fee !== undefined) params.append('has_fee', filters.has_fee.toString());
-      if (filters.search) params.append('search', filters.search);
-
-      const response = await apiClient.get(`${PAYMENT_METHODS_BASE_URL}?${params}`);
+      const response = await apiClient.get('/payment-methods', params);
       return response.data;
     } catch (error) {
       console.error('Erro ao buscar métodos de pagamento:', error);
-      throw new Error('Falha ao carregar métodos de pagamento');
+      throw error;
     }
   }
 
-  /**
-   * Buscar apenas métodos de pagamento ativos
-   */
-  static async listActive(): Promise<PaymentMethodsActiveResponse> {
-    try {
-      const response = await apiClient.get(`${PAYMENT_METHODS_BASE_URL}/active`);
-      return response.data;
-    } catch (error) {
-      console.error('Erro ao buscar métodos de pagamento ativos:', error);
-      throw new Error('Falha ao carregar métodos de pagamento ativos');
-    }
+  async create(data: PaymentMethodCreate): Promise<PaymentMethodResponse> {
+    const response = await apiClient.post('/payment-methods', data);
+    return response.data;
   }
 
-  /**
-   * Buscar um método de pagamento por ID
-   */
-  static async getById(id: number): Promise<PaymentMethod> {
-    try {
-      const response = await apiClient.get(`${PAYMENT_METHODS_BASE_URL}/${id}`);
-      return response.data;
-    } catch (error) {
-      console.error(`Erro ao buscar método de pagamento ${id}:`, error);
-      throw new Error('Método de pagamento não encontrado');
-    }
+  async getById(id: number): Promise<PaymentMethodResponse> {
+    const response = await apiClient.get(`/payment-methods/${id}`);
+    return response.data;
   }
 
-  /**
-   * Criar novo método de pagamento
-   */
-  static async create(data: PaymentMethodCreate): Promise<PaymentMethod> {
-    try {
-      const response = await apiClient.post(PAYMENT_METHODS_BASE_URL, data);
-      return response.data;
-    } catch (error: any) {
-      console.error('Erro ao criar método de pagamento:', error);
-      
-      if (error.response?.status === 409) {
-        throw new Error('Já existe um método de pagamento com este código');
-      }
-      
-      if (error.response?.data?.detail) {
-        throw new Error(error.response.data.detail);
-      }
-      
-      throw new Error('Falha ao criar método de pagamento');
-    }
+  async update(id: number, data: PaymentMethodUpdate): Promise<PaymentMethodResponse> {
+    const response = await apiClient.put(`/payment-methods/${id}`, data);
+    return response.data;
   }
 
-  /**
-   * Atualizar método de pagamento
-   */
-  static async update(id: number, data: PaymentMethodUpdate): Promise<PaymentMethod> {
-    try {
-      const response = await apiClient.put(`${PAYMENT_METHODS_BASE_URL}/${id}`, data);
-      return response.data;
-    } catch (error: any) {
-      console.error(`Erro ao atualizar método de pagamento ${id}:`, error);
-      
-      if (error.response?.status === 404) {
-        throw new Error('Método de pagamento não encontrado');
-      }
-      
-      if (error.response?.status === 409) {
-        throw new Error('Já existe um método de pagamento com este código');
-      }
-      
-      if (error.response?.data?.detail) {
-        throw new Error(error.response.data.detail);
-      }
-      
-      throw new Error('Falha ao atualizar método de pagamento');
-    }
+  async delete(id: number): Promise<void> {
+    await apiClient.delete(`/payment-methods/${id}`);
   }
 
-  /**
-   * Deletar método de pagamento (soft delete)
-   */
-  static async delete(id: number): Promise<void> {
-    try {
-      await apiClient.delete(`${PAYMENT_METHODS_BASE_URL}/${id}`);
-    } catch (error: any) {
-      console.error(`Erro ao deletar método de pagamento ${id}:`, error);
-      
-      if (error.response?.status === 404) {
-        throw new Error('Método de pagamento não encontrado');
-      }
-      
-      if (error.response?.status === 409) {
-        throw new Error('Não é possível deletar este método de pagamento pois está sendo utilizado');
-      }
-      
-      throw new Error('Falha ao deletar método de pagamento');
-    }
+  async getActive(): Promise<PaymentMethodResponse[]> {
+    const response = await apiClient.get('/payment-methods/active');
+    return response.data;
   }
 
-  /**
-   * Ativar/Desativar método de pagamento
-   */
-  static async toggleStatus(id: number, isActive: boolean): Promise<PaymentMethod> {
-    try {
-      const response = await apiClient.put(`${PAYMENT_METHODS_BASE_URL}/${id}`, {
-        is_active: isActive
-      });
-      return response.data;
-    } catch (error: any) {
-      console.error(`Erro ao alterar status do método de pagamento ${id}:`, error);
-      
-      if (error.response?.status === 404) {
-        throw new Error('Método de pagamento não encontrado');
-      }
-      
-      throw new Error('Falha ao alterar status do método de pagamento');
-    }
+  async getStats(): Promise<any> {
+    const response = await apiClient.get('/payment-methods/stats');
+    return response.data;
   }
 
-  /**
-   * Criar dados padrão (métodos de pagamento comuns)
-   */
-  static async setupDefaults(): Promise<{ message: string; created_count: number }> {
-    try {
-      const response = await apiClient.post(`${PAYMENT_METHODS_BASE_URL}/setup-defaults`);
-      return response.data;
-    } catch (error: any) {
-      console.error('Erro ao criar métodos de pagamento padrão:', error);
-      
-      if (error.response?.data?.detail) {
-        throw new Error(error.response.data.detail);
-      }
-      
-      throw new Error('Falha ao criar métodos de pagamento padrão');
-    }
+  async bulkOperation(operation: {
+    operation: 'activate' | 'deactivate' | 'delete';
+    payment_method_ids: number[];
+  }): Promise<any> {
+    const response = await apiClient.post('/payment-methods/bulk-operation', operation);
+    return response.data;
   }
 
-  /**
-   * Validar código único antes de criar/editar
-   */
-  static async validateCode(code: string, excludeId?: number): Promise<{ available: boolean }> {
-    try {
-      const params = new URLSearchParams();
-      params.append('code', code);
-      if (excludeId) params.append('exclude_id', excludeId.toString());
-      
-      const response = await apiClient.get(`${PAYMENT_METHODS_BASE_URL}/validate-code?${params}`);
-      return response.data;
-    } catch (error) {
-      console.error('Erro ao validar código:', error);
-      return { available: false };
-    }
+  async updateOrder(orderData: {
+    payment_method_orders: Array<{ id: number; display_order: number }>;
+  }): Promise<PaymentMethodResponse[]> {
+    const response = await apiClient.put('/payment-methods/update-order', orderData);
+    return response.data;
+  }
+
+  async getByCode(code: string): Promise<PaymentMethodResponse> {
+    const response = await apiClient.get(`/payment-methods/code/${code}`);
+    return response.data;
+  }
+
+  async setupDefaults(): Promise<PaymentMethodResponse[]> {
+    const response = await apiClient.post('/payment-methods/setup-defaults');
+    return response.data;
   }
 }
 
-// Exportar como default
-export default PaymentMethodsAPI;
+export const paymentMethodsAPI = new PaymentMethodsAPI();
+export default paymentMethodsAPI;

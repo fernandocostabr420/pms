@@ -1,403 +1,394 @@
 // frontend/src/hooks/use-sales-channels.ts
 
-import { useState, useEffect, useCallback, useReducer } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useToast } from '@/hooks/use-toast';
-import SalesChannelsAPI from '@/lib/api/sales-channels';
-import type {
-  SalesChannel,
+import salesChannelsAPI, {
+  SalesChannelResponse,
   SalesChannelCreate,
   SalesChannelUpdate,
-  SalesChannelsFilters,
-  SalesChannelsState,
-  SalesChannelsAction,
-  BulkOperationRequest,
-  CommissionCalculationRequest
-} from '@/types/sales-channels';
+  SalesChannelListResponse,
+  SalesChannelFilters
+} from '@/lib/api/sales-channels';
 
-// Reducer para gerenciar estado dos canais de venda
-function salesChannelsReducer(
-  state: SalesChannelsState,
-  action: SalesChannelsAction
-): SalesChannelsState {
-  switch (action.type) {
-    case 'SET_LOADING':
-      return { ...state, loading: action.payload };
-    
-    case 'SET_ERROR':
-      return { ...state, error: action.payload, loading: false };
-    
-    case 'SET_SALES_CHANNELS':
-      return {
-        ...state,
-        salesChannels: action.payload.sales_channels,
-        total: action.payload.total,
-        page: action.payload.page,
-        per_page: action.payload.per_page,
-        total_pages: action.payload.total_pages,
-        loading: false,
-        error: null
-      };
-    
-    case 'ADD_SALES_CHANNEL':
-      return {
-        ...state,
-        salesChannels: [action.payload, ...state.salesChannels],
-        total: state.total + 1
-      };
-    
-    case 'UPDATE_SALES_CHANNEL':
-      return {
-        ...state,
-        salesChannels: state.salesChannels.map(sc =>
-          sc.id === action.payload.id ? action.payload : sc
-        )
-      };
-    
-    case 'REMOVE_SALES_CHANNEL':
-      return {
-        ...state,
-        salesChannels: state.salesChannels.filter(sc => sc.id !== action.payload),
-        total: state.total - 1
-      };
-    
-    case 'TOGGLE_SALES_CHANNEL_STATUS':
-      return {
-        ...state,
-        salesChannels: state.salesChannels.map(sc =>
-          sc.id === action.payload.id
-            ? { ...sc, is_active: action.payload.is_active }
-            : sc
-        )
-      };
-    
-    case 'BULK_UPDATE':
-      return {
-        ...state,
-        salesChannels: state.salesChannels.map(sc =>
-          action.payload.ids.includes(sc.id)
-            ? { ...sc, ...action.payload.changes }
-            : sc
-        )
-      };
-    
-    default:
-      return state;
-  }
+interface UseSalesChannelsReturn {
+  // Estado
+  salesChannels: SalesChannelResponse[];
+  loading: boolean;
+  error: string | null;
+  
+  // Paginação
+  pagination: {
+    total: number;
+    page: number;
+    pages: number;
+    per_page: number;
+  };
+  
+  // Filtros
+  filters: SalesChannelFilters;
+  currentPage: number;
+  perPage: number;
+  
+  // Ações
+  loadSalesChannels: () => Promise<void>;
+  refreshData: () => Promise<void>;
+  setFilters: (filters: SalesChannelFilters) => void;
+  setPage: (page: number) => void;
+  setPerPage: (perPage: number) => void;
+  clearFilters: () => void;
+  
+  // Operações CRUD
+  createSalesChannel: (data: SalesChannelCreate) => Promise<SalesChannelResponse | null>;
+  updateSalesChannel: (id: number, data: SalesChannelUpdate) => Promise<SalesChannelResponse | null>;
+  deleteSalesChannel: (id: number) => Promise<boolean>;
+  getSalesChannel: (id: number) => Promise<SalesChannelResponse | null>;
+  
+  // Operações especiais
+  getActiveSalesChannels: () => Promise<SalesChannelResponse[]>;
+  getExternalChannels: () => Promise<SalesChannelResponse[]>;
+  bulkOperation: (operation: {
+    operation: 'activate' | 'deactivate' | 'delete';
+    sales_channel_ids: number[];
+  }) => Promise<any>;
+  updateOrder: (orderData: {
+    sales_channel_orders: Array<{ id: number; display_order: number }>;
+  }) => Promise<SalesChannelResponse[] | null>;
+  calculateCommission: (id: number, data: {
+    base_amount: number;
+    reservation_data?: any;
+  }) => Promise<any>;
+  testConnection: (id: number) => Promise<any>;
+  setupDefaults: () => Promise<SalesChannelResponse[] | null>;
 }
 
-const initialState: SalesChannelsState = {
-  salesChannels: [],
-  loading: false,
-  error: null,
-  total: 0,
-  page: 1,
-  per_page: 10,
-  total_pages: 0
-};
+const initialFilters: SalesChannelFilters = {};
 
-export function useSalesChannels(initialFilters?: SalesChannelsFilters) {
-  const [state, dispatch] = useReducer(salesChannelsReducer, initialState);
-  const [filters, setFilters] = useState<SalesChannelsFilters>(initialFilters || {});
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+export function useSalesChannels(): UseSalesChannelsReturn {
+  const [salesChannels, setSalesChannels] = useState<SalesChannelResponse[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [filters, setFiltersState] = useState<SalesChannelFilters>(initialFilters);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [perPage, setPerPageState] = useState(20);
+  const [pagination, setPagination] = useState({
+    total: 0,
+    page: 1,
+    pages: 1,
+    per_page: 20,
+  });
+
   const { toast } = useToast();
 
-  // Carregar canais de venda
-  const loadSalesChannels = useCallback(async (newFilters?: SalesChannelsFilters) => {
-    dispatch({ type: 'SET_LOADING', payload: true });
-    
+  const loadSalesChannels = useCallback(async () => {
     try {
-      const finalFilters = newFilters || filters;
-      const response = await SalesChannelsAPI.list(finalFilters);
-      dispatch({ type: 'SET_SALES_CHANNELS', payload: response });
-    } catch (error: any) {
-      dispatch({ type: 'SET_ERROR', payload: error.message });
-      toast({
-        title: 'Erro ao carregar canais de venda',
-        description: error.message,
-        variant: 'destructive'
+      setLoading(true);
+      setError(null);
+      
+      const response = await salesChannelsAPI.list({
+        page: currentPage,
+        per_page: perPage,
+        ...filters,
       });
+      
+      // ✅ CORREÇÃO: Garantir que sempre seja um array
+      setSalesChannels(response?.sales_channels || []);
+      setPagination({
+        total: response?.total || 0,
+        page: response?.page || 1,
+        pages: response?.pages || 1,
+        per_page: response?.per_page || 20,
+      });
+      
+    } catch (err: any) {
+      console.error('Erro ao carregar canais de venda:', err);
+      setError(err.response?.data?.detail || 'Erro ao carregar canais de venda');
+      // ✅ CORREÇÃO: Garantir array vazio em caso de erro
+      setSalesChannels([]);
+    } finally {
+      setLoading(false);
     }
-  }, [filters, toast]);
+  }, [currentPage, perPage, filters]);
 
-  // Carregar apenas canais externos
-  const loadExternalSalesChannels = useCallback(async () => {
-    dispatch({ type: 'SET_LOADING', payload: true });
-    
-    try {
-      const response = await SalesChannelsAPI.listExternal();
-      dispatch({ 
-        type: 'SET_SALES_CHANNELS', 
-        payload: {
-          sales_channels: response.sales_channels,
-          total: response.total,
-          page: 1,
-          per_page: response.total,
-          total_pages: 1
-        }
-      });
-    } catch (error: any) {
-      dispatch({ type: 'SET_ERROR', payload: error.message });
-      toast({
-        title: 'Erro ao carregar canais externos',
-        description: error.message,
-        variant: 'destructive'
-      });
-    }
-  }, [toast]);
+  const refreshData = useCallback(async () => {
+    await loadSalesChannels();
+  }, [loadSalesChannels]);
 
-  // Criar canal de venda
+  const setFilters = useCallback((newFilters: SalesChannelFilters) => {
+    setFiltersState(newFilters);
+    setCurrentPage(1); // Reset para primeira página quando filtros mudam
+  }, []);
+
+  const setPage = useCallback((page: number) => {
+    setCurrentPage(page);
+  }, []);
+
+  const setPerPage = useCallback((newPerPage: number) => {
+    setPerPageState(newPerPage);
+    setCurrentPage(1); // Reset para primeira página quando per_page muda
+  }, []);
+
+  const clearFilters = useCallback(() => {
+    setFiltersState(initialFilters);
+    setCurrentPage(1);
+  }, []);
+
   const createSalesChannel = useCallback(async (data: SalesChannelCreate) => {
     try {
-      const newSalesChannel = await SalesChannelsAPI.create(data);
-      dispatch({ type: 'ADD_SALES_CHANNEL', payload: newSalesChannel });
+      const response = await salesChannelsAPI.create(data);
+      
+      // Adicionar à lista
+      setSalesChannels(prev => [response, ...prev]);
       
       toast({
-        title: 'Canal de venda criado',
-        description: `${newSalesChannel.name} foi criado com sucesso.`
+        title: "Canal de venda criado",
+        description: "O canal de venda foi criado com sucesso.",
       });
       
-      return newSalesChannel;
-    } catch (error: any) {
+      return response;
+    } catch (err: any) {
+      console.error('Erro ao criar canal de venda:', err);
       toast({
-        title: 'Erro ao criar canal de venda',
-        description: error.message,
-        variant: 'destructive'
+        title: "Erro",
+        description: err.response?.data?.detail || 'Erro ao criar canal de venda',
+        variant: "destructive",
       });
-      throw error;
+      return null;
     }
   }, [toast]);
 
-  // Atualizar canal de venda
   const updateSalesChannel = useCallback(async (id: number, data: SalesChannelUpdate) => {
     try {
-      const updatedSalesChannel = await SalesChannelsAPI.update(id, data);
-      dispatch({ type: 'UPDATE_SALES_CHANNEL', payload: updatedSalesChannel });
+      const response = await salesChannelsAPI.update(id, data);
+      
+      // Atualizar na lista
+      setSalesChannels(prev => 
+        prev.map(channel => 
+          channel.id === id ? response : channel
+        )
+      );
       
       toast({
-        title: 'Canal de venda atualizado',
-        description: `${updatedSalesChannel.name} foi atualizado com sucesso.`
+        title: "Canal de venda atualizado",
+        description: "O canal de venda foi atualizado com sucesso.",
       });
       
-      return updatedSalesChannel;
-    } catch (error: any) {
-      toast({
-        title: 'Erro ao atualizar canal de venda',
-        description: error.message,
-        variant: 'destructive'
-      });
-      throw error;
-    }
-  }, [toast]);
-
-  // Deletar canal de venda
-  const deleteSalesChannel = useCallback(async (id: number, name: string) => {
-    try {
-      await SalesChannelsAPI.delete(id);
-      dispatch({ type: 'REMOVE_SALES_CHANNEL', payload: id });
-      
-      toast({
-        title: 'Canal de venda removido',
-        description: `${name} foi removido com sucesso.`
-      });
-    } catch (error: any) {
-      toast({
-        title: 'Erro ao remover canal de venda',
-        description: error.message,
-        variant: 'destructive'
-      });
-      throw error;
-    }
-  }, [toast]);
-
-  // Alternar status (ativar/desativar)
-  const toggleSalesChannelStatus = useCallback(async (id: number, isActive: boolean, name: string) => {
-    try {
-      await SalesChannelsAPI.toggleStatus(id, isActive);
-      dispatch({ 
-        type: 'TOGGLE_SALES_CHANNEL_STATUS', 
-        payload: { id, is_active: isActive } 
-      });
-      
-      toast({
-        title: `Canal de venda ${isActive ? 'ativado' : 'desativado'}`,
-        description: `${name} foi ${isActive ? 'ativado' : 'desativado'} com sucesso.`
-      });
-    } catch (error: any) {
-      toast({
-        title: 'Erro ao alterar status',
-        description: error.message,
-        variant: 'destructive'
-      });
-      throw error;
-    }
-  }, [toast]);
-
-  // Operações em massa
-  const performBulkOperation = useCallback(async (request: BulkOperationRequest) => {
-    try {
-      const response = await SalesChannelsAPI.bulkOperation(request);
-      
-      // Atualizar estado baseado na operação
-      if (request.operation === 'activate' || request.operation === 'deactivate') {
-        const isActive = request.operation === 'activate';
-        dispatch({
-          type: 'BULK_UPDATE',
-          payload: {
-            ids: request.channel_ids,
-            changes: { is_active: isActive }
-          }
-        });
-      } else if (request.operation === 'delete') {
-        // Remover múltiplos itens
-        request.channel_ids.forEach(id => {
-          dispatch({ type: 'REMOVE_SALES_CHANNEL', payload: id });
-        });
-      } else if (request.operation === 'update_commission' && request.data?.commission_percentage) {
-        dispatch({
-          type: 'BULK_UPDATE',
-          payload: {
-            ids: request.channel_ids,
-            changes: { commission_percentage: request.data.commission_percentage }
-          }
-        });
-      }
-
-      toast({
-        title: 'Operação realizada com sucesso',
-        description: `${response.affected_count} canais foram afetados.`
-      });
-      
-      setSelectedIds([]); // Limpar seleção
       return response;
-    } catch (error: any) {
+    } catch (err: any) {
+      console.error('Erro ao atualizar canal de venda:', err);
       toast({
-        title: 'Erro na operação em massa',
-        description: error.message,
-        variant: 'destructive'
+        title: "Erro",
+        description: err.response?.data?.detail || 'Erro ao atualizar canal de venda',
+        variant: "destructive",
       });
-      throw error;
+      return null;
     }
   }, [toast]);
 
-  // Calcular comissão
-  const calculateCommission = useCallback(async (id: number, request: CommissionCalculationRequest) => {
+  const deleteSalesChannel = useCallback(async (id: number) => {
     try {
-      const response = await SalesChannelsAPI.calculateCommission(id, request);
-      return response;
-    } catch (error: any) {
+      await salesChannelsAPI.delete(id);
+      
+      // Remover da lista
+      setSalesChannels(prev => prev.filter(channel => channel.id !== id));
+      
       toast({
-        title: 'Erro ao calcular comissão',
-        description: error.message,
-        variant: 'destructive'
+        title: "Canal de venda excluído",
+        description: "O canal de venda foi excluído com sucesso.",
       });
-      throw error;
+      
+      return true;
+    } catch (err: any) {
+      console.error('Erro ao excluir canal de venda:', err);
+      toast({
+        title: "Erro",
+        description: err.response?.data?.detail || 'Erro ao excluir canal de venda',
+        variant: "destructive",
+      });
+      return false;
     }
   }, [toast]);
 
-  // Aplicar filtros
-  const applyFilters = useCallback((newFilters: SalesChannelsFilters) => {
-    setFilters(newFilters);
-    loadSalesChannels(newFilters);
-  }, [loadSalesChannels]);
+  const getSalesChannel = useCallback(async (id: number) => {
+    try {
+      const response = await salesChannelsAPI.getById(id);
+      return response;
+    } catch (err: any) {
+      console.error('Erro ao buscar canal de venda:', err);
+      toast({
+        title: "Erro",
+        description: err.response?.data?.detail || 'Erro ao buscar canal de venda',
+        variant: "destructive",
+      });
+      return null;
+    }
+  }, [toast]);
 
-  // Limpar filtros
-  const clearFilters = useCallback(() => {
-    const clearedFilters = { page: 1, per_page: 10 };
-    setFilters(clearedFilters);
-    loadSalesChannels(clearedFilters);
-  }, [loadSalesChannels]);
-
-  // Gerenciar seleção
-  const toggleSelection = useCallback((id: number) => {
-    setSelectedIds(prev => 
-      prev.includes(id) 
-        ? prev.filter(selectedId => selectedId !== id)
-        : [...prev, id]
-    );
+  const getActiveSalesChannels = useCallback(async () => {
+    try {
+      const response = await salesChannelsAPI.getActive();
+      return response;
+    } catch (err: any) {
+      console.error('Erro ao buscar canais ativos:', err);
+      return [];
+    }
   }, []);
 
-  const selectAll = useCallback(() => {
-    setSelectedIds(state.salesChannels.map(sc => sc.id));
-  }, [state.salesChannels]);
-
-  const clearSelection = useCallback(() => {
-    setSelectedIds([]);
+  const getExternalChannels = useCallback(async () => {
+    try {
+      const response = await salesChannelsAPI.getExternal();
+      return response;
+    } catch (err: any) {
+      console.error('Erro ao buscar canais externos:', err);
+      return [];
+    }
   }, []);
 
-  // Carregar dados iniciais
+  const bulkOperation = useCallback(async (operation: {
+    operation: 'activate' | 'deactivate' | 'delete';
+    sales_channel_ids: number[];
+  }) => {
+    try {
+      const response = await salesChannelsAPI.bulkOperation(operation);
+      
+      // Recarregar dados após operação em massa
+      await loadSalesChannels();
+      
+      toast({
+        title: "Operação realizada",
+        description: `${operation.operation} executado com sucesso em ${operation.sales_channel_ids.length} canal(is).`,
+      });
+      
+      return response;
+    } catch (err: any) {
+      console.error('Erro na operação em massa:', err);
+      toast({
+        title: "Erro",
+        description: err.response?.data?.detail || 'Erro na operação em massa',
+        variant: "destructive",
+      });
+      return null;
+    }
+  }, [loadSalesChannels, toast]);
+
+  const updateOrder = useCallback(async (orderData: {
+    sales_channel_orders: Array<{ id: number; display_order: number }>;
+  }) => {
+    try {
+      const response = await salesChannelsAPI.updateOrder(orderData);
+      
+      // Atualizar lista com nova ordem
+      setSalesChannels(response);
+      
+      toast({
+        title: "Ordem atualizada",
+        description: "A ordem dos canais de venda foi atualizada com sucesso.",
+      });
+      
+      return response;
+    } catch (err: any) {
+      console.error('Erro ao atualizar ordem:', err);
+      toast({
+        title: "Erro",
+        description: err.response?.data?.detail || 'Erro ao atualizar ordem',
+        variant: "destructive",
+      });
+      return null;
+    }
+  }, [toast]);
+
+  const calculateCommission = useCallback(async (id: number, data: {
+    base_amount: number;
+    reservation_data?: any;
+  }) => {
+    try {
+      const response = await salesChannelsAPI.calculateCommission(id, data);
+      return response;
+    } catch (err: any) {
+      console.error('Erro ao calcular comissão:', err);
+      toast({
+        title: "Erro",
+        description: err.response?.data?.detail || 'Erro ao calcular comissão',
+        variant: "destructive",
+      });
+      return null;
+    }
+  }, [toast]);
+
+  const testConnection = useCallback(async (id: number) => {
+    try {
+      const response = await salesChannelsAPI.testConnection(id);
+      
+      toast({
+        title: response.success ? "Conexão bem-sucedida" : "Falha na conexão",
+        description: response.message,
+        variant: response.success ? "default" : "destructive",
+      });
+      
+      return response;
+    } catch (err: any) {
+      console.error('Erro ao testar conexão:', err);
+      toast({
+        title: "Erro",
+        description: err.response?.data?.detail || 'Erro ao testar conexão',
+        variant: "destructive",
+      });
+      return { success: false, message: 'Erro ao testar conexão' };
+    }
+  }, [toast]);
+
+  const setupDefaults = useCallback(async () => {
+    try {
+      const response = await salesChannelsAPI.setupDefaults();
+      
+      // Adicionar canais padrão à lista
+      setSalesChannels(response);
+      
+      toast({
+        title: "Canais padrão criados",
+        description: `${response.length} canal(is) de venda padrão foram criados com sucesso.`,
+      });
+      
+      return response;
+    } catch (err: any) {
+      console.error('Erro ao criar canais padrão:', err);
+      toast({
+        title: "Erro",
+        description: err.response?.data?.detail || 'Erro ao criar canais padrão',
+        variant: "destructive",
+      });
+      return null;
+    }
+  }, [toast]);
+
+  // Carregar dados inicial
   useEffect(() => {
     loadSalesChannels();
   }, [loadSalesChannels]);
 
   return {
-    // Estado
-    ...state,
+    salesChannels,
+    loading,
+    error,
+    pagination,
     filters,
-    selectedIds,
-    
-    // Ações
+    currentPage,
+    perPage,
     loadSalesChannels,
-    loadExternalSalesChannels,
+    refreshData,
+    setFilters,
+    setPage,
+    setPerPage,
+    clearFilters,
     createSalesChannel,
     updateSalesChannel,
     deleteSalesChannel,
-    toggleSalesChannelStatus,
-    performBulkOperation,
+    getSalesChannel,
+    getActiveSalesChannels,
+    getExternalChannels,
+    bulkOperation,
+    updateOrder,
     calculateCommission,
-    applyFilters,
-    clearFilters,
-    
-    // Seleção
-    toggleSelection,
-    selectAll,
-    clearSelection,
-    
-    // Utilitários
-    refresh: () => loadSalesChannels(),
-    hasMore: state.page < state.total_pages,
-    isEmpty: state.salesChannels.length === 0 && !state.loading,
-    hasSelected: selectedIds.length > 0,
-    selectedCount: selectedIds.length
-  };
-}
-
-// Hook simplificado para apenas buscar por ID
-export function useSalesChannel(id?: number) {
-  const [salesChannel, setSalesChannel] = useState<SalesChannel | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const { toast } = useToast();
-
-  const loadSalesChannel = useCallback(async (salesChannelId: number) => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const sc = await SalesChannelsAPI.getById(salesChannelId);
-      setSalesChannel(sc);
-    } catch (error: any) {
-      setError(error.message);
-      toast({
-        title: 'Erro ao carregar canal de venda',
-        description: error.message,
-        variant: 'destructive'
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [toast]);
-
-  useEffect(() => {
-    if (id) {
-      loadSalesChannel(id);
-    }
-  }, [id, loadSalesChannel]);
-
-  return {
-    salesChannel,
-    loading,
-    error,
-    loadSalesChannel,
-    refresh: () => id && loadSalesChannel(id)
+    testConnection,
+    setupDefaults,
   };
 }
