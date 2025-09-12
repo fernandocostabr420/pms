@@ -168,14 +168,13 @@ class SalesChannelService:
             if 'credentials' in audit_data:
                 audit_data['credentials'] = '***OMITIDO***'
             
-            self.audit_service.log_action(
+            self.audit_service.log_create(
                 table_name="sales_channels",
                 record_id=sales_channel.id,
-                action="CREATE",
-                user_id=current_user.id,
-                tenant_id=tenant_id,
-                description=f"Canal de venda '{sales_channel.name}' criado",
-                new_values=audit_data
+                new_values=audit_data,
+                user=current_user,
+                request=None,
+                description=f"Canal de venda '{sales_channel.name}' criado"
             )
             
             self.db.commit()
@@ -272,15 +271,14 @@ class SalesChannelService:
             if credentials:
                 audit_update_data['credentials'] = '***ATUALIZADO***'
             
-            self.audit_service.log_action(
+            self.audit_service.log_update(
                 table_name="sales_channels",
                 record_id=sales_channel.id,
-                action="UPDATE",
-                user_id=current_user.id,
-                tenant_id=tenant_id,
-                description=f"Canal de venda '{sales_channel.name}' atualizado",
                 old_values=old_values,
-                new_values=audit_update_data
+                new_values=audit_update_data,
+                user=current_user,
+                request=None,
+                description=f"Canal de venda '{sales_channel.name}' atualizado"
             )
             
             self.db.commit()
@@ -322,16 +320,15 @@ class SalesChannelService:
             sales_channel.is_active = False
             self.db.flush()
             
-            # Registrar auditoria
-            self.audit_service.log_action(
+            # Registrar auditoria (usando log_update pois é soft delete)
+            self.audit_service.log_update(
                 table_name="sales_channels",
                 record_id=sales_channel.id,
-                action="DELETE",
-                user_id=current_user.id,
-                tenant_id=tenant_id,
-                description=f"Canal de venda '{sales_channel.name}' desativado",
                 old_values={"is_active": True},
-                new_values={"is_active": False}
+                new_values={"is_active": False},
+                user=current_user,
+                request=None,
+                description=f"Canal de venda '{sales_channel.name}' desativado"
             )
             
             self.db.commit()
@@ -378,15 +375,14 @@ class SalesChannelService:
                     
                     # Registrar auditoria se houve mudança
                     if old_active != sales_channel.is_active:
-                        self.audit_service.log_action(
+                        self.audit_service.log_update(
                             table_name="sales_channels",
                             record_id=sales_channel.id,
-                            action=operation_data.operation.upper(),
-                            user_id=current_user.id,
-                            tenant_id=tenant_id,
-                            description=f"Operação em massa '{operation_data.operation}' no canal '{sales_channel.name}'",
                             old_values={"is_active": old_active},
-                            new_values={"is_active": sales_channel.is_active}
+                            new_values={"is_active": sales_channel.is_active},
+                            user=current_user,
+                            request=None,
+                            description=f"Operação em massa '{operation_data.operation}' no canal '{sales_channel.name}'"
                         )
                     
                     results.append({
@@ -435,15 +431,14 @@ class SalesChannelService:
                     sales_channel.display_order = order_item["display_order"]
                     
                     # Registrar auditoria
-                    self.audit_service.log_action(
+                    self.audit_service.log_update(
                         table_name="sales_channels",
                         record_id=sales_channel.id,
-                        action="UPDATE",
-                        user_id=current_user.id,
-                        tenant_id=tenant_id,
-                        description=f"Ordem de exibição do canal '{sales_channel.name}' alterada",
                         old_values={"display_order": old_order},
-                        new_values={"display_order": sales_channel.display_order}
+                        new_values={"display_order": sales_channel.display_order},
+                        user=current_user,
+                        request=None,
+                        description=f"Ordem de exibição do canal '{sales_channel.name}' alterada"
                     )
                     
                     updated_channels.append(sales_channel)
@@ -638,17 +633,33 @@ class SalesChannelService:
             
             # Registrar auditoria para cada canal criado
             for channel in default_channels:
+                # Preparar new_values com os dados do canal criado
+                new_values = {
+                    'name': channel.name,
+                    'code': channel.code,
+                    'description': channel.description,
+                    'display_order': channel.display_order,
+                    'icon': channel.icon,
+                    'color': channel.color,
+                    'channel_type': channel.channel_type,
+                    'is_external': channel.is_external,
+                    'is_active': channel.is_active,
+                    'commission_rate': float(channel.commission_rate) if channel.commission_rate else None,
+                    'commission_type': channel.commission_type,
+                    'base_fee': float(channel.base_fee) if channel.base_fee else None,
+                    'has_api_integration': channel.has_api_integration,
+                    'webhook_url': channel.webhook_url,
+                    'settings': channel.settings,
+                    'business_rules': channel.business_rules,
+                    'external_id': channel.external_id
+                }
+                
                 self.audit_service.log_create(
                     table_name="sales_channels",
                     record_id=channel.id,
-                    new_values={
-                        "name": channel.name,
-                        "code": channel.code,
-                        "description": channel.description,
-                        "channel_type": channel.channel_type,
-                        "display_order": channel.display_order
-                    },
+                    new_values=new_values,
                     user=current_user,
+                    request=None,
                     description=f"Canal de venda padrão '{channel.name}' criado automaticamente"
                 )
             

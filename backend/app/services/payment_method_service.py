@@ -128,14 +128,13 @@ class PaymentMethodService:
             self.db.flush()  # Para obter o ID
             
             # Registrar auditoria
-            self.audit_service.log_action(
+            self.audit_service.log_create(
                 table_name="payment_methods",
                 record_id=payment_method.id,
-                action="CREATE",
-                user_id=current_user.id,
-                tenant_id=tenant_id,
-                description=f"Método de pagamento '{payment_method.name}' criado",
-                new_values=payment_method_data.model_dump()
+                new_values=payment_method_data.model_dump(),
+                user=current_user,
+                request=None,
+                description=f"Método de pagamento '{payment_method.name}' criado"
             )
             
             self.db.commit()
@@ -217,15 +216,14 @@ class PaymentMethodService:
             self.db.flush()
             
             # Registrar auditoria
-            self.audit_service.log_action(
+            self.audit_service.log_update(
                 table_name="payment_methods",
                 record_id=payment_method.id,
-                action="UPDATE",
-                user_id=current_user.id,
-                tenant_id=tenant_id,
-                description=f"Método de pagamento '{payment_method.name}' atualizado",
                 old_values=old_values,
-                new_values=update_data
+                new_values=update_data,
+                user=current_user,
+                request=None,
+                description=f"Método de pagamento '{payment_method.name}' atualizado"
             )
             
             self.db.commit()
@@ -267,16 +265,15 @@ class PaymentMethodService:
             payment_method.is_active = False
             self.db.flush()
             
-            # Registrar auditoria
-            self.audit_service.log_action(
+            # Registrar auditoria (usando log_update pois é soft delete)
+            self.audit_service.log_update(
                 table_name="payment_methods",
                 record_id=payment_method.id,
-                action="DELETE",
-                user_id=current_user.id,
-                tenant_id=tenant_id,
-                description=f"Método de pagamento '{payment_method.name}' desativado",
                 old_values={"is_active": True},
-                new_values={"is_active": False}
+                new_values={"is_active": False},
+                user=current_user,
+                request=None,
+                description=f"Método de pagamento '{payment_method.name}' desativado"
             )
             
             self.db.commit()
@@ -323,15 +320,14 @@ class PaymentMethodService:
                     
                     # Registrar auditoria se houve mudança
                     if old_active != payment_method.is_active:
-                        self.audit_service.log_action(
+                        self.audit_service.log_update(
                             table_name="payment_methods",
                             record_id=payment_method.id,
-                            action=operation_data.operation.upper(),
-                            user_id=current_user.id,
-                            tenant_id=tenant_id,
-                            description=f"Operação em massa '{operation_data.operation}' no método '{payment_method.name}'",
                             old_values={"is_active": old_active},
-                            new_values={"is_active": payment_method.is_active}
+                            new_values={"is_active": payment_method.is_active},
+                            user=current_user,
+                            request=None,
+                            description=f"Operação em massa '{operation_data.operation}' no método '{payment_method.name}'"
                         )
                     
                     results.append({
@@ -380,15 +376,14 @@ class PaymentMethodService:
                     payment_method.display_order = order_item["display_order"]
                     
                     # Registrar auditoria
-                    self.audit_service.log_action(
+                    self.audit_service.log_update(
                         table_name="payment_methods",
                         record_id=payment_method.id,
-                        action="UPDATE",
-                        user_id=current_user.id,
-                        tenant_id=tenant_id,
-                        description=f"Ordem de exibição do método '{payment_method.name}' alterada",
                         old_values={"display_order": old_order},
-                        new_values={"display_order": payment_method.display_order}
+                        new_values={"display_order": payment_method.display_order},
+                        user=current_user,
+                        request=None,
+                        description=f"Ordem de exibição do método '{payment_method.name}' alterada"
                     )
                     
                     updated_methods.append(payment_method)
@@ -462,12 +457,28 @@ class PaymentMethodService:
             
             # Registrar auditoria para cada método criado
             for method in default_methods:
-                self.audit_service.log_action(
+                # Preparar new_values com os dados do método criado
+                new_values = {
+                    'name': method.name,
+                    'code': method.code,
+                    'description': method.description,
+                    'display_order': method.display_order,
+                    'icon': method.icon,
+                    'color': method.color,
+                    'is_active': method.is_active,
+                    'requires_reference': method.requires_reference,
+                    'has_fees': method.has_fees,
+                    'default_fee_rate': float(method.default_fee_rate) if method.default_fee_rate else None,
+                    'settings': method.settings,
+                    'validation_rules': method.validation_rules
+                }
+                
+                self.audit_service.log_create(
                     table_name="payment_methods",
                     record_id=method.id,
-                    action="CREATE",
-                    user_id=current_user.id,
-                    tenant_id=tenant_id,
+                    new_values=new_values,
+                    user=current_user,
+                    request=None,
                     description=f"Método de pagamento padrão '{method.name}' criado automaticamente"
                 )
             
