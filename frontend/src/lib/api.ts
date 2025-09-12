@@ -1,4 +1,4 @@
-// src/lib/api.ts - REFATORADO + DOWNLOAD VOUCHER + TODAS AS FUNCIONALIDADES MANTIDAS
+// src/lib/api.ts - REFATORADO + ESTACIONAMENTO + TODAS AS FUNCIONALIDADES MANTIDAS
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import Cookies from 'js-cookie';
 
@@ -42,7 +42,12 @@ import type {
   CheckInRequest,
   CheckOutRequest,
   CancelReservationRequest,
-  AvailabilityRequest
+  AvailabilityRequest,
+  // ✅ NOVOS IMPORTS - ESTACIONAMENTO
+  ParkingConfigResponse,
+  ParkingUpdateRequest,
+  ParkingAvailabilityRequest,
+  ParkingAvailabilityResponse
 } from '@/types/api';
 
 import {
@@ -178,6 +183,7 @@ interface ReservationDetailedResponse {
  * - Detecção de atividade do usuário
  * - Tratamento robusto de erros
  * - Cache inteligente
+ * - Gestão de estacionamento
  */
 class PMSApiClient {
   private client: AxiosInstance;
@@ -568,6 +574,59 @@ class PMSApiClient {
   async deleteProperty(id: number) {
     const response = await this.client.delete(`/properties/${id}`);
     return response.data;
+  }
+
+  // ===== PARKING API =====
+  
+  /**
+   * Busca configuração de estacionamento de uma propriedade
+   */
+  async getParkingConfiguration(propertyId: number): Promise<ParkingConfigResponse> {
+    try {
+      const response = await this.client.get<ParkingConfigResponse>(`/properties/${propertyId}/parking`);
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao buscar configuração de estacionamento:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Atualiza configuração de estacionamento de uma propriedade
+   */
+  async updateParkingConfiguration(
+    propertyId: number, 
+    data: ParkingUpdateRequest
+  ): Promise<ParkingConfigResponse> {
+    try {
+      const response = await this.client.put<ParkingConfigResponse>(
+        `/properties/${propertyId}/parking`, 
+        data
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao atualizar configuração de estacionamento:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Verifica disponibilidade de estacionamento para um período específico
+   */
+  async checkParkingAvailability(
+    propertyId: number,
+    data: ParkingAvailabilityRequest
+  ): Promise<ParkingAvailabilityResponse> {
+    try {
+      const response = await this.client.post<ParkingAvailabilityResponse>(
+        `/properties/${propertyId}/parking/check-availability`,
+        data
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao verificar disponibilidade de estacionamento:', error);
+      throw error;
+    }
   }
 
   // ===== RESERVATIONS API =====
