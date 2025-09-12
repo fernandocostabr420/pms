@@ -284,7 +284,7 @@ class ParkingConfigResponse(BaseModel):
     property_id: int
     property_name: str
     parking_enabled: bool
-    parking_spots_total: int
+    parking_spots_total: Optional[int] = 0
     parking_policy: str
     parking_policy_display: str
     has_parking: bool

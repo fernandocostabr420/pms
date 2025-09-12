@@ -3,7 +3,7 @@
 from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import and_, or_, func, desc, asc
+from sqlalchemy import and_, or_, func, desc, asc, not_  # ✅ CORRIGIDO: Adicionado not_
 from fastapi import Request, HTTPException, status
 from datetime import datetime, date, timedelta
 from decimal import Decimal
@@ -203,7 +203,7 @@ class ParkingService:
             daily_availability=daily_availability,
             can_reserve_integral=can_reserve_integral,
             can_reserve_flexible=can_reserve_flexible,
-            conflicts=conflicts if conflicts else None,
+            conflicts=conflicts if conflicts else [],
             alternative_dates=alternative_dates
         )
 

@@ -642,13 +642,13 @@ class ReservationService:
         
         if property_obj.parking_policy == "integral":
             # Política integral: deve ter vaga disponível em todos os dias
-            if not parking_availability['can_reserve_integral']:
+            if not parking_availability.can_reserve_integral:
                 conflicts = ', '.join(parking_availability.get('conflicts', []))
                 return f"Não há vagas disponíveis para toda a estadia. Conflitos: {conflicts}"
         
         elif property_obj.parking_policy == "flexible":
             # Política flexível: pode reservar mesmo se não tiver vaga em todos os dias
-            if not parking_availability['can_reserve_flexible']:
+            if not parking_availability.can_reserve_flexible:
                 return "Não há vagas disponíveis em nenhum dia da estadia"
             
             # Se há conflitos parciais, retornar aviso (não erro)

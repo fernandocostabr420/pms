@@ -8,7 +8,7 @@ from fastapi import Request
 
 from app.models.property import Property
 from app.models.user import User
-from app.schemas.property import PropertyCreate, PropertyUpdate, PropertyFilters
+from app.schemas.property import PropertyCreate, PropertyUpdate, PropertyFilters, ParkingConfigUpdate
 from app.services.audit_service import AuditService
 from app.utils.decorators import _extract_model_data, AuditContext
 
@@ -67,6 +67,27 @@ class PropertyService:
                     Property.amenities.op('?')(filters.has_amenity.lower())
                 )
             
+            # ✅ NOVO: Filtros de estacionamento
+            if filters.has_parking is not None:
+                if filters.has_parking:
+                    query = query.filter(
+                        and_(
+                            Property.parking_enabled == True,
+                            Property.parking_spots_total > 0
+                        )
+                    )
+                else:
+                    query = query.filter(
+                        or_(
+                            Property.parking_enabled == False,
+                            Property.parking_spots_total.is_(None),
+                            Property.parking_spots_total <= 0
+                        )
+                    )
+            
+            if filters.parking_policy:
+                query = query.filter(Property.parking_policy == filters.parking_policy.lower())
+            
             if filters.search:
                 # Busca textual em nome e descrição
                 search_term = f"%{filters.search}%"
@@ -98,6 +119,28 @@ class PropertyService:
                 query = query.filter(Property.is_operational == filters.is_operational)
             if filters.has_amenity:
                 query = query.filter(Property.amenities.op('?')(filters.has_amenity.lower()))
+            
+            # ✅ NOVO: Aplicar filtros de estacionamento na contagem também
+            if filters.has_parking is not None:
+                if filters.has_parking:
+                    query = query.filter(
+                        and_(
+                            Property.parking_enabled == True,
+                            Property.parking_spots_total > 0
+                        )
+                    )
+                else:
+                    query = query.filter(
+                        or_(
+                            Property.parking_enabled == False,
+                            Property.parking_spots_total.is_(None),
+                            Property.parking_spots_total <= 0
+                        )
+                    )
+            
+            if filters.parking_policy:
+                query = query.filter(Property.parking_policy == filters.parking_policy.lower())
+                
             if filters.search:
                 search_term = f"%{filters.search}%"
                 query = query.filter(
@@ -151,6 +194,10 @@ class PropertyService:
             website=property_data.website,
             check_in_time=property_data.check_in_time,
             check_out_time=property_data.check_out_time,
+            # ✅ NOVO: Campos de estacionamento
+            parking_enabled=getattr(property_data, 'parking_enabled', False),
+            parking_spots_total=getattr(property_data, 'parking_spots_total', None),
+            parking_policy=getattr(property_data, 'parking_policy', 'integral'),
             amenities=property_data.amenities,
             policies=property_data.policies,
             settings=property_data.settings,
@@ -210,6 +257,10 @@ class PropertyService:
             if hasattr(property_obj, field):
                 setattr(property_obj, field, value)
 
+        # ✅ NOVO: Validar configurações de estacionamento se atualizadas
+        if any(key in update_data for key in ['parking_enabled', 'parking_spots_total', 'parking_policy']):
+            self._validate_parking_config(property_obj)
+
         try:
             self.db.commit()
             self.db.refresh(property_obj)
@@ -230,6 +281,70 @@ class PropertyService:
         except IntegrityError:
             self.db.rollback()
             raise ValueError("Erro ao atualizar propriedade")
+
+    # ✅ NOVO: Método específico para atualizar configurações de estacionamento
+    def update_parking_config(
+        self,
+        property_id: int,
+        tenant_id: int,
+        parking_config: ParkingConfigUpdate,
+        current_user: User,
+        request: Optional[Request] = None
+    ) -> Optional[Property]:
+        """Atualiza apenas as configurações de estacionamento de uma propriedade"""
+        
+        property_obj = self.get_property_by_id(property_id, tenant_id)
+        if not property_obj:
+            return None
+
+        # Capturar valores antigos para auditoria
+        old_values = _extract_model_data(property_obj)
+
+        # Atualizar configurações de estacionamento
+        property_obj.parking_enabled = parking_config.parking_enabled
+        property_obj.parking_spots_total = parking_config.parking_spots_total
+        property_obj.parking_policy = parking_config.parking_policy
+
+        # Validar configurações
+        self._validate_parking_config(property_obj)
+
+        try:
+            self.db.commit()
+            self.db.refresh(property_obj)
+            
+            # Registrar auditoria
+            new_values = _extract_model_data(property_obj)
+            with AuditContext(self.db, current_user, request) as audit:
+                audit.log_update(
+                    "properties", 
+                    property_obj.id, 
+                    old_values, 
+                    new_values,
+                    f"Configurações de estacionamento da propriedade '{property_obj.name}' atualizadas"
+                )
+            
+            return property_obj
+            
+        except Exception as e:
+            self.db.rollback()
+            raise ValueError(f"Erro ao atualizar configurações de estacionamento: {str(e)}")
+
+    # ✅ NOVO: Método para validar configurações de estacionamento
+    def _validate_parking_config(self, property_obj: Property) -> None:
+        """Valida configurações de estacionamento"""
+        if property_obj.parking_enabled:
+            if not property_obj.parking_spots_total or property_obj.parking_spots_total <= 0:
+                raise ValueError("Quando estacionamento está habilitado, deve ter pelo menos 1 vaga")
+            
+            if property_obj.parking_spots_total > 999:
+                raise ValueError("Número máximo de vagas é 999")
+        
+        if property_obj.parking_policy and property_obj.parking_policy not in ['integral', 'flexible']:
+            raise ValueError("Política de estacionamento deve ser 'integral' ou 'flexible'")
+        
+        # Se estacionamento desabilitado, normalizar valores
+        if not property_obj.parking_enabled:
+            property_obj.parking_spots_total = None
 
     def delete_property(
         self, 
@@ -348,3 +463,60 @@ class PropertyService:
             Property.latitude.between(latitude - lat_range, latitude + lat_range),
             Property.longitude.between(longitude - lng_range, longitude + lng_range)
         ).all()
+
+    # ✅ NOVO: Métodos auxiliares para estacionamento
+    def get_properties_with_parking(self, tenant_id: int) -> List[Property]:
+        """Lista apenas propriedades que oferecem estacionamento"""
+        return self.db.query(Property).filter(
+            Property.tenant_id == tenant_id,
+            Property.is_active == True,
+            Property.parking_enabled == True,
+            Property.parking_spots_total > 0
+        ).all()
+
+    def get_parking_summary(self, tenant_id: int) -> Dict[str, Any]:
+        """Retorna resumo das configurações de estacionamento do tenant"""
+        
+        # Total de propriedades
+        total_properties = self.db.query(func.count(Property.id)).filter(
+            Property.tenant_id == tenant_id,
+            Property.is_active == True
+        ).scalar() or 0
+
+        # Propriedades com estacionamento
+        properties_with_parking = self.db.query(func.count(Property.id)).filter(
+            Property.tenant_id == tenant_id,
+            Property.is_active == True,
+            Property.parking_enabled == True,
+            Property.parking_spots_total > 0
+        ).scalar() or 0
+
+        # Total de vagas disponíveis
+        total_spots = self.db.query(func.sum(Property.parking_spots_total)).filter(
+            Property.tenant_id == tenant_id,
+            Property.is_active == True,
+            Property.parking_enabled == True
+        ).scalar() or 0
+
+        # Políticas utilizadas
+        policies = self.db.query(
+            Property.parking_policy,
+            func.count(Property.id).label('count')
+        ).filter(
+            Property.tenant_id == tenant_id,
+            Property.is_active == True,
+            Property.parking_enabled == True
+        ).group_by(Property.parking_policy).all()
+
+        policies_summary = {policy: count for policy, count in policies}
+
+        return {
+            'total_properties': total_properties,
+            'properties_with_parking': properties_with_parking,
+            'properties_without_parking': total_properties - properties_with_parking,
+            'total_parking_spots': total_spots,
+            'parking_policies': policies_summary,
+            'parking_coverage_rate': round(
+                (properties_with_parking / total_properties * 100) if total_properties > 0 else 0, 1
+            )
+        }
