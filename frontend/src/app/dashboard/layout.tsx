@@ -32,7 +32,8 @@ import {
   X,
   Search,
   Loader2,
-  FolderOpen
+  FolderOpen,
+  Car // ✅ NOVO ÍCONE - ESTACIONAMENTO
 } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -447,6 +448,14 @@ export default function DashboardLayout({
                     <Link href="/dashboard/rooms" className="flex items-center">
                       <Bed className="mr-2 h-4 w-4" />
                       Unidades Habitacionais
+                    </Link>
+                  </DropdownMenuItem>
+                  
+                  {/* ✅ NOVO ITEM - ESTACIONAMENTO */}
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/properties/parking" className="flex items-center">
+                      <Car className="mr-2 h-4 w-4" />
+                      Estacionamento
                     </Link>
                   </DropdownMenuItem>
                   

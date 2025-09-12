@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 
 // Hook personalizado para propriedade única
 import { useProperty } from '@/hooks/useProperty';
@@ -23,7 +24,7 @@ let Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter;
 let Popover, PopoverContent, PopoverTrigger;
 let Calendar;
 let Select, SelectContent, SelectItem, SelectTrigger, SelectValue;
-let Badge, Card, CardContent, Alert, AlertDescription, Checkbox;
+let Badge, Card, CardContent, Alert, AlertDescription;
 
 try {
   const dialogComponents = require('@/components/ui/dialog');
@@ -80,22 +81,6 @@ try {
   AlertDescription = ({ children }) => <div>{children}</div>;
 }
 
-try {
-  const checkboxComponents = require('@/components/ui/checkbox');
-  Checkbox = checkboxComponents.Checkbox;
-} catch (e) {
-  Checkbox = ({ checked, onCheckedChange, disabled, id }) => (
-    <input 
-      type="checkbox" 
-      checked={checked} 
-      onChange={(e) => onCheckedChange && onCheckedChange(e.target.checked)} 
-      disabled={disabled}
-      id={id}
-      className="rounded border-gray-300"
-    />
-  );
-}
-
 // Icons
 import { 
   CalendarIcon, 
@@ -110,7 +95,9 @@ import {
   Phone,
   Mail,
   DollarSign,
-  Loader2
+  Loader2,
+  Car, // ✅ NOVO ÍCONE - ESTACIONAMENTO
+  AlertTriangle // ✅ NOVO ÍCONE - ALERTA
 } from 'lucide-react';
 
 // Utils
@@ -415,6 +402,9 @@ const standardReservationSchema = z.object({
   source: z.string().optional(),
   requires_deposit: z.boolean().optional(),
   is_group_reservation: z.boolean().optional(),
+  
+  // ✅ NOVO CAMPO - ESTACIONAMENTO
+  parking_requested: z.boolean().optional(),
 }).refine((data) => {
   // Validação condicional: se guest_mode = 'existing', guest_id é obrigatório
   if (data.guest_mode === 'existing' && !data.guest_id) {
@@ -502,6 +492,11 @@ export default function StandardReservationModal({
   const [salesChannels, setSalesChannels] = useState<any[]>([]);
   const [loadingChannels, setLoadingChannels] = useState(false);
 
+  // ✅ NOVO: Estados para estacionamento
+  const [parkingConfig, setParkingConfig] = useState<any>(null);
+  const [loadingParking, setLoadingParking] = useState(false);
+  const [parkingAvailability, setParkingAvailability] = useState<any>(null);
+
   const { toast } = useToast();
 
   // ===== CONFIGURAÇÃO POR MODO =====
@@ -556,6 +551,7 @@ export default function StandardReservationModal({
       source: mode === 'map' ? 'room_map' : 'direct',
       requires_deposit: false,
       is_group_reservation: false,
+      parking_requested: false, // ✅ NOVO: Campo de estacionamento
     },
   });
 
@@ -564,6 +560,7 @@ export default function StandardReservationModal({
   const watchedRooms = watch('selected_rooms');
   const watchedAdults = watch('adults');
   const watchedChildren = watch('children');
+  const watchedParkingRequested = watch('parking_requested'); // ✅ NOVO: Watch estacionamento
 
   // ===== EFEITOS =====
   
@@ -588,6 +585,20 @@ export default function StandardReservationModal({
       loadAvailableRooms();
     }
   }, [checkInDate, checkOutDate, tenantProperty, watchedAdults, watchedChildren]);
+
+  // ✅ NOVO: Carregar configuração de estacionamento quando propriedade carregar
+  useEffect(() => {
+    if (tenantProperty && tenantProperty.id) {
+      loadParkingConfig();
+    }
+  }, [tenantProperty]);
+
+  // ✅ NOVO: Verificar disponibilidade de estacionamento quando datas ou estacionamento mudarem
+  useEffect(() => {
+    if (watchedParkingRequested && checkInDate && checkOutDate && tenantProperty) {
+      checkParkingAvailability();
+    }
+  }, [watchedParkingRequested, checkInDate, checkOutDate, tenantProperty]);
 
   // ✅ NOVO: Garantir recálculo quando datas mudarem no formulário
   useEffect(() => {
@@ -661,6 +672,44 @@ export default function StandardReservationModal({
     }
   };
 
+  // ✅ NOVO: Carregar configuração de estacionamento
+  const loadParkingConfig = async () => {
+    try {
+      setLoadingParking(true);
+      const response = await apiClient.get(`/properties/${tenantProperty.id}/parking`);
+      setParkingConfig(response.data);
+      console.log('Configuração de estacionamento carregada:', response.data);
+    } catch (error: any) {
+      console.error('Erro ao carregar configuração de estacionamento:', error);
+      setParkingConfig(null);
+    } finally {
+      setLoadingParking(false);
+    }
+  };
+
+  // ✅ NOVO: Verificar disponibilidade de estacionamento
+  const checkParkingAvailability = async () => {
+    if (!parkingConfig?.parking_enabled || !checkInDate || !checkOutDate) {
+      setParkingAvailability(null);
+      return;
+    }
+
+    try {
+      const response = await apiClient.post('/parking/check-availability', {
+        property_id: tenantProperty.id,
+        check_in_date: format(checkInDate, 'yyyy-MM-dd'),
+        check_out_date: format(checkOutDate, 'yyyy-MM-dd'),
+        exclude_reservation_id: isEditing ? reservation?.id : undefined,
+      });
+      
+      setParkingAvailability(response.data);
+      console.log('Disponibilidade de estacionamento:', response.data);
+    } catch (error: any) {
+      console.error('Erro ao verificar disponibilidade de estacionamento:', error);
+      setParkingAvailability(null);
+    }
+  };
+
   const loadInitialData = async () => {
     try {
       // ✅ NOVO: Carregar canais de venda junto com outros dados
@@ -710,6 +759,7 @@ export default function StandardReservationModal({
         internal_notes: reservation.internal_notes || '',
         requires_deposit: reservation.requires_deposit || false,
         is_group_reservation: reservation.is_group_reservation || false,
+        parking_requested: reservation.parking_requested || false, // ✅ NOVO: Campo de estacionamento
       };
       
       reset(formData);
@@ -725,6 +775,7 @@ export default function StandardReservationModal({
         guest_mode: config.defaultGuestMode,
         adults: prefilledData.adults || 2, // Garantir padrão de 2 adultos
         children: prefilledData.children || 0,
+        parking_requested: false, // ✅ NOVO: Padrão false para estacionamento
         ...prefilledData,
       };
 
@@ -776,6 +827,7 @@ export default function StandardReservationModal({
         source: mode === 'map' ? 'room_map' : 'direct',
         requires_deposit: false,
         is_group_reservation: false,
+        parking_requested: false, // ✅ NOVO: Padrão false para estacionamento
         check_in_date: format(today, 'yyyy-MM-dd'),
         check_out_date: format(tomorrow, 'yyyy-MM-dd'),
       });
@@ -879,6 +931,7 @@ export default function StandardReservationModal({
         internal_notes: data.internal_notes,
         requires_deposit: data.requires_deposit || false,
         is_group_reservation: data.is_group_reservation || false,
+        parking_requested: data.parking_requested || false, // ✅ NOVO: Campo de estacionamento
         
         // Quartos com datas
         rooms: data.selected_rooms.map(roomId => ({
@@ -974,6 +1027,8 @@ export default function StandardReservationModal({
       setAvailableRooms([]);
       setGuestSearch('');
       setSalesChannels([]); // ✅ NOVO: Limpar canais
+      setParkingConfig(null); // ✅ NOVO: Limpar configuração de estacionamento
+      setParkingAvailability(null); // ✅ NOVO: Limpar disponibilidade de estacionamento
       onClose();
     }
   };
@@ -1045,6 +1100,15 @@ export default function StandardReservationModal({
   const nights = calculateNights();
   const estimatedTotal = calculateTotal();
 
+  // ✅ NOVO: Verificar se estacionamento pode ser exibido
+  const showParkingSection = parkingConfig?.parking_enabled && !loadingParking;
+
+  // ✅ NOVO: Determinar se há alerta de estacionamento
+  const hasParkinAlert = showParkingSection && watchedParkingRequested && parkingAvailability && (
+    !parkingAvailability.available ||
+    (parkingConfig?.parking_policy === 'flexible' && parkingAvailability.partial_availability)
+  );
+
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
       <DialogContent className="!w-[750px] !max-w-[750px] max-h-[85vh] overflow-y-auto">
@@ -1073,6 +1137,16 @@ export default function StandardReservationModal({
                   <span className="text-sm text-blue-800 font-medium">
                     Propriedade: <strong>{tenantProperty.name}</strong>
                   </span>
+                  {/* ✅ NOVO: Indicador de estacionamento na propriedade */}
+                  {showParkingSection && (
+                    <div className="flex items-center gap-1 ml-4">
+                      <Car className="h-4 w-4 text-blue-600" />
+                      <span className="text-xs text-blue-700">
+                        Estacionamento: {parkingConfig.parking_spots_total} vagas 
+                        ({parkingConfig.parking_policy === 'integral' ? 'Integral' : 'Flexível'})
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1355,6 +1429,78 @@ export default function StandardReservationModal({
               </div>
             </div>
 
+            {/* ✅ NOVA SEÇÃO - ESTACIONAMENTO */}
+            {showParkingSection && (
+              <div className="space-y-3">
+                <h3 className="text-sm font-medium flex items-center gap-2">
+                  <Car className="h-4 w-4" />
+                  Estacionamento
+                </h3>
+
+                <div className="px-2">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="parking_requested"
+                      checked={watchedParkingRequested}
+                      onCheckedChange={(checked) => setValue('parking_requested', !!checked)}
+                      disabled={loading}
+                    />
+                    <Label htmlFor="parking_requested" className="text-sm">
+                      Solicitar vaga de estacionamento
+                    </Label>
+                  </div>
+                  
+                  {watchedParkingRequested && (
+                    <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                      <div className="text-xs text-blue-700">
+                        <div><strong>Vagas disponíveis:</strong> {parkingConfig.parking_spots_total}</div>
+                        <div><strong>Política:</strong> {parkingConfig.parking_policy_display}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ✅ ALERTA DE DISPONIBILIDADE DE ESTACIONAMENTO */}
+                  {hasParkinAlert && (
+                    <div className="mt-2">
+                      {!parkingAvailability.available ? (
+                        <Alert variant="destructive">
+                          <AlertTriangle className="h-4 w-4" />
+                          <AlertDescription>
+                            <div className="space-y-1">
+                              <div className="font-medium">Estacionamento Indisponível</div>
+                              <div className="text-sm">
+                                Não há vagas de estacionamento disponíveis para todo o período da reserva.
+                              </div>
+                              {parkingConfig.parking_policy === 'integral' && (
+                                <div className="text-sm">
+                                  Com a política integral, a reserva não pode ser feita sem vagas disponíveis.
+                                </div>
+                              )}
+                            </div>
+                          </AlertDescription>
+                        </Alert>
+                      ) : parkingAvailability.partial_availability && parkingConfig.parking_policy === 'flexible' ? (
+                        <Alert>
+                          <AlertTriangle className="h-4 w-4" />
+                          <AlertDescription>
+                            <div className="space-y-1">
+                              <div className="font-medium">Disponibilidade Parcial</div>
+                              <div className="text-sm">
+                                O estacionamento não estará disponível em todos os dias da estadia.
+                              </div>
+                              <div className="text-sm">
+                                Política flexível: reserva permitida com alerta ao hóspede.
+                              </div>
+                            </div>
+                          </AlertDescription>
+                        </Alert>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Seleção de Quarto */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -1431,6 +1577,13 @@ export default function StandardReservationModal({
                           <span>Hóspedes:</span>
                           <span className="font-medium">{(watchedValues.adults || 0) + (watchedValues.children || 0)}</span>
                         </div>
+                        {/* ✅ NOVO: Indicador de estacionamento no resumo */}
+                        {watchedParkingRequested && (
+                          <div className="flex justify-between">
+                            <span>Estacionamento:</span>
+                            <span className="font-medium text-blue-600">Solicitado</span>
+                          </div>
+                        )}
                         <div className="flex justify-between font-medium text-sm border-t pt-2 mt-2">
                           <span>Total:</span>
                           <span className="text-green-600">{AutoCurrencyUtils.formatWithSymbol(estimatedTotal)}</span>
@@ -1521,7 +1674,12 @@ export default function StandardReservationModal({
               </Button>
               <Button 
                 type="submit" 
-                disabled={loading || watchedRooms.length === 0 || loadingProperty}
+                disabled={
+                  loading || 
+                  watchedRooms.length === 0 || 
+                  loadingProperty ||
+                  (watchedParkingRequested && parkingAvailability && !parkingAvailability.available && parkingConfig?.parking_policy === 'integral') // ✅ NOVO: Bloquear se estacionamento indisponível e política integral
+                }
                 className="min-w-[120px] h-9 px-4 text-sm focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
               >
                 {loading && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}

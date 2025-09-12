@@ -60,6 +60,11 @@ export interface PropertyResponse {
   tenant_id: number;
   created_at: string;
   updated_at: string;
+  
+  // ✅ NOVOS CAMPOS - ESTACIONAMENTO
+  parking_enabled: boolean;
+  parking_spots_total: number;
+  parking_policy: 'integral' | 'flexible';
 }
 
 // ===== ROOM TYPES =====
@@ -118,6 +123,27 @@ export interface ReservationResponse {
   nights: number | null;
   tenant_id: number;
   created_at: string;
+  
+  // ✅ NOVOS CAMPOS - ESTACIONAMENTO
+  parking_requested: boolean;
+  parking_display: string;
+}
+
+// ===== PARKING TYPES =====
+export interface ParkingConfigResponse {
+  property_id: number;
+  property_name: string;
+  parking_enabled: boolean;
+  parking_spots_total: number;
+  parking_policy: 'integral' | 'flexible';
+  parking_policy_display: string;
+  has_parking: boolean;
+}
+
+export interface ParkingUpdateRequest {
+  parking_enabled: boolean;
+  parking_spots_total: number;
+  parking_policy: 'integral' | 'flexible';
 }
 
 // ===== COMMON TYPES =====

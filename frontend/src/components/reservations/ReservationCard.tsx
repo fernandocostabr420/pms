@@ -29,7 +29,8 @@ import {
   DollarSign,
   Globe,
   Hash,
-  User
+  User,
+  Car // ✅ NOVO ÍCONE - ESTACIONAMENTO
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -108,6 +109,9 @@ export default function ReservationCard({
     onClick?.(reservation);
   };
 
+  // ✅ VERIFICAR SE TEM ESTACIONAMENTO SOLICITADO
+  const hasParking = reservation.parking_requested || false;
+
   return (
     <div 
       className="bg-white border border-gray-200 rounded-lg p-6 hover:shadow-md transition-all duration-200 cursor-pointer" // ✅ Adicionar cursor pointer
@@ -120,8 +124,17 @@ export default function ReservationCard({
           <div className="flex items-start justify-between mb-4">
             <div className="space-y-2">
               <div className="flex items-center gap-3">
-                <h3 className="text-lg font-semibold text-gray-900">
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                   #{reservation.reservation_number}
+                  {/* ✅ ÍCONE DE ESTACIONAMENTO - Aparece se parking_requested = true */}
+                  {hasParking && (
+                    <div 
+                      className="flex items-center justify-center w-6 h-6 bg-blue-100 rounded-full"
+                      title="Estacionamento solicitado"
+                    >
+                      <Car className="h-4 w-4 text-blue-600" />
+                    </div>
+                  )}
                 </h3>
                 {getStatusBadge(reservation.status)}
                 {getPaymentBadge()}
@@ -285,6 +298,19 @@ export default function ReservationCard({
             </div>
           )}
 
+          {/* ✅ SEÇÃO DE ESTACIONAMENTO - Nova seção dedicada */}
+          {hasParking && (
+            <div className="bg-blue-50 p-3 rounded-lg mb-4 border border-blue-200">
+              <div className="flex items-center gap-2 mb-2">
+                <Car className="h-4 w-4 text-blue-600" />
+                <div className="text-xs font-medium text-blue-600">ESTACIONAMENTO</div>
+              </div>
+              <div className="text-sm text-blue-900 font-medium">
+                {reservation.parking_display || 'Estacionamento solicitado'}
+              </div>
+            </div>
+          )}
+
           {/* Informações Financeiras */}
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-green-50 p-3 rounded-lg">
@@ -412,7 +438,7 @@ export default function ReservationCard({
 
           {/* Status Especiais */}
           {(reservation.is_group_reservation || reservation.requires_deposit || 
-            reservation.guest_requests || reservation.internal_notes) && (
+            reservation.guest_requests || reservation.internal_notes || hasParking) && (
             <div className="bg-yellow-50 p-4 rounded-lg">
               <div className="space-y-2">
                 {reservation.is_group_reservation && (
@@ -428,6 +454,14 @@ export default function ReservationCard({
                       : "bg-red-100 text-red-800"
                   }>
                     Depósito {reservation.deposit_paid ? 'Pago' : 'Pendente'}
+                  </Badge>
+                )}
+
+                {/* ✅ BADGE PARA ESTACIONAMENTO */}
+                {hasParking && (
+                  <Badge variant="outline" className="bg-blue-100 text-blue-800">
+                    <Car className="h-3 w-3 mr-1" />
+                    Estacionamento Solicitado
                   </Badge>
                 )}
                 

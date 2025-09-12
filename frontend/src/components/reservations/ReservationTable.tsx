@@ -1,4 +1,4 @@
-// frontend/src/components/reservations/ReservationTable.tsx - CORRIGIDO PARA MAPEAMENTOS
+// frontend/src/components/reservations/ReservationTable.tsx - CORRIGIDO PARA MAPEAMENTOS + ESTACIONAMENTO
 
 'use client';
 
@@ -50,7 +50,8 @@ import {
   Settings,
   UserPlus,
   MessageSquare,
-  Share2
+  Share2,
+  Car // ✅ NOVO ÍCONE - ESTACIONAMENTO
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ReservationResponseWithGuestDetails } from '@/types/reservation';
@@ -471,6 +472,9 @@ export default function ReservationTable({
             
             const quickActions = getQuickActions(reservation);
             
+            // ✅ VERIFICAR SE TEM ESTACIONAMENTO SOLICITADO
+            const hasParking = reservation.parking_requested || false;
+            
             return (
               <TableRow 
                 key={reservation.id} 
@@ -478,9 +482,20 @@ export default function ReservationTable({
                 onClick={(e) => handleRowClick(reservation, e)}
               >
                 <TableCell className="px-2 py-3 font-mono text-sm text-gray-600">
-                  <div className="flex items-center">
-                    <Hash className="h-3 w-3 mr-1 text-gray-400" />
-                    {reservation.id}
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center">
+                      <Hash className="h-3 w-3 mr-1 text-gray-400" />
+                      {reservation.id}
+                    </div>
+                    {/* ✅ ÍCONE DE ESTACIONAMENTO - Aparece se parking_requested = true */}
+                    {hasParking && (
+                      <div 
+                        className="flex items-center justify-center w-5 h-5 bg-blue-100 rounded-full"
+                        title="Estacionamento solicitado"
+                      >
+                        <Car className="h-3 w-3 text-blue-600" />
+                      </div>
+                    )}
                   </div>
                 </TableCell>
 

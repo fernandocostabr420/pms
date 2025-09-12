@@ -15,8 +15,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Car, Info } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { PropertyResponse } from '@/types/api';
 import { useToast } from '@/hooks/use-toast';
@@ -38,6 +39,11 @@ const propertySchema = z.object({
   check_out_time: z.string().optional(),
   latitude: z.number().optional(),
   longitude: z.number().optional(),
+  
+  // ✅ NOVOS CAMPOS - ESTACIONAMENTO
+  parking_enabled: z.boolean(),
+  parking_spots_total: z.number().min(0, 'Número de vagas deve ser maior ou igual a 0').optional(),
+  parking_policy: z.enum(['integral', 'flexible']).optional(),
 });
 
 type PropertyFormData = z.infer<typeof propertySchema>;
@@ -57,6 +63,20 @@ const PROPERTY_TYPES = [
   { value: 'resort', label: 'Resort' },
   { value: 'flat', label: 'Flat' },
   { value: 'casa', label: 'Casa' },
+];
+
+// ✅ OPÇÕES DE POLÍTICA DE ESTACIONAMENTO
+const PARKING_POLICIES = [
+  { 
+    value: 'integral', 
+    label: 'Política Integral',
+    description: 'Vagas devem estar disponíveis para toda a estadia'
+  },
+  { 
+    value: 'flexible', 
+    label: 'Política Flexível',
+    description: 'Permite reservar mesmo sem vagas em todos os dias'
+  },
 ];
 
 // Função para gerar slug a partir do nome
@@ -82,14 +102,21 @@ export default function PropertyModal({ isOpen, onClose, property }: PropertyMod
     formState: { errors },
     reset,
     setValue,
+    watch,
   } = useForm<PropertyFormData>({
     resolver: zodResolver(propertySchema),
     defaultValues: {
       country: 'Brasil',
       check_in_time: '14:00',
       check_out_time: '12:00',
+      parking_enabled: false,
+      parking_spots_total: 0,
+      parking_policy: 'integral',
     },
   });
+
+  // ✅ WATCH PARKING ENABLED STATE
+  const parkingEnabled = watch('parking_enabled');
 
   // Resetar form quando modal abrir/fechar ou propriedade mudar
   useEffect(() => {
@@ -108,6 +135,9 @@ export default function PropertyModal({ isOpen, onClose, property }: PropertyMod
           country: 'Brasil',
           check_in_time: '14:00',
           check_out_time: '12:00',
+          parking_enabled: false,
+          parking_spots_total: 0,
+          parking_policy: 'integral',
         });
       }
       setError(null);
@@ -132,6 +162,10 @@ export default function PropertyModal({ isOpen, onClose, property }: PropertyMod
         // Remover os campos com underscore do frontend
         address_line_1: undefined,
         address_line_2: undefined,
+        
+        // ✅ CAMPOS DE ESTACIONAMENTO - Limpar se estacionamento desabilitado
+        parking_spots_total: data.parking_enabled ? (data.parking_spots_total || 0) : 0,
+        parking_policy: data.parking_enabled ? data.parking_policy : 'integral',
       };
 
       // Limpar campos vazios ou undefined
@@ -335,6 +369,88 @@ export default function PropertyModal({ isOpen, onClose, property }: PropertyMod
                 )}
               </div>
             </div>
+          </div>
+
+          {/* ✅ NOVA SEÇÃO - ESTACIONAMENTO */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Car className="h-5 w-5 text-blue-600" />
+              <h3 className="text-lg font-medium text-gray-900">Estacionamento</h3>
+            </div>
+            
+            {/* Switch para habilitar estacionamento */}
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="parking_enabled" className="text-base">
+                  Habilitar Estacionamento
+                </Label>
+                <div className="text-sm text-gray-500">
+                  Permitir que hóspedes solicitem vagas de estacionamento
+                </div>
+              </div>
+              <Switch
+                id="parking_enabled"
+                {...register('parking_enabled')}
+                disabled={loading}
+              />
+            </div>
+
+            {/* Configurações de estacionamento (só aparece se habilitado) */}
+            {parkingEnabled && (
+              <div className="space-y-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="parking_spots_total">Número Total de Vagas *</Label>
+                    <Input
+                      {...register('parking_spots_total', { valueAsNumber: true })}
+                      id="parking_spots_total"
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="5"
+                      disabled={loading}
+                    />
+                    {errors.parking_spots_total && (
+                      <p className="text-sm text-red-600 mt-1">{errors.parking_spots_total.message}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <Label htmlFor="parking_policy">Política de Liberação *</Label>
+                    <select
+                      {...register('parking_policy')}
+                      id="parking_policy"
+                      disabled={loading}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
+                    >
+                      {PARKING_POLICIES.map((policy) => (
+                        <option key={policy.value} value={policy.value}>
+                          {policy.label}
+                        </option>
+                      ))}
+                    </select>
+                    {errors.parking_policy && (
+                      <p className="text-sm text-red-600 mt-1">{errors.parking_policy.message}</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Informações sobre as políticas */}
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription>
+                    <div className="space-y-2">
+                      <div>
+                        <strong>Política Integral:</strong> Só permite reserva se houver vagas disponíveis para todos os dias da estadia.
+                      </div>
+                      <div>
+                        <strong>Política Flexível:</strong> Permite reservar mesmo sem vagas em todos os dias, mas exibe alerta informativo.
+                      </div>
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              </div>
+            )}
           </div>
 
           {/* Contato */}
