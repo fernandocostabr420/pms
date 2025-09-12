@@ -212,26 +212,30 @@ class Reservation(BaseModel, TenantMixin):
         if not self.check_in_date or not self.check_out_date:
             return 0
         return (self.check_out_date - self.check_in_date).days
-    
+
     @property
     def total_paid(self):
         """Total efetivamente pago (apenas pagamentos confirmados)"""
+        if not self.payments:
+            return Decimal('0')
         confirmed_payments = [p for p in self.payments if p.status == "confirmed" and not p.is_refund]
-        return sum(p.amount for p in confirmed_payments)
-    
+        return sum((p.amount for p in confirmed_payments), Decimal('0'))
+
     @property
     def total_refunded(self):
         """Total estornado"""
+        if not self.payments:
+            return Decimal('0')
         refunds = [p for p in self.payments if p.status == "confirmed" and p.is_refund]
-        return sum(p.amount for p in refunds)
-    
+        return sum((p.amount for p in refunds), Decimal('0'))
+
     @property
     def balance_due(self):
         """Saldo devedor baseado nos pagamentos reais"""
         if not self.total_amount:
             return Decimal('0')
         return self.total_amount - self.total_paid + self.total_refunded
-    
+
     @property
     def balance_due_legacy(self):
         """Saldo devedor usando campo paid_amount (compatibilidade)"""

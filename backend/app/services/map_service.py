@@ -1,7 +1,7 @@
 # backend/app/services/map_service.py
 
 from typing import Optional, List, Dict, Any, Tuple
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload  # ✅ ADICIONADO selectinload
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import and_, or_, func, case, text, desc
 from datetime import datetime, date, timedelta
@@ -115,8 +115,9 @@ class MapService:
                         check_in_date=reservation.check_in_date,
                         check_out_date=reservation.check_out_date,
                         nights=reservation.nights,
-                        total_amount=reservation.total_amount,
-                        paid_amount=reservation.total_paid,
+                        total_amount=reservation.total_amount or Decimal('0.00'),
+                        paid_amount=reservation.total_paid,  # ✅ CORRIGIDO: Agora payments estão carregados
+                        total_paid=reservation.total_paid,   # ✅ ADICIONADO: Campo adicional se necessário
                         balance_due=reservation.balance_due,
                         total_guests=reservation.total_guests,
                         source=reservation.source,
@@ -161,7 +162,7 @@ class MapService:
                     category_stats['available_rooms'] += 1
                 
                 category_stats['total_reservations'] += len(room_room_reservations)
-                category_stats['total_revenue'] += sum(r.total_amount for r in room_room_reservations)
+                category_stats['total_revenue'] += sum(r.total_amount or Decimal('0.00') for r in room_room_reservations)
             
             # Calcular ocupação média da categoria
             if category_stats['total_rooms'] > 0:
@@ -253,9 +254,10 @@ class MapService:
         
         rooms = rooms_query.all()
         
-        # Buscar reservas do período - USANDO A LÓGICA CORRIGIDA
+        # ✅ CORRIGIDO: Buscar reservas do período COM payments carregados
         reservations_query = self.db.query(Reservation).options(
-            joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room)
+            joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room),
+            selectinload(Reservation.payments)  # ✅ ADICIONADO: Carrega payments
         ).filter(
             Reservation.tenant_id == tenant_id,
             Reservation.is_active == True,
@@ -301,10 +303,10 @@ class MapService:
         available_room_nights = total_room_nights - occupied_room_nights
         occupancy_rate = (occupied_room_nights / total_room_nights * 100) if total_room_nights > 0 else 0
         
-        # Estatísticas de receita
-        total_revenue = sum(r.total_amount for r in reservations if r.status != 'cancelled')
-        confirmed_revenue = sum(r.total_amount for r in reservations if r.status in ['confirmed', 'checked_in', 'checked_out'])
-        pending_revenue = sum(r.total_amount for r in reservations if r.status == 'pending')
+        # ✅ CORRIGIDO: Estatísticas de receita usando total_paid (agora payments estão carregados)
+        total_revenue = sum(r.total_amount or Decimal('0.00') for r in reservations if r.status != 'cancelled')
+        confirmed_revenue = sum(r.total_amount or Decimal('0.00') for r in reservations if r.status in ['confirmed', 'checked_in', 'checked_out'])
+        pending_revenue = sum(r.total_amount or Decimal('0.00') for r in reservations if r.status == 'pending')
         
         average_daily_rate = (total_revenue / occupied_room_nights) if occupied_room_nights > 0 else Decimal('0.00')
         revenue_per_available_room = (total_revenue / total_room_nights) if total_room_nights > 0 else Decimal('0.00')
@@ -342,7 +344,7 @@ class MapService:
             rt_total_rooms = len(rt_data['rooms'])
             rt_operational = sum(1 for r in rt_data['rooms'] if r.is_operational)
             rt_reservations = len(rt_data['reservations'])
-            rt_revenue = sum(r.total_amount for r in rt_data['reservations'] if r.status != 'cancelled')
+            rt_revenue = sum(r.total_amount or Decimal('0.00') for r in rt_data['reservations'] if r.status != 'cancelled')
             rt_room_nights = rt_operational * total_days
             rt_occupied_nights = 0
             
@@ -442,11 +444,12 @@ class MapService:
         include_cancelled: bool = False
     ) -> List[Reservation]:
         """
-        ✅ CORRIGIDO: Busca reservas que se sobrepõem ao período
+        ✅ CORRIGIDO: Busca reservas que se sobrepõem ao período COM payments carregados
         """
         query = self.db.query(Reservation).options(
             joinedload(Reservation.guest),
-            joinedload(Reservation.reservation_rooms).joinedload(ReservationRoom.room)
+            selectinload(Reservation.reservation_rooms).joinedload(ReservationRoom.room),
+            selectinload(Reservation.payments)  # ✅ ADICIONADO: Carrega payments para evitar N+1 queries
         ).filter(
             Reservation.tenant_id == tenant_id,
             Reservation.is_active == True,
@@ -488,7 +491,6 @@ class MapService:
                 print(f"DEBUG - Reserva check-out no start_date: {res.reservation_number}, status: {res.status}")
         
         return reservations
-
 
     def _map_reservations_by_room(
         self, 
