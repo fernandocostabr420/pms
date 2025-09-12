@@ -17,7 +17,8 @@ import {
   AlertTriangle, 
   Wrench,
   Calendar,
-  DollarSign
+  DollarSign,
+  Car  // ✅ ADICIONADO: Ícone de estacionamento
 } from 'lucide-react';
 // ✅ NOVAS IMPORTAÇÕES - Modal de reserva
 import { ReservationQuickView } from './ReservationQuickView';
@@ -400,11 +401,16 @@ export default function RoomMapGrid({
                 }}
                 title={`${reservation.guest_name} - ${reservation.reservation_number} - Clique para detalhes`}
               >
-                {/* NOME COMPLETO DO HÓSPEDE */}
-                <span className="font-medium truncate leading-tight px-2">
+                {/* ✅ CORRIGIDO: NOME DO HÓSPEDE COM ÍCONE DE ESTACIONAMENTO */}
+                <span className="font-medium truncate leading-tight px-2 flex items-center gap-1">
                   {reservation.guest_name}
+                  {/* ✅ ÍCONE DE ESTACIONAMENTO */}
+                  {reservation.parking_requested && (
+                    <Car className="h-2 w-2 flex-shrink-0 text-white opacity-90" title="Estacionamento solicitado" />
+                  )}
                 </span>
                 
+                {/* Indicadores existentes (chegada/partida) */}
                 {reservation.is_arrival && (
                   <div className="absolute top-1 left-1 w-1.5 h-1.5 bg-green-400 rounded-full" />
                 )}

@@ -24,6 +24,9 @@ class MapReservationResponse(BaseModel):
     source: Optional[str] = None
     notes: Optional[str] = None
     
+    # ✅ NOVO: Campo de estacionamento
+    parking_requested: bool = False
+    
     # Status indicators
     is_arrival: bool = False
     is_departure: bool = False
