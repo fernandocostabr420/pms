@@ -41,7 +41,8 @@ import {
   UserCheck,
   FileText,
   Settings,
-  AlertTriangle
+  AlertTriangle,
+  Download
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import apiClient from '@/lib/api';
@@ -755,8 +756,18 @@ const ConfirmReservationModal = ({
   );
 };
 
-// ✅ COMPONENTE Header CORRIGIDO - Com validação de data para check-in
-function ImprovedReservationHeader({ data, onAction }: { data: any; onAction: (action: string) => void }) {
+// ✅ COMPONENTE Header CORRIGIDO - Com validação de data para check-in + DOWNLOAD VOUCHER
+function ImprovedReservationHeader({ 
+  data, 
+  onAction, 
+  voucherLoading, 
+  onDownloadVoucher 
+}: { 
+  data: any; 
+  onAction: (action: string) => void;
+  voucherLoading: boolean;
+  onDownloadVoucher: () => void;
+}) {
   const getStatusColor = (status: string) => {
     const colors = {
       pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
@@ -769,6 +780,9 @@ function ImprovedReservationHeader({ data, onAction }: { data: any; onAction: (a
   };
 
   const roomsDisplay = data.rooms?.map(room => `${room.room_number} (${room.room_type_name})`).join(', ') || 'Quartos não informados';
+
+  // ✅ VALIDAÇÃO: Permitir download de voucher apenas para reservas confirmadas ou com status superior
+  const canDownloadVoucher = ['confirmed', 'checked_in', 'checked_out'].includes(data.status);
 
   return (
     <Card className="border-l-4 border-l-blue-500">
@@ -824,6 +838,29 @@ function ImprovedReservationHeader({ data, onAction }: { data: any; onAction: (a
             </Badge>
             
             <div className="flex gap-2 flex-wrap">
+              {/* ✅ NOVO: Botão de Download Voucher */}
+              {canDownloadVoucher && (
+                <Button
+                  onClick={onDownloadVoucher}
+                  disabled={voucherLoading}
+                  className="bg-blue-600 hover:bg-blue-700"
+                  size="sm"
+                  title="Baixar voucher da reserva em PDF"
+                >
+                  {voucherLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Gerando...
+                    </>
+                  ) : (
+                    <>
+                      <Download className="h-4 w-4 mr-2" />
+                      Baixar Voucher
+                    </>
+                  )}
+                </Button>
+              )}
+
               {/* ✅ CORRIGIDO: Botão de Confirmar - apenas para reservas pendentes */}
               {data.status === 'pending' && (
                 <Button 
@@ -925,6 +962,51 @@ export default function ReservationDetailsPage() {
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
+
+  // ✅ NOVO ESTADO: Para controlar loading do voucher
+  const [voucherLoading, setVoucherLoading] = useState(false);
+
+  // ✅ FUNÇÃO CORRIGIDA: Download do voucher usando apiClient
+  const downloadVoucher = async () => {
+    if (!data) return;
+
+    try {
+      setVoucherLoading(true);
+      
+      // ✅ USAR O MÉTODO DO APICLIENT QUE JÁ TEM AUTH CONFIGURADO
+      const blob = await apiClient.downloadReservationVoucher(data.id);
+      
+      // Criar URL temporária para download
+      const url = window.URL.createObjectURL(blob);
+      
+      // Gerar nome do arquivo
+      const timestamp = format(new Date(), 'yyyy-MM-dd_HH-mm');
+      const filename = `voucher_${data.reservation_number}_${timestamp}.pdf`;
+      
+      // Criar link e acionar download
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      toast({
+        title: 'Voucher baixado com sucesso!',
+        description: `O voucher da reserva ${data.reservation_number} foi baixado.`,
+      });
+    } catch (error: any) {
+      console.error('Erro ao baixar voucher:', error);
+      toast({
+        title: 'Erro ao baixar voucher',
+        description: error.response?.data?.detail || error.message || 'Erro interno do servidor',
+        variant: 'destructive',
+      });
+    } finally {
+      setVoucherLoading(false);
+    }
+  };
 
   // ✅ IMPLEMENTAÇÃO CONDICIONAL: Detectar parâmetros da URL e abrir modais APENAS do QuickView
   useEffect(() => {
@@ -1231,8 +1313,13 @@ export default function ReservationDetailsPage() {
         <span className="font-medium text-sm">{data.guest?.full_name || data.reservation_number}</span>
       </div>
 
-      {/* Header melhorado e corrigido */}
-      <ImprovedReservationHeader data={data} onAction={handleAction} />
+      {/* Header melhorado e corrigido + Download Voucher */}
+      <ImprovedReservationHeader 
+        data={data} 
+        onAction={handleAction}
+        voucherLoading={voucherLoading}
+        onDownloadVoucher={downloadVoucher}
+      />
 
       {/* Grid principal - COMPACTADO */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

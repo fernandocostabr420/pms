@@ -1,4 +1,4 @@
-# backend/app/services/voucher_service.py - BASEADO NO CÓDIGO ORIGINAL
+# backend/app/services/voucher_service.py - CORRIGIDO PARA MOSTRAR MÉTODO DE PAGAMENTO
 
 import io
 import logging
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class LandscapeVoucherService:
-    """Serviço para vouchers em formato paisagem - versão baseada no original"""
+    """Serviço para vouchers em formato paisagem - versão corrigida para método de pagamento"""
     
     def __init__(self, db: Session):
         self.db = db
@@ -49,7 +49,7 @@ class LandscapeVoucherService:
             raise Exception(f"Erro na geração do voucher: {str(e)}")
     
     def _prepare_data(self, detailed_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Prepara dados usando valores corretos do sistema"""
+        """Prepara dados usando valores corretos do sistema - CORRIGIDO MÉTODO DE PAGAMENTO"""
         def format_date(date_value):
             if not date_value:
                 return "N/A"
@@ -123,49 +123,61 @@ class LandscapeVoucherService:
         paid_amount = payment_data.get('paid_amount', 0) or 0
         balance_due = payment_data.get('balance_due', 0) or 0
         
-        # Buscar método de pagamento usando a mesma lógica da página detalhada
+        # === BUSCAR MÉTODO DE PAGAMENTO - NOVA IMPLEMENTAÇÃO CORRIGIDA ===
         payment_method = "Nenhum pagamento"
         payments_list = detailed_data.get('payments', [])
         
+        logger.info(f"Pagamentos encontrados: {len(payments_list) if payments_list else 0}")
+        
         if payments_list and len(payments_list) > 0:
-            # Os pagamentos vêm direto do modelo, não do PaymentResponse
-            # Vamos acessar o primeiro pagamento (mais recente)
-            latest_payment = payments_list[0]
-            
-            # Se é um objeto Payment, usar as properties diretamente
-            if hasattr(latest_payment, 'payment_method_display'):
-                payment_method = latest_payment.payment_method_display
-            elif hasattr(latest_payment, 'payment_method'):
-                # Aplicar a mesma formatação que existe no modelo Payment
-                method_raw = latest_payment.payment_method
-                method_map = {
-                    "pix": "PIX",
-                    "credit_card": "Cartão de Crédito", 
-                    "debit_card": "Cartão de Débito",
-                    "bank_transfer": "Transferência Bancária",
-                    "cash": "Dinheiro",
-                    "check": "Cheque",
-                    "other": "Outro"
-                }
-                payment_method = method_map.get(method_raw, method_raw.title() if method_raw else "Não especificado")
-            # Se é um dict (improvável, mas para ser seguro)
-            elif isinstance(latest_payment, dict):
-                method_display = latest_payment.get('payment_method_display')
-                if method_display and method_display not in ['N/A', '', None]:
-                    payment_method = method_display
+            # Filtrar apenas pagamentos confirmados (não cancelados)
+            confirmed_payments = []
+            for payment in payments_list:
+                # Verificar se é objeto Payment ou dict
+                if hasattr(payment, 'status'):
+                    status = payment.status
+                elif isinstance(payment, dict):
+                    status = payment.get('status')
                 else:
-                    method_raw = latest_payment.get('payment_method')
-                    if method_raw and method_raw not in ['N/A', '', None]:
-                        method_map = {
-                            "pix": "PIX",
-                            "credit_card": "Cartão de Crédito", 
-                            "debit_card": "Cartão de Débito",
-                            "bank_transfer": "Transferência Bancária",
-                            "cash": "Dinheiro",
-                            "check": "Cheque",
-                            "other": "Outro"
-                        }
-                        payment_method = method_map.get(method_raw.lower(), method_raw.title())
+                    continue
+                
+                # Considerar apenas pagamentos confirmados
+                if status == 'confirmed':
+                    confirmed_payments.append(payment)
+            
+            # Se não tem confirmados, pegar o mais recente independente do status
+            target_payments = confirmed_payments if confirmed_payments else payments_list
+            
+            if target_payments:
+                # Usar o primeiro/mais recente
+                latest_payment = target_payments[0]
+                
+                logger.info(f"Processando pagamento: type={type(latest_payment)}")
+                
+                # MÉTODO 1: Se é objeto Payment (SQLAlchemy), usar property diretamente
+                if hasattr(latest_payment, 'payment_method_display'):
+                    payment_method = latest_payment.payment_method_display
+                    logger.info(f"Método obtido via payment_method_display: {payment_method}")
+                
+                # MÉTODO 2: Se é objeto Payment, acessar payment_method e fazer mapping
+                elif hasattr(latest_payment, 'payment_method'):
+                    method_raw = latest_payment.payment_method
+                    payment_method = self._format_payment_method(method_raw)
+                    logger.info(f"Método obtido via payment_method: {method_raw} -> {payment_method}")
+                
+                # MÉTODO 3: Se é dict, tentar payment_method_display primeiro
+                elif isinstance(latest_payment, dict):
+                    method_display = latest_payment.get('payment_method_display')
+                    if method_display and method_display not in ['N/A', '', None]:
+                        payment_method = method_display
+                        logger.info(f"Método obtido via dict payment_method_display: {payment_method}")
+                    else:
+                        method_raw = latest_payment.get('payment_method')
+                        if method_raw and method_raw not in ['N/A', '', None]:
+                            payment_method = self._format_payment_method(method_raw)
+                            logger.info(f"Metodo obtido via dict payment_method: {method_raw} -> {payment_method}")
+        
+        logger.info(f"Método de pagamento final: {payment_method}")
         
         return {
             'property_name': property_data.get('name', 'Hotel'),
@@ -189,6 +201,25 @@ class LandscapeVoucherService:
             'status': detailed_data.get('status', 'confirmed').upper(),
             'source': detailed_data.get('source', 'PMS').upper()
         }
+    
+    def _format_payment_method(self, method_raw: str) -> str:
+        """
+        Formatar método de pagamento usando o mesmo mapeamento do modelo Payment
+        """
+        if not method_raw:
+            return "Não especificado"
+        
+        method_map = {
+            "pix": "PIX",
+            "credit_card": "Cartão de Crédito",
+            "debit_card": "Cartão de Débito", 
+            "bank_transfer": "Transferência Bancária",
+            "cash": "Dinheiro",
+            "check": "Cheque",
+            "other": "Outro"
+        }
+        
+        return method_map.get(method_raw.lower(), method_raw.title())
     
     def _generate_landscape_pdf(self, data: Dict[str, Any]) -> bytes:
         """Gera PDF em formato paisagem - baseado no código original"""
@@ -296,7 +327,7 @@ class LandscapeVoucherService:
             ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#cbd5e1')),
         ]))
         
-        # COLUNA 2: Informações financeiras (SEM STATUS PAGAMENTO)
+        # COLUNA 2: Informações financeiras
         financial_data = [
             ["VALOR TOTAL", data['total_amount']],
             ["VALOR PAGO", data['paid_amount']],

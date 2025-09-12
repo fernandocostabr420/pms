@@ -1,6 +1,8 @@
-// src/lib/api.ts - ARQUIVO COMPLETO + SISTEMA DE REFRESH PROATIVO + TODAS AS FUNCIONALIDADES ORIGINAIS
+// src/lib/api.ts - REFATORADO + DOWNLOAD VOUCHER + TODAS AS FUNCIONALIDADES MANTIDAS
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import Cookies from 'js-cookie';
+
+// ===== TYPE IMPORTS =====
 import type { 
   LoginRequest, 
   AuthResponse, 
@@ -66,7 +68,6 @@ import {
   CategorySummaryData,
 } from '@/types/room-map';
 
-// Novos tipos adicionados para funcionalidades expandidas
 import {
   ReservationFilters as ReservationFiltersNew,
   ReservationResponseWithGuestDetails,
@@ -83,6 +84,19 @@ import {
   PropertyDetails
 } from '@/types/reservation';
 
+import {
+  PaymentResponse,
+  PaymentListResponse, 
+  PaymentCreate,
+  PaymentUpdate,
+  PaymentStatusUpdate,
+  PaymentConfirmedUpdate,
+  PaymentDeleteConfirmed,
+  PaymentPermissions,
+  PaymentSecurityWarning
+} from '@/types/payment';
+
+// ===== INTERFACE DEFINITIONS =====
 interface ReservationStatsExtended {
   total_reservations: number;
   total_revenue: number;
@@ -98,7 +112,6 @@ interface ReservationStatsExtended {
   }>;
 }
 
-// ===== NOVOS TIPOS PARA DASHBOARD =====
 export interface RecentReservationResponse {
   id: number;
   reservation_number: string;
@@ -114,7 +127,6 @@ export interface RecentReservationResponse {
   balance_due: string;
   nights: number;
   created_at: string;
-  // Todos os outros campos de ReservationResponseWithGuestDetails
 }
 
 export interface CheckedInPendingPayment {
@@ -153,30 +165,25 @@ export interface TodaysReservationsImproved {
   current_guests: any[];
 }
 
-// Tipo adicional para compatibilidade (mantido do código original)
 interface ReservationDetailedResponse {
   [key: string]: any;
 }
 
-// ✅ NOVOS IMPORTS PARA FUNCIONALIDADES ADMINISTRATIVAS DE PAGAMENTOS
-import {
-  PaymentResponse,
-  PaymentListResponse, 
-  PaymentCreate,
-  PaymentUpdate,
-  PaymentStatusUpdate,
-  // ✅ NOVOS TIPOS PARA FUNCIONALIDADES ADMINISTRATIVAS
-  PaymentConfirmedUpdate,
-  PaymentDeleteConfirmed,
-  PaymentPermissions,
-  PaymentSecurityWarning
-} from '@/types/payment';
-
+/**
+ * API Client para o Sistema de Gestão Hoteleira
+ * 
+ * Features:
+ * - Autenticação automática com JWT
+ * - Refresh proativo de tokens
+ * - Detecção de atividade do usuário
+ * - Tratamento robusto de erros
+ * - Cache inteligente
+ */
 class PMSApiClient {
   private client: AxiosInstance;
   private baseURL: string;
   
-  // ===== ✅ NOVAS PROPRIEDADES PARA SISTEMA DE REFRESH PROATIVO =====
+  // ===== SISTEMA DE REFRESH PROATIVO =====
   private refreshTimer: NodeJS.Timeout | null = null;
   private activityTimer: NodeJS.Timeout | null = null;
   private lastActivity: number = Date.now();
@@ -184,9 +191,9 @@ class PMSApiClient {
   private activityListeners: (() => void)[] = [];
   
   // Configurações do sistema proativo
-  private readonly REFRESH_BUFFER_MINUTES = 5; // Renovar 5 min antes de expirar
-  private readonly ACTIVITY_TIMEOUT_MINUTES = 15; // Considerar inativo após 15 min
-  private readonly MIN_REFRESH_INTERVAL_MINUTES = 5; // Mínimo entre renovações
+  private readonly REFRESH_BUFFER_MINUTES = 5;
+  private readonly ACTIVITY_TIMEOUT_MINUTES = 15;
+  private readonly MIN_REFRESH_INTERVAL_MINUTES = 5;
 
   constructor() {
     this.baseURL = process.env.NEXT_PUBLIC_API_URL || 'http://72.60.50.223:8000';
@@ -203,9 +210,9 @@ class PMSApiClient {
     this.setupActivityDetection();
   }
 
-  // ===== ✅ NOVO SISTEMA DE DETECÇÃO DE ATIVIDADE =====
+  // ===== SETUP E CONFIGURAÇÃO =====
   private setupActivityDetection() {
-    if (typeof window === 'undefined') return; // SSR safety
+    if (typeof window === 'undefined') return;
 
     const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
     
@@ -213,31 +220,27 @@ class PMSApiClient {
       this.lastActivity = Date.now();
       this.isUserActive = true;
       
-      // Reset activity timer
       if (this.activityTimer) {
         clearTimeout(this.activityTimer);
       }
       
-      // Set user as inactive after timeout
       this.activityTimer = setTimeout(() => {
         this.isUserActive = false;
-        console.log('👤 Usuário considerado inativo - pausando refresh automático');
+        console.log('👤 Usuário inativo - pausando refresh automático');
       }, this.ACTIVITY_TIMEOUT_MINUTES * 60 * 1000);
     };
 
-    // Add event listeners
     activityEvents.forEach(event => {
       const listener = () => updateActivity();
       document.addEventListener(event, listener, true);
       this.activityListeners.push(() => document.removeEventListener(event, listener, true));
     });
 
-    // Initial activity
     updateActivity();
   }
 
   private setupInterceptors() {
-    // Request interceptor - adiciona token JWT
+    // Request interceptor
     this.client.interceptors.request.use(
       (config) => {
         const token = this.getToken();
@@ -249,7 +252,7 @@ class PMSApiClient {
       (error) => Promise.reject(error)
     );
 
-    // Response interceptor - trata erros e refresh token (mantém sistema reativo como fallback)
+    // Response interceptor
     this.client.interceptors.response.use(
       (response) => response,
       async (error) => {
@@ -259,15 +262,17 @@ class PMSApiClient {
           originalRequest._retry = true;
           
           try {
-            console.log('🔄 Refresh reativo acionado (fallback)');
+            console.log('🔄 Refresh reativo acionado');
             await this.refreshToken();
             const token = this.getToken();
             originalRequest.headers.Authorization = `Bearer ${token}`;
             return this.client(originalRequest);
           } catch (refreshError) {
-            console.log('❌ Refresh falhou - redirecionando para login');
+            console.log('❌ Refresh falhou - redirecionando');
             this.logout();
-            window.location.href = '/login';
+            if (typeof window !== 'undefined') {
+              window.location.href = '/login';
+            }
             return Promise.reject(refreshError);
           }
         }
@@ -277,33 +282,29 @@ class PMSApiClient {
     );
   }
 
-  // ===== ✅ SISTEMA DE REFRESH PROATIVO =====
+  // ===== SISTEMA DE REFRESH PROATIVO =====
   private startProactiveRefresh(expiresInSeconds: number) {
-    // Limpar timer anterior se existir
     this.stopProactiveRefresh();
 
-    // Calcular quando deve renovar (buffer antes da expiração)
     const refreshInMs = Math.max(
       (expiresInSeconds - (this.REFRESH_BUFFER_MINUTES * 60)) * 1000,
-      this.MIN_REFRESH_INTERVAL_MINUTES * 60 * 1000 // Mínimo de 5 minutos
+      this.MIN_REFRESH_INTERVAL_MINUTES * 60 * 1000
     );
 
     console.log(`⏰ Refresh proativo agendado para ${Math.round(refreshInMs / 1000 / 60)} minutos`);
 
     this.refreshTimer = setTimeout(async () => {
-      // Só renovar se usuário estiver ativo
       if (!this.isUserActive) {
-        console.log('😴 Usuário inativo - pulando refresh automático');
+        console.log('😴 Usuário inativo - pulando refresh');
         return;
       }
 
       try {
-        console.log('🔄 Executando refresh proativo automático');
+        console.log('🔄 Executando refresh proativo');
         await this.refreshToken();
         console.log('✅ Token renovado automaticamente');
       } catch (error) {
         console.error('❌ Erro no refresh proativo:', error);
-        // O interceptor vai lidar com isso na próxima requisição
       }
     }, refreshInMs);
   }
@@ -324,7 +325,7 @@ class PMSApiClient {
     this.activityListeners = [];
   }
 
-  // ===== TOKEN MANAGEMENT (MODIFICADO) =====
+  // ===== TOKEN MANAGEMENT =====
   private getToken(): string | null {
     return Cookies.get('access_token') || null;
   }
@@ -333,11 +334,8 @@ class PMSApiClient {
     return Cookies.get('refresh_token') || null;
   }
 
-  // ✅ MÉTODO MODIFICADO: setTokens agora inicia o refresh proativo
   private setTokens(accessToken: string, refreshToken: string, expiresIn: number) {
-    // Access token expira em expiresIn segundos
     const accessExpires = new Date(Date.now() + expiresIn * 1000);
-    // Refresh token expira em 7 dias (como no backend)
     const refreshExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     Cookies.set('access_token', accessToken, { 
@@ -352,35 +350,97 @@ class PMSApiClient {
       sameSite: 'lax'
     });
 
-    // ✅ INICIAR SISTEMA PROATIVO
     this.startProactiveRefresh(expiresIn);
   }
 
-  // ✅ MÉTODO MODIFICADO: removeTokens agora limpa timers
   private removeTokens() {
     Cookies.remove('access_token');
     Cookies.remove('refresh_token');
     Cookies.remove('user_data');
     Cookies.remove('tenant_data');
-    
-    // ✅ LIMPAR SISTEMA PROATIVO
     this.stopProactiveRefresh();
   }
 
-  // ===== AUTH METHODS =====
+  // ===== UTILITY METHODS =====
+  private encodeSearchParams(params: Record<string, any>): Record<string, any> {
+    const encoded = { ...params };
+    
+    if (encoded.search && typeof encoded.search === 'string') {
+      const searchValue = encoded.search.trim();
+      if (searchValue.includes('@') && !searchValue.includes('%40')) {
+        encoded.search = encodeURIComponent(searchValue);
+        console.log(`🔍 Email encodado: ${searchValue} → ${encoded.search}`);
+      }
+    }
+    
+    if (encoded.guest_email && typeof encoded.guest_email === 'string') {
+      const emailValue = encoded.guest_email.trim();
+      if (emailValue.includes('@') && !emailValue.includes('%40')) {
+        encoded.guest_email = encodeURIComponent(emailValue);
+      }
+    }
+    
+    return encoded;
+  }
+
+  private buildQueryParams(params: Record<string, any>): URLSearchParams {
+    const queryParams = new URLSearchParams();
+    
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== null && value !== undefined && value !== '' && value !== 'all') {
+        if (Array.isArray(value)) {
+          value.forEach(v => queryParams.append(key, v.toString()));
+        } else {
+          queryParams.append(key, value.toString());
+        }
+      }
+    });
+    
+    return queryParams;
+  }
+
+  private handleApiError(error: any): never {
+    if (error.response) {
+      const message = error.response.data?.detail || 
+                      error.response.data?.message || 
+                      'Erro na requisição';
+      throw new Error(message);
+    } else if (error.request) {
+      throw new Error('Erro de conexão. Verifique sua internet.');
+    } else {
+      throw new Error(error.message || 'Erro desconhecido');
+    }
+  }
+
+  // ===== GENERIC HTTP METHODS =====
+  async get<T>(url: string, params?: any): Promise<AxiosResponse<T>> {
+    return this.client.get<T>(url, { params });
+  }
+
+  async post<T>(url: string, data?: any): Promise<AxiosResponse<T>> {
+    return this.client.post<T>(url, data);
+  }
+
+  async put<T>(url: string, data?: any): Promise<AxiosResponse<T>> {
+    return this.client.put<T>(url, data);
+  }
+
+  async delete<T>(url: string, options?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
+    return this.client.delete<T>(url, options);
+  }
+
+  // ===== AUTHENTICATION =====
   async login(credentials: LoginRequest): Promise<AuthResponse> {
     try {
       const response = await this.client.post<AuthResponse>('/auth/login', credentials);
       const { user, tenant, token } = response.data;
       
-      // Salvar tokens (vai iniciar sistema proativo automaticamente)
       this.setTokens(token.access_token, token.refresh_token, token.expires_in);
       
-      // Salvar dados do usuário e tenant
       Cookies.set('user_data', JSON.stringify(user), { expires: 7 });
       Cookies.set('tenant_data', JSON.stringify(tenant), { expires: 7 });
       
-      console.log('✅ Login realizado - sistema de refresh proativo ativado');
+      console.log('✅ Login realizado - sistema proativo ativado');
       return response.data;
     } catch (error) {
       console.error('Login error:', error);
@@ -400,18 +460,15 @@ class PMSApiClient {
       });
       
       const { access_token, refresh_token: newRefreshToken, expires_in } = response.data;
-      
-      // Salvar novos tokens (vai resetar o timer proativo automaticamente)
       this.setTokens(access_token, newRefreshToken, expires_in);
       
-      console.log('🔄 Token renovado - timer proativo resetado');
+      console.log('🔄 Token renovado - timer resetado');
     } catch (error) {
       console.error('Token refresh error:', error);
       throw error;
     }
   }
 
-  // ✅ MÉTODO MODIFICADO: logout agora limpa tudo
   logout(): void {
     console.log('👋 Logout - limpando sistema proativo');
     this.removeTokens();
@@ -432,16 +489,13 @@ class PMSApiClient {
     return tenantData ? JSON.parse(tenantData) : null;
   }
 
-  // ✅ NOVO MÉTODO: Verificar se o usuário atual tem permissões de administrador
   async checkAdminPermissions(): Promise<boolean> {
     try {
-      // Primeiro verificar no cache local
       const userData = this.getCurrentUser();
       if (userData && userData.is_superuser !== undefined) {
         return userData.is_superuser;
       }
       
-      // Se não tem no cache, buscar do servidor
       const response = await this.get<{ is_superuser: boolean }>('/auth/me');
       return response.data.is_superuser;
     } catch (error) {
@@ -450,25 +504,13 @@ class PMSApiClient {
     }
   }
 
-  // ===== ✅ NOVOS MÉTODOS PARA CONTROLE MANUAL DO SISTEMA =====
-  
-  /**
-   * Força uma renovação manual do token (útil para debugging)
-   */
+  // ===== SYSTEM CONTROL =====
   async forceTokenRefresh(): Promise<void> {
-    console.log('🔧 Forçando renovação manual do token');
+    console.log('🔧 Forçando renovação manual');
     await this.refreshToken();
   }
 
-  /**
-   * Verifica o status do sistema de refresh proativo
-   */
-  getRefreshStatus(): {
-    hasActiveTimer: boolean;
-    isUserActive: boolean;
-    lastActivity: string;
-    secondsSinceActivity: number;
-  } {
+  getRefreshStatus() {
     return {
       hasActiveTimer: this.refreshTimer !== null,
       isUserActive: this.isUserActive,
@@ -477,35 +519,13 @@ class PMSApiClient {
     };
   }
 
-  /**
-   * Reinicia a detecção de atividade (útil se necessário)
-   */
   resetActivityDetection(): void {
     console.log('🔄 Reiniciando detecção de atividade');
     this.cleanupActivityListeners();
     this.setupActivityDetection();
   }
 
-  // ===== GENERIC HTTP METHODS =====
-  
-  async get<T>(url: string, params?: any): Promise<AxiosResponse<T>> {
-    return this.client.get<T>(url, { params });
-  }
-
-  async post<T>(url: string, data?: any): Promise<AxiosResponse<T>> {
-    return this.client.post<T>(url, data);
-  }
-
-  async put<T>(url: string, data?: any): Promise<AxiosResponse<T>> {
-    return this.client.put<T>(url, data);
-  }
-
-  async delete<T>(url: string, options?: AxiosRequestConfig): Promise<AxiosResponse<T>> {
-    return this.client.delete<T>(url, options);
-  }
-
   // ===== PROPERTIES API =====
-  
   async getProperties(params?: { 
     page?: number; 
     per_page?: number; 
@@ -521,7 +541,6 @@ class PMSApiClient {
     return response.data;
   }
 
-  // Novo método para compatibilidade com novas funcionalidades
   async getPropertyById(id: number, includeRooms = false): Promise<PropertyDetails> {
     const params = includeRooms ? { include_rooms: true } : {};
     const response = await this.client.get<PropertyDetails>(`/properties/${id}`, { params });
@@ -529,16 +548,12 @@ class PMSApiClient {
   }
 
   async createProperty(data: any) {
-    // Normalizar dados para compatibilidade com backend
     const normalizedData = {
       ...data,
-      // Gerar slug automaticamente se não fornecido
       slug: data.slug || data.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
-      // Corrigir nome do campo de endereço
       address_line1: data.address_line_1 || data.address_line1,
     };
     
-    // Remover campo com nome incorreto
     delete normalizedData.address_line_1;
     
     const response = await this.client.post('/properties/', normalizedData);
@@ -555,37 +570,7 @@ class PMSApiClient {
     return response.data;
   }
 
-  // ===== CORREÇÃO: MÉTODO PARA CODIFICAR PARÂMETROS DE BUSCA =====
-  // ===== CORREÇÃO: MÉTODO PARA CODIFICAR PARÂMETROS DE BUSCA =====
-private encodeSearchParams(params: Record<string, any>): Record<string, any> {
-  const encoded = { ...params };
-  
-  // ✅ CORREÇÃO ESPECÍFICA: Encodar parâmetro search se contém email (evitar dupla codificação)
-  if (encoded.search && typeof encoded.search === 'string') {
-    const searchValue = encoded.search.trim();
-    
-    // Detectar se é email (contém @) e ainda não foi encodado
-    if (searchValue.includes('@') && !searchValue.includes('%40')) {
-      encoded.search = encodeURIComponent(searchValue);
-      console.log(`🔍 Email encodado: ${searchValue} → ${encoded.search}`); // DEBUG
-    } else if (searchValue.includes('@')) {
-      console.log(`🔍 Email já encodado: ${searchValue}`); // DEBUG
-    }
-  }
-  
-  // Aplicar mesma lógica para guest_email
-  if (encoded.guest_email && typeof encoded.guest_email === 'string') {
-    const emailValue = encoded.guest_email.trim();
-    if (emailValue.includes('@') && !emailValue.includes('%40')) {
-      encoded.guest_email = encodeURIComponent(emailValue);
-    }
-  }
-  
-  return encoded;
-}
-
-  // ===== RESERVATIONS API (MÉTODOS ORIGINAIS MANTIDOS + EXPANDIDOS) =====
-
+  // ===== RESERVATIONS API =====
   async getReservations(params?: { 
     page?: number; 
     per_page?: number; 
@@ -605,8 +590,6 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
     requires_deposit?: boolean;
     is_group_reservation?: boolean;
     search?: string;
-    
-    // ===== NOVOS PARÂMETROS ADICIONADOS =====
     guest_email?: string;
     guest_phone?: string;
     guest_nationality?: string;
@@ -634,17 +617,14 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
     include_room_details?: boolean;
     include_payment_summary?: boolean;
   }): Promise<ReservationListResponse | ReservationListResponseWithDetails> {
-    // ✅ APLICAR ENCODING AQUI TAMBÉM
     const encodedParams = this.encodeSearchParams(params || {});
     
-    // Limpar parâmetros nulos/vazios para os novos filtros
     const cleanParams = Object.fromEntries(
       Object.entries(encodedParams).filter(([_, value]) => 
         value !== null && value !== undefined && value !== '' && value !== 'all'
       )
     );
 
-    // Se tem parâmetros expandidos, usar a nova interface
     const hasExpandedParams = cleanParams.include_guest_details || 
                               cleanParams.include_room_details || 
                               cleanParams.guest_email ||
@@ -659,7 +639,6 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
     }
   }
 
-  // ✅ MÉTODO CORRIGIDO: getReservationsWithDetails
   async getReservationsWithDetails(params?: {
     page?: number;
     per_page?: number;
@@ -710,22 +689,19 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
     requires_deposit?: boolean;
     is_group_reservation?: boolean;
   }): Promise<ReservationListResponseWithDetails> {
-    // ✅ APLICAR ENCODING ANTES DE LIMPAR PARÂMETROS
     const encodedParams = this.encodeSearchParams(params || {});
     
-    // Limpar parâmetros nulos/vazios
     const cleanParams = Object.fromEntries(
       Object.entries(encodedParams).filter(([_, value]) => 
         value !== null && value !== undefined && value !== '' && value !== 'all'
       )
     );
 
-    // Sempre incluir detalhes para este método
     cleanParams.include_guest_details = true;
     cleanParams.include_room_details = true;
     cleanParams.include_payment_details = true;
 
-    console.log('Parâmetros enviados (com encoding):', cleanParams); // ✅ DEBUG
+    console.log('Parâmetros enviados:', cleanParams);
 
     try {
       const response = await this.client.get<ReservationListResponseWithDetails>('/reservations/detailed', { params: cleanParams });
@@ -733,7 +709,6 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
     } catch (error: any) {
       console.error('Erro ao carregar reservas detalhadas:', error);
       
-      // Fallback: tentar o endpoint padrão se o detalhado não existir
       try {
         const fallbackResponse = await this.getReservations({
           ...cleanParams,
@@ -741,7 +716,6 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
           include_room_details: true,
         });
         
-        // Converter para o formato expandido se necessário
         if ('reservations' in fallbackResponse) {
           return fallbackResponse as ReservationListResponseWithDetails;
         }
@@ -764,7 +738,6 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
     return response.data;
   }
 
-  // Novo método expandido
   async getReservationById(id: number, includeDetails = true): Promise<ReservationResponseWithGuestDetails> {
     const params = includeDetails ? { include_details: true } : {};
     const response = await this.client.get<ReservationResponseWithGuestDetails>(`/reservations/${id}`, { params });
@@ -786,31 +759,30 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
     return response.data;
   }
 
-  async getTodaysReservations(propertyId?: number) {
-    const params = propertyId ? { property_id: propertyId } : {};
-    const response = await this.client.get('/reservations/today', { params });
+  async getReservationDetailed(id: number): Promise<ReservationDetailedResponse> {
+    const response = await this.client.get(`/reservations/${id}/detailed`);
     return response.data;
   }
 
-  // Método original de disponibilidade
-  async checkAvailability(data: AvailabilityRequest): Promise<AvailabilityResponse> {
-    const response = await this.client.post<AvailabilityResponse>('/reservations/check-availability', data);
-    return response.data;
+  // ===== NOVO: DOWNLOAD VOUCHER =====
+  async downloadReservationVoucher(id: number): Promise<Blob> {
+    try {
+      const response = await this.client.get(`/reservations/${id}/voucher`, {
+        responseType: 'blob'
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao baixar voucher:', error);
+      throw error;
+    }
   }
 
-  // Novo método de disponibilidade expandido
-  async checkAvailabilityNew(request: AvailabilityRequestNew): Promise<AvailabilityResponse> {
-    const response = await this.client.post<AvailabilityResponse>('/reservations/availability', request);
-    return response.data;
-  }
-
-  // ===== MÉTODOS DE AÇÕES RÁPIDAS ATUALIZADOS =====
+  // ===== RESERVATION ACTIONS =====
   async confirmReservation(reservationId: number): Promise<ReservationResponseWithGuestDetails> {
     try {
       const response = await this.client.patch<ReservationResponseWithGuestDetails>(`/reservations/${reservationId}/confirm`);
       return response.data;
     } catch (error: any) {
-      // Fallback para método original se o novo não existir
       try {
         const fallbackResponse = await this.client.patch<ReservationResponse>(`/reservations/${reservationId}/confirm`);
         return fallbackResponse.data as ReservationResponseWithGuestDetails;
@@ -828,7 +800,6 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
       const response = await this.client.post<ReservationResponseWithGuestDetails>(`/reservations/${reservationId}/check-in`, data);
       return response.data;
     } catch (error: any) {
-      // Fallback para método original
       try {
         const fallbackResponse = await this.client.post<ReservationResponse>(`/reservations/${reservationId}/check-in`, data);
         return fallbackResponse.data as ReservationResponseWithGuestDetails;
@@ -846,7 +817,6 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
       const response = await this.client.post<ReservationResponseWithGuestDetails>(`/reservations/${reservationId}/check-out`, data);
       return response.data;
     } catch (error: any) {
-      // Fallback para método original
       try {
         const fallbackResponse = await this.client.post<ReservationResponse>(`/reservations/${reservationId}/check-out`, data);
         return fallbackResponse.data as ReservationResponseWithGuestDetails;
@@ -864,7 +834,6 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
       const response = await this.client.post<ReservationResponseWithGuestDetails>(`/reservations/${reservationId}/cancel`, data);
       return response.data;
     } catch (error: any) {
-      // Fallback para método original
       try {
         const fallbackResponse = await this.client.post<ReservationResponse>(`/reservations/${reservationId}/cancel`, data);
         return fallbackResponse.data as ReservationResponseWithGuestDetails;
@@ -874,89 +843,20 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
     }
   }
 
-  // ===== MÉTODO DE EXPORTAÇÃO ATUALIZADO =====
-  async exportReservations(filters?: ReservationExportFilters): Promise<Blob> {
-    const cleanParams = Object.fromEntries(
-      Object.entries(filters || {}).filter(([_, value]) => 
-        value !== null && value !== undefined && value !== ''
-      )
-    );
-
-    try {
-      const response = await this.client.get('/reservations/export', {
-        params: {
-          ...cleanParams,
-          format: 'xlsx',
-        },
-        responseType: 'blob',
-      });
-
-      return response.data;
-    } catch (error: any) {
-      // Fallback: usar endpoint alternativo ou método CSV
-      try {
-        const response = await this.client.post('/reservations/export', cleanParams, {
-          responseType: 'blob',
-        });
-        return response.data;
-      } catch (fallbackError) {
-        console.error('Erro ao exportar reservas:', error);
-        throw error;
-      }
-    }
+  // ===== AVAILABILITY & CALENDAR =====
+  async checkAvailability(data: AvailabilityRequest): Promise<AvailabilityResponse> {
+    const response = await this.client.post<AvailabilityResponse>('/reservations/check-availability', data);
+    return response.data;
   }
 
-  // ===== MÉTODO DE DASHBOARD STATS ATUALIZADO =====
-  async getDashboardStats(): Promise<DashboardStats> {
-    try {
-      const response = await this.client.get<DashboardStats>('/reservations/dashboard/stats');
-      return response.data;
-    } catch (error: any) {
-      console.error('Erro ao carregar estatísticas do dashboard:', error);
-      
-      // Fallback: tentar endpoint original
-      try {
-        const fallbackResponse = await this.getDashboardStatsSimple();
-        return {
-          total_reservations: fallbackResponse.total_reservations || 0,
-          total_revenue: fallbackResponse.total_revenue || 0,
-          occupancy_rate: 0,
-          pending_checkins: fallbackResponse.arrivals_today || 0,
-          pending_checkouts: fallbackResponse.departures_today || 0,
-          overdue_payments: 0,
-          avg_nights: 0,
-          avg_guests: 0,
-          avg_amount: 0,
-          this_month_reservations: 0,
-          this_month_revenue: 0,
-          last_month_reservations: 0,
-          last_month_revenue: 0,
-          status_distribution: {},
-          source_distribution: {},
-          recent_activity: [],
-        };
-      } catch (fallbackError) {
-        // Retornar dados padrão em caso de erro completo
-        return {
-          total_reservations: 0,
-          total_revenue: 0,
-          occupancy_rate: 0,
-          pending_checkins: 0,
-          pending_checkouts: 0,
-          overdue_payments: 0,
-          avg_nights: 0,
-          avg_guests: 0,
-          avg_amount: 0,
-          this_month_reservations: 0,
-          this_month_revenue: 0,
-          last_month_reservations: 0,
-          last_month_revenue: 0,
-          status_distribution: {},
-          source_distribution: {},
-          recent_activity: [],
-        };
-      }
-    }
+  async checkAvailabilityNew(request: AvailabilityRequestNew): Promise<AvailabilityResponse> {
+    const response = await this.client.post<AvailabilityResponse>('/reservations/availability', request);
+    return response.data;
+  }
+
+  async checkAvailabilityCalendar(data: AvailabilityCheckRequest): Promise<AvailabilityCheckResponse> {
+    const response = await this.client.post('/reservations/check-availability', data);
+    return response.data;
   }
 
   async getCalendarMonth(
@@ -1000,6 +900,127 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
     return response.data;
   }
 
+  // ===== DASHBOARD & STATS =====
+  async getDashboardStats(): Promise<DashboardStats> {
+    try {
+      const response = await this.client.get<DashboardStats>('/reservations/dashboard/stats');
+      return response.data;
+    } catch (error: any) {
+      console.error('Erro ao carregar estatísticas:', error);
+      
+      try {
+        const fallbackResponse = await this.getDashboardStatsSimple();
+        return {
+          total_reservations: fallbackResponse.total_reservations || 0,
+          total_revenue: fallbackResponse.total_revenue || 0,
+          occupancy_rate: 0,
+          pending_checkins: fallbackResponse.arrivals_today || 0,
+          pending_checkouts: fallbackResponse.departures_today || 0,
+          overdue_payments: 0,
+          avg_nights: 0,
+          avg_guests: 0,
+          avg_amount: 0,
+          this_month_reservations: 0,
+          this_month_revenue: 0,
+          last_month_reservations: 0,
+          last_month_revenue: 0,
+          status_distribution: {},
+          source_distribution: {},
+          recent_activity: [],
+        };
+      } catch (fallbackError) {
+        return {
+          total_reservations: 0,
+          total_revenue: 0,
+          occupancy_rate: 0,
+          pending_checkins: 0,
+          pending_checkouts: 0,
+          overdue_payments: 0,
+          avg_nights: 0,
+          avg_guests: 0,
+          avg_amount: 0,
+          this_month_reservations: 0,
+          this_month_revenue: 0,
+          last_month_reservations: 0,
+          last_month_revenue: 0,
+          status_distribution: {},
+          source_distribution: {},
+          recent_activity: [],
+        };
+      }
+    }
+  }
+
+  async getDashboardStatsSimple() {
+    try {
+      const response = await this.client.get('/reservations/stats/dashboard');
+      return response.data;
+    } catch (error) {
+      console.error('Dashboard stats error:', error);
+      return {
+        total_reservations: 0,
+        arrivals_today: 0,
+        departures_today: 0,
+        current_guests: 0,
+        total_revenue: 0,
+        pending_revenue: 0
+      };
+    }
+  }
+
+  async getRecentReservations(limit: number = 5, propertyId?: number): Promise<RecentReservationResponse[]> {
+    const params: any = { limit };
+    if (propertyId) {
+      params.property_id = propertyId;
+    }
+    
+    const response = await this.get<RecentReservationResponse[]>('/reservations/recent', params);
+    return response.data;
+  }
+
+  async getCheckedInPendingPayments(limit: number = 10, propertyId?: number): Promise<CheckedInPendingPayment[]> {
+    const params: any = { limit };
+    if (propertyId) {
+      params.property_id = propertyId;
+    }
+    
+    const response = await this.get<CheckedInPendingPayment[]>('/reservations/checked-in-pending-payment', params);
+    return response.data;
+  }
+
+  async getDashboardSummary(propertyId?: number): Promise<DashboardSummary> {
+    const params = propertyId ? { property_id: propertyId } : undefined;
+    
+    const response = await this.get<DashboardSummary>('/reservations/dashboard-summary', params);
+    return response.data;
+  }
+
+  async getTodaysReservations(propertyId?: number) {
+    const params = propertyId ? { property_id: propertyId } : {};
+    const response = await this.client.get('/reservations/today', { params });
+    return response.data;
+  }
+
+  async getTodaysReservationsImproved(propertyId?: number, includeDetails: boolean = false): Promise<TodaysReservationsImproved> {
+    const params: any = { include_details: includeDetails };
+    if (propertyId) {
+      params.property_id = propertyId;
+    }
+    
+    const response = await this.get<TodaysReservationsImproved>('/reservations/today', params);
+    return response.data;
+  }
+
+  async getTodaysReservationsCalendar(propertyId?: number): Promise<TodaysReservationsResponse> {
+    const params = new URLSearchParams();
+    if (propertyId) {
+      params.append('property_id', propertyId.toString());
+    }
+
+    const response = await this.client.get(`/reservations/today?${params}`);
+    return response.data;
+  }
+
   async getReservationStats(propertyId?: number): Promise<ReservationStats> {
     const params = propertyId ? { property_id: propertyId } : {};
     const response = await this.client.get<ReservationStats>('/reservations/stats/general', { params });
@@ -1019,6 +1040,7 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
     return response.data;
   }
 
+  // ===== ADVANCED OPERATIONS =====
   async advancedSearchReservations(
     filters: ReservationFilters | ReservationFiltersNew,
     page = 1,
@@ -1033,7 +1055,35 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
     return response.data;
   }
 
-  // ===== NOVOS MÉTODOS DE RESERVA ADICIONADOS =====
+  async exportReservations(filters?: ReservationExportFilters): Promise<Blob> {
+    const cleanParams = Object.fromEntries(
+      Object.entries(filters || {}).filter(([_, value]) => 
+        value !== null && value !== undefined && value !== ''
+      )
+    );
+
+    try {
+      const response = await this.client.get('/reservations/export', {
+        params: {
+          ...cleanParams,
+          format: 'xlsx',
+        },
+        responseType: 'blob',
+      });
+
+      return response.data;
+    } catch (error: any) {
+      try {
+        const response = await this.client.post('/reservations/export', cleanParams, {
+          responseType: 'blob',
+        });
+        return response.data;
+      } catch (fallbackError) {
+        console.error('Erro ao exportar reservas:', error);
+        throw error;
+      }
+    }
+  }
 
   async exportReservationsCSV(filters: ReservationExportFilters): Promise<ReservationExportResponse> {
     const response = await this.client.post<ReservationExportResponse>('/reservations/export', filters);
@@ -1060,8 +1110,55 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
     return response.data;
   }
 
-  // ===== GUESTS API (MÉTODOS ORIGINAIS MANTIDOS) =====
-  
+  // ===== QUICK OPERATIONS =====
+  async createQuickReservation(data: {
+    guest_id?: number;
+    guest_name?: string;
+    guest_email?: string;
+    guest_phone?: string;
+    property_id: number;
+    check_in_date: string;
+    check_out_date: string;
+    adults: number;
+    children: number;
+    rooms: { room_id: number; rate_per_night?: number }[];
+    total_amount?: number;
+    source?: string;
+    guest_requests?: string;
+  }): Promise<ReservationResponse> {
+    let guestId = data.guest_id;
+
+    if (!guestId && data.guest_name) {
+      const guest = await this.createGuest({
+        first_name: data.guest_name.split(' ')[0] || data.guest_name,
+        last_name: data.guest_name.split(' ').slice(1).join(' ') || '',
+        email: data.guest_email || '',
+        phone: data.guest_phone || '',
+      });
+      guestId = guest.id;
+    }
+
+    if (!guestId) {
+      throw new Error('Guest ID or guest information is required');
+    }
+
+    const reservationData = {
+      guest_id: guestId,
+      property_id: data.property_id,
+      check_in_date: data.check_in_date,
+      check_out_date: data.check_out_date,
+      adults: data.adults,
+      children: data.children,
+      rooms: data.rooms,
+      total_amount: data.total_amount || 0,
+      source: data.source || 'direct',
+      guest_requests: data.guest_requests,
+    };
+
+    return this.createReservation(reservationData);
+  }
+
+  // ===== GUESTS API =====
   async getGuests(params?: { 
     page?: number; 
     per_page?: number; 
@@ -1087,7 +1184,6 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
     return response.data;
   }
 
-  // Novo método expandido
   async getGuestById(id: number, includeStats = false): Promise<GuestDetails> {
     const params = includeStats ? { include_stats: true } : {};
     const response = await this.client.get<GuestDetails>(`/guests/${id}`, { params });
@@ -1115,7 +1211,6 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
     return response.data;
   }
 
-  // Novos métodos de busca expandida
   async searchGuestsExpanded(params?: {
     page?: number;
     per_page?: number;
@@ -1158,7 +1253,6 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
 
   async checkDocumentAvailability(document: string, excludeGuestId?: number) {
     try {
-      // Validação básica - não enviar se documento estiver vazio
       if (!document || document.trim().length === 0) {
         return { available: true };
       }
@@ -1195,148 +1289,145 @@ private encodeSearchParams(params: Record<string, any>): Record<string, any> {
     return response.data;
   }
 
-// ===== ROOM TYPES API (MÉTODOS ORIGINAIS MANTIDOS) =====
+  // ===== ROOM TYPES API =====
+  async getRoomTypes(params?: {
+    page?: number;
+    per_page?: number;
+    is_bookable?: boolean;
+    min_capacity?: number;
+    max_capacity?: number;
+    has_amenity?: string;
+    search?: string;
+  }): Promise<RoomTypeListResponse> {
+    const response = await this.get<RoomTypeListResponse>('/room-types/', params);
+    return response.data;
+  }
 
-async getRoomTypes(params?: {
-  page?: number;
-  per_page?: number;
-  is_bookable?: boolean;
-  min_capacity?: number;
-  max_capacity?: number;
-  has_amenity?: string;
-  search?: string;
-}): Promise<RoomTypeListResponse> {
-  const response = await this.get<RoomTypeListResponse>('/room-types/', params);
-  return response.data;
-}
+  async createRoomType(data: RoomTypeCreate): Promise<RoomTypeResponse> {
+    const response = await this.post<RoomTypeResponse>('/room-types/', data);
+    return response.data;
+  }
 
-async createRoomType(data: RoomTypeCreate): Promise<RoomTypeResponse> {
-  const response = await this.post<RoomTypeResponse>('/room-types/', data);
-  return response.data;
-}
+  async getRoomType(id: number): Promise<RoomTypeResponse> {
+    const response = await this.get<RoomTypeResponse>(`/room-types/${id}`);
+    return response.data;
+  }
 
-async getRoomType(id: number): Promise<RoomTypeResponse> {
-  const response = await this.get<RoomTypeResponse>(`/room-types/${id}`);
-  return response.data;
-}
+  async updateRoomType(id: number, data: RoomTypeUpdate): Promise<RoomTypeResponse> {
+    const response = await this.put<RoomTypeResponse>(`/room-types/${id}`, data);
+    return response.data;
+  }
 
-async updateRoomType(id: number, data: RoomTypeUpdate): Promise<RoomTypeResponse> {
-  const response = await this.put<RoomTypeResponse>(`/room-types/${id}`, data);
-  return response.data;
-}
+  async deleteRoomType(id: number): Promise<void> {
+    await this.delete(`/room-types/${id}`);
+  }
 
-async deleteRoomType(id: number): Promise<void> {
-  await this.delete(`/room-types/${id}`);
-}
+  async getRoomTypeBySlug(slug: string): Promise<RoomTypeResponse> {
+    const response = await this.get<RoomTypeResponse>(`/room-types/slug/${slug}`);
+    return response.data;
+  }
 
-async getRoomTypeBySlug(slug: string): Promise<RoomTypeResponse> {
-  const response = await this.get<RoomTypeResponse>(`/room-types/slug/${slug}`);
-  return response.data;
-}
+  async toggleRoomTypeBookable(id: number): Promise<RoomTypeResponse> {
+    const response = await this.client.patch<RoomTypeResponse>(`/room-types/${id}/toggle-bookable`);
+    return response.data;
+  }
 
-async toggleRoomTypeBookable(id: number): Promise<RoomTypeResponse> {
-  const response = await this.client.patch<RoomTypeResponse>(`/room-types/${id}/toggle-bookable`);
-  return response.data;
-}
+  async getRoomTypeStats(id: number): Promise<any> {
+    const response = await this.get<any>(`/room-types/${id}/stats`);
+    return response.data;
+  }
 
-async getRoomTypeStats(id: number): Promise<any> {
-  const response = await this.get<any>(`/room-types/${id}/stats`);
-  return response.data;
-}
+  async getAvailableAmenities(): Promise<string[]> {
+    const response = await this.get<{ amenities: string[] }>('/room-types/meta/amenities');
+    return response.data.amenities;
+  }
 
-async getAvailableAmenities(): Promise<string[]> {
-  const response = await this.get<{ amenities: string[] }>('/room-types/meta/amenities');
-  return response.data.amenities;
-}
+  async searchRoomTypes(filters: RoomTypeFilters, page = 1, per_page = 20): Promise<RoomTypeListResponse> {
+    const response = await this.post<RoomTypeListResponse>(`/room-types/search?page=${page}&per_page=${per_page}`, filters);
+    return response.data;
+  }
 
-async searchRoomTypes(filters: RoomTypeFilters, page = 1, per_page = 20): Promise<RoomTypeListResponse> {
-  const response = await this.post<RoomTypeListResponse>(`/room-types/search?page=${page}&per_page=${per_page}`, filters);
-  return response.data;
-}
+  // ===== ROOMS API =====
+  async getRooms(params?: {
+    page?: number;
+    per_page?: number;
+    property_id?: number;
+    room_type_id?: number;
+    floor?: number;
+    building?: string;
+    is_operational?: boolean;
+    is_out_of_order?: boolean;
+    is_available_for_booking?: boolean;
+    min_occupancy?: number;
+    max_occupancy?: number;
+    has_amenity?: string;
+    search?: string;
+  }): Promise<RoomListResponse> {
+    const response = await this.get<RoomListResponse>('/rooms/', params);
+    return response.data;
+  }
 
-// ===== ROOMS API (MÉTODOS ORIGINAIS MANTIDOS) =====
+  async createRoom(data: RoomCreate): Promise<RoomResponse> {
+    const response = await this.post<RoomResponse>('/rooms/', data);
+    return response.data;
+  }
 
-async getRooms(params?: {
-  page?: number;
-  per_page?: number;
-  property_id?: number;
-  room_type_id?: number;
-  floor?: number;
-  building?: string;
-  is_operational?: boolean;
-  is_out_of_order?: boolean;
-  is_available_for_booking?: boolean;
-  min_occupancy?: number;
-  max_occupancy?: number;
-  has_amenity?: string;
-  search?: string;
-}): Promise<RoomListResponse> {
-  const response = await this.get<RoomListResponse>('/rooms/', params);
-  return response.data;
-}
+  async getRoom(id: number): Promise<RoomResponse> {
+    const response = await this.get<RoomResponse>(`/rooms/${id}`);
+    return response.data;
+  }
 
-async createRoom(data: RoomCreate): Promise<RoomResponse> {
-  const response = await this.post<RoomResponse>('/rooms/', data);
-  return response.data;
-}
+  async getRoomWithDetails(id: number): Promise<RoomWithDetails> {
+    const response = await this.get<RoomWithDetails>(`/rooms/${id}/details`);
+    return response.data;
+  }
 
-async getRoom(id: number): Promise<RoomResponse> {
-  const response = await this.get<RoomResponse>(`/rooms/${id}`);
-  return response.data;
-}
+  async updateRoom(id: number, data: RoomUpdate): Promise<RoomResponse> {
+    const response = await this.put<RoomResponse>(`/rooms/${id}`, data);
+    return response.data;
+  }
 
-async getRoomWithDetails(id: number): Promise<RoomWithDetails> {
-  const response = await this.get<RoomWithDetails>(`/rooms/${id}/details`);
-  return response.data;
-}
+  async deleteRoom(id: number): Promise<void> {
+    await this.delete(`/rooms/${id}`);
+  }
 
-async updateRoom(id: number, data: RoomUpdate): Promise<RoomResponse> {
-  const response = await this.put<RoomResponse>(`/rooms/${id}`, data);
-  return response.data;
-}
+  async toggleRoomOperational(id: number): Promise<RoomResponse> {
+    const response = await this.client.patch<RoomResponse>(`/rooms/${id}/toggle-operational`);
+    return response.data;
+  }
 
-async deleteRoom(id: number): Promise<void> {
-  await this.delete(`/rooms/${id}`);
-}
+  async bulkUpdateRooms(data: RoomBulkUpdate): Promise<any> {
+    const response = await this.post<any>('/rooms/bulk-update', data);
+    return response.data;
+  }
 
-async toggleRoomOperational(id: number): Promise<RoomResponse> {
-  const response = await this.client.patch<RoomResponse>(`/rooms/${id}/toggle-operational`);
-  return response.data;
-}
+  async getRoomsByProperty(propertyId: number): Promise<RoomResponse[]> {
+    const response = await this.get<RoomResponse[]>(`/rooms/by-property/${propertyId}`);
+    return response.data;
+  }
 
-async bulkUpdateRooms(data: RoomBulkUpdate): Promise<any> {
-  const response = await this.post<any>('/rooms/bulk-update', data);
-  return response.data;
-}
+  async getRoomsByType(roomTypeId: number): Promise<RoomResponse[]> {
+    const response = await this.get<RoomResponse[]>(`/rooms/by-type/${roomTypeId}`);
+    return response.data;
+  }
 
-async getRoomsByProperty(propertyId: number): Promise<RoomResponse[]> {
-  const response = await this.get<RoomResponse[]>(`/rooms/by-property/${propertyId}`);
-  return response.data;
-}
+  async getRoomStats(propertyId?: number): Promise<RoomStats> {
+    const params = propertyId ? { property_id: propertyId } : undefined;
+    const response = await this.get<RoomStats>('/rooms/stats/general', params);
+    return response.data;
+  }
 
-async getRoomsByType(roomTypeId: number): Promise<RoomResponse[]> {
-  const response = await this.get<RoomResponse[]>(`/rooms/by-type/${roomTypeId}`);
-  return response.data;
-}
+  async searchRooms(filters: RoomFilters, page = 1, per_page = 20): Promise<RoomListResponse> {
+    const response = await this.post<RoomListResponse>(`/rooms/search?page=${page}&per_page=${per_page}`, filters);
+    return response.data;
+  }
 
-async getRoomStats(propertyId?: number): Promise<RoomStats> {
-  const params = propertyId ? { property_id: propertyId } : undefined;
-  const response = await this.get<RoomStats>('/rooms/stats/general', params);
-  return response.data;
-}
+  async checkRoomNumberAvailability(roomNumber: string, propertyId: number): Promise<{ available: boolean }> {
+    const response = await this.get<{ available: boolean }>(`/rooms/check-number/${roomNumber}`, { property_id: propertyId });
+    return response.data;
+  }
 
-async searchRooms(filters: RoomFilters, page = 1, per_page = 20): Promise<RoomListResponse> {
-  const response = await this.post<RoomListResponse>(`/rooms/search?page=${page}&per_page=${per_page}`, filters);
-  return response.data;
-}
-
-async checkRoomNumberAvailability(roomNumber: string, propertyId: number): Promise<{ available: boolean }> {
-  const response = await this.get<{ available: boolean }>(`/rooms/check-number/${roomNumber}`, { property_id: propertyId });
-  return response.data;
-}
-
-  // ===== ROOM AVAILABILITY METHODS (MÉTODOS ORIGINAIS MANTIDOS) =====
-  
+  // ===== ROOM AVAILABILITY API =====
   async getRoomAvailabilities(params?: {
     page?: number;
     per_page?: number;
@@ -1468,371 +1559,200 @@ async checkRoomNumberAvailability(roomNumber: string, propertyId: number): Promi
     return response.data;
   }
 
-// ===== MAPA DE QUARTOS API (MÉTODOS ORIGINAIS MANTIDOS) =====
+  // ===== ROOM MAP API =====
+  async getMapData(filters: MapFilters): Promise<MapResponse> {
+    const params = new URLSearchParams();
+    params.append('start_date', filters.start_date);
+    params.append('end_date', filters.end_date);
+    
+    if (filters.property_id) {
+      params.append('property_id', filters.property_id.toString());
+    }
+    
+    if (filters.room_type_ids && filters.room_type_ids.length > 0) {
+      params.append('room_type_ids', filters.room_type_ids.join(','));
+    }
+    
+    if (filters.include_out_of_order !== undefined) {
+      params.append('include_out_of_order', filters.include_out_of_order.toString());
+    }
+    
+    if (filters.include_cancelled !== undefined) {
+      params.append('include_cancelled', filters.include_cancelled.toString());
+    }
+    
+    if (filters.status_filter && filters.status_filter.length > 0) {
+      params.append('status_filter', filters.status_filter.join(','));
+    }
 
-async getMapData(filters: MapFilters): Promise<MapResponse> {
-  const params = new URLSearchParams();
-  params.append('start_date', filters.start_date);
-  params.append('end_date', filters.end_date);
-  
-  if (filters.property_id) {
-    params.append('property_id', filters.property_id.toString());
-  }
-  
-  if (filters.room_type_ids && filters.room_type_ids.length > 0) {
-    params.append('room_type_ids', filters.room_type_ids.join(','));
-  }
-  
-  if (filters.include_out_of_order !== undefined) {
-    params.append('include_out_of_order', filters.include_out_of_order.toString());
-  }
-  
-  if (filters.include_cancelled !== undefined) {
-    params.append('include_cancelled', filters.include_cancelled.toString());
-  }
-  
-  if (filters.status_filter && filters.status_filter.length > 0) {
-    params.append('status_filter', filters.status_filter.join(','));
-  }
-
-  const response = await this.client.get<MapResponse>(`/map/data?${params}`);
-  return response.data;
-}
-
-async getMapStats(
-  startDate: string, 
-  endDate: string, 
-  propertyId?: number
-): Promise<MapStatsResponse> {
-  const params = new URLSearchParams();
-  params.append('start_date', startDate);
-  params.append('end_date', endDate);
-  
-  if (propertyId) {
-    params.append('property_id', propertyId.toString());
-  }
-
-  const response = await this.client.get<MapStatsResponse>(`/map/stats?${params}`);
-  return response.data;
-}
-
-async executeBulkOperation(operation: MapBulkOperation): Promise<any> {
-  const response = await this.client.post('/map/bulk-operation', operation);
-  return response.data;
-}
-
-async createQuickBooking(booking: MapQuickBooking): Promise<any> {
-  const response = await this.client.post('/map/quick-booking', booking);
-  return response.data;
-}
-
-async getRoomAvailabilityFromMap(
-  roomId: number,
-  startDate: string,
-  endDate: string
-): Promise<RoomAvailabilityData> {
-  const params = new URLSearchParams();
-  params.append('start_date', startDate);
-  params.append('end_date', endDate);
-
-  const response = await this.client.get<RoomAvailabilityData>(
-    `/map/room-availability/${roomId}?${params}`
-  );
-  return response.data;
-}
-
-async getCategorySummary(
-  startDate: string,
-  endDate: string,
-  propertyId?: number
-): Promise<CategorySummaryData[]> {
-  const params = new URLSearchParams();
-  params.append('start_date', startDate);
-  params.append('end_date', endDate);
-  
-  if (propertyId) {
-    params.append('property_id', propertyId.toString());
-  }
-
-  const response = await this.client.get<CategorySummaryData[]>(`/map/category-summary?${params}`);
-  return response.data;
-}
-
-  // ===== CALENDAR METHODS (MÉTODOS ORIGINAIS MANTIDOS) =====
-
-  // Método original de disponibilidade para calendário
-  async checkAvailabilityCalendar(data: AvailabilityCheckRequest): Promise<AvailabilityCheckResponse> {
-    const response = await this.client.post('/reservations/check-availability', data);
+    const response = await this.client.get<MapResponse>(`/map/data?${params}`);
     return response.data;
   }
 
-  async getTodaysReservationsCalendar(propertyId?: number): Promise<TodaysReservationsResponse> {
+  async getMapStats(
+    startDate: string, 
+    endDate: string, 
+    propertyId?: number
+  ): Promise<MapStatsResponse> {
     const params = new URLSearchParams();
+    params.append('start_date', startDate);
+    params.append('end_date', endDate);
+    
     if (propertyId) {
       params.append('property_id', propertyId.toString());
     }
 
-    const response = await this.client.get(`/reservations/today?${params}`);
+    const response = await this.client.get<MapStatsResponse>(`/map/stats?${params}`);
     return response.data;
   }
 
-  // ===== DASHBOARD STATS (MÉTODOS ORIGINAIS MANTIDOS) =====
-  
-  async getDashboardStatsSimple() {
-    try {
-      const response = await this.client.get('/reservations/stats/dashboard');
+  async executeBulkOperation(operation: MapBulkOperation): Promise<any> {
+    const response = await this.client.post('/map/bulk-operation', operation);
+    return response.data;
+  }
+
+  async createQuickBooking(booking: MapQuickBooking): Promise<any> {
+    const response = await this.client.post('/map/quick-booking', booking);
+    return response.data;
+  }
+
+  async getRoomAvailabilityFromMap(
+    roomId: number,
+    startDate: string,
+    endDate: string
+  ): Promise<RoomAvailabilityData> {
+    const params = new URLSearchParams();
+    params.append('start_date', startDate);
+    params.append('end_date', endDate);
+
+    const response = await this.client.get<RoomAvailabilityData>(
+      `/map/room-availability/${roomId}?${params}`
+    );
+    return response.data;
+  }
+
+  async getCategorySummary(
+    startDate: string,
+    endDate: string,
+    propertyId?: number
+  ): Promise<CategorySummaryData[]> {
+    const params = new URLSearchParams();
+    params.append('start_date', startDate);
+    params.append('end_date', endDate);
+    
+    if (propertyId) {
+      params.append('property_id', propertyId.toString());
+    }
+
+    const response = await this.client.get<CategorySummaryData[]>(`/map/category-summary?${params}`);
+    return response.data;
+  }
+
+  // ===== PAYMENTS API =====
+  async getPayments(params?: {
+    page?: number;
+    per_page?: number;
+    reservation_id?: number;
+    status?: string;
+    payment_method?: string;
+    payment_date_from?: string;
+    payment_date_to?: string;
+    min_amount?: number;
+    max_amount?: number;
+    is_partial?: boolean;
+    is_refund?: boolean;
+    search?: string;
+  }): Promise<PaymentListResponse> {
+    const response = await this.get<PaymentListResponse>('/payments/', params);
+    return response.data;
+  }
+
+  async createPayment(data: PaymentCreate): Promise<PaymentResponse> {
+    const response = await this.post<PaymentResponse>('/payments/', data);
+    return response.data;
+  }
+
+  async getPayment(id: number): Promise<PaymentResponse> {
+    const response = await this.get<PaymentResponse>(`/payments/${id}`);
+    return response.data;
+  }
+
+  async updatePayment(
+    id: number, 
+    data: PaymentUpdate | PaymentConfirmedUpdate
+  ): Promise<PaymentResponse> {
+    if ('admin_reason' in data && data.admin_reason) {
+      return await this.updateConfirmedPayment(id, data as PaymentConfirmedUpdate);
+    } else {
+      const response = await this.put<PaymentResponse>(`/payments/${id}`, data);
       return response.data;
-    } catch (error) {
-      console.error('Dashboard stats error:', error);
-      return {
-        total_reservations: 0,
-        arrivals_today: 0,
-        departures_today: 0,
-        current_guests: 0,
-        total_revenue: 0,
-        pending_revenue: 0
-      };
     }
   }
 
-// ===== NOVOS MÉTODOS PARA DASHBOARD (INSERIR APÓS getDashboardStatsSimple) =====
-
-async getRecentReservations(limit: number = 5, propertyId?: number): Promise<RecentReservationResponse[]> {
-  const params: any = { limit };
-  if (propertyId) {
-    params.property_id = propertyId;
-  }
-  
-  const response = await this.get<RecentReservationResponse[]>('/reservations/recent', params);
-  return response.data;
-}
-
-async getCheckedInPendingPayments(limit: number = 10, propertyId?: number): Promise<CheckedInPendingPayment[]> {
-  const params: any = { limit };
-  if (propertyId) {
-    params.property_id = propertyId;
-  }
-  
-  const response = await this.get<CheckedInPendingPayment[]>('/reservations/checked-in-pending-payment', params);
-  return response.data;
-}
-
-async getDashboardSummary(propertyId?: number): Promise<DashboardSummary> {
-  const params = propertyId ? { property_id: propertyId } : undefined;
-  
-  const response = await this.get<DashboardSummary>('/reservations/dashboard-summary', params);
-  return response.data;
-}
-
-async getTodaysReservationsImproved(propertyId?: number, includeDetails: boolean = false): Promise<TodaysReservationsImproved> {
-  const params: any = { include_details: includeDetails };
-  if (propertyId) {
-    params.property_id = propertyId;
-  }
-  
-  const response = await this.get<TodaysReservationsImproved>('/reservations/today', params);
-  return response.data;
-}
-
-  // ===== GENERIC REQUEST METHOD (MÉTODO ORIGINAL MANTIDO) =====
-
-  async request<T>(endpoint: string, options?: AxiosRequestConfig): Promise<T> {
-    const response: AxiosResponse<T> = await this.client.request({
-      url: endpoint,
-      ...options,
-    });
-    return response.data;
-  }
-
-  // ===== PAYMENT METHODS (MÉTODOS ORIGINAIS + NOVOS ADMINISTRATIVOS) =====
-
-async getPayments(params?: {
-  page?: number;
-  per_page?: number;
-  reservation_id?: number;
-  status?: string;
-  payment_method?: string;
-  payment_date_from?: string;
-  payment_date_to?: string;
-  min_amount?: number;
-  max_amount?: number;
-  is_partial?: boolean;
-  is_refund?: boolean;
-  search?: string;
-}): Promise<PaymentListResponse> {
-  const response = await this.get<PaymentListResponse>('/payments/', params);
-  return response.data;
-}
-
-async createPayment(data: PaymentCreate): Promise<PaymentResponse> {
-  const response = await this.post<PaymentResponse>('/payments/', data);
-  return response.data;
-}
-
-async getPayment(id: number): Promise<PaymentResponse> {
-  const response = await this.get<PaymentResponse>(`/payments/${id}`);
-  return response.data;
-}
-
-// ✅ MÉTODO MODIFICADO: updatePayment - suporte para pagamentos confirmados
-async updatePayment(
-  id: number, 
-  data: PaymentUpdate | PaymentConfirmedUpdate
-): Promise<PaymentResponse> {
-  // Verificar se é uma atualização de pagamento confirmado (tem admin_reason)
-  if ('admin_reason' in data && data.admin_reason) {
-    // Usar endpoint específico para pagamentos confirmados
-    return await this.updateConfirmedPayment(id, data as PaymentConfirmedUpdate);
-  } else {
-    // Método original
-    const response = await this.put<PaymentResponse>(`/payments/${id}`, data);
-    return response.data;
-  }
-}
-
-// ✅ MÉTODO MODIFICADO: deletePayment - suporte para justificativas
-async deletePayment(
-  id: number, 
-  justification?: { admin_reason: string }
-): Promise<void> {
-  if (justification) {
-    // Se tem justificativa, usar endpoint específico para pagamentos confirmados
-    await this.delete(`/payments/${id}`, { data: justification });
-  } else {
-    // Método original para pagamentos não confirmados
-    await this.delete(`/payments/${id}`);
-  }
-}
-
-// ✅ MÉTODO CORRIGIDO: updatePaymentStatus - usar PATCH ao invés de PUT
-async updatePaymentStatus(id: number, data: PaymentStatusUpdate): Promise<PaymentResponse> {
-  // ✅ CORREÇÃO: Mudar de PUT para PATCH
-  const response = await this.client.patch<PaymentResponse>(`/payments/${id}/status`, data);
-  return response.data;
-}
-
-async getPaymentByNumber(paymentNumber: string): Promise<PaymentResponse> {
-  const response = await this.get<PaymentResponse>(`/payments/by-number/${paymentNumber}`);
-  return response.data;
-}
-
-async getPaymentsByReservation(reservationId: number): Promise<PaymentResponse[]> {
-  const response = await this.get<PaymentResponse[]>(`/payments/by-reservation/${reservationId}`);
-  return response.data;
-}
-
-// ===== ✅ NOVOS MÉTODOS ADMINISTRATIVOS PARA PAGAMENTOS CONFIRMADOS =====
-
-/**
- * Verifica as permissões do usuário para um pagamento específico
- */
-async getPaymentPermissions(id: number): Promise<PaymentPermissions> {
-  const response = await this.get<PaymentPermissions>(`/payments/${id}/permissions`);
-  return response.data;
-}
-
-/**
- * Obtém aviso de segurança para operações sensíveis
- */
-async getPaymentSecurityWarning(
-  id: number, 
-  operation: 'edit_confirmed' | 'delete_confirmed'
-): Promise<PaymentSecurityWarning> {
-  const response = await this.get<PaymentSecurityWarning>(
-    `/payments/${id}/security-warning`,
-    { operation }
-  );
-  return response.data;
-}
-
-/**
- * Atualiza pagamento confirmado com justificativa obrigatória (apenas admin)
- */
-async updateConfirmedPayment(
-  id: number, 
-  data: PaymentConfirmedUpdate
-): Promise<PaymentResponse> {
-  const response = await this.put<PaymentResponse>(`/payments/${id}/confirmed`, data);
-  return response.data;
-}
-
-/**
- * Exclui pagamento confirmado com justificativa obrigatória (apenas admin)
- */
-async deleteConfirmedPayment(
-  id: number, 
-  data: PaymentDeleteConfirmed
-): Promise<void> {
-  await this.delete(`/payments/${id}/confirmed`, { data });
-}
-
-/**
- * Obtém histórico de alterações administrativas em um pagamento
- */
-async getPaymentAuditLog(id: number): Promise<any[]> {
-  const response = await this.get<any[]>(`/payments/${id}/audit-log`);
-  return response.data;
-}
-
-  // ===== CRIAR RESERVA RÁPIDA (MÉTODO ORIGINAL MANTIDO) =====
-
-  async createQuickReservation(data: {
-    guest_id?: number;
-    guest_name?: string;
-    guest_email?: string;
-    guest_phone?: string;
-    property_id: number;
-    check_in_date: string;
-    check_out_date: string;
-    adults: number;
-    children: number;
-    rooms: { room_id: number; rate_per_night?: number }[];
-    total_amount?: number;
-    source?: string;
-    guest_requests?: string;
-  }): Promise<ReservationResponse> {
-    // Se não tem guest_id, cria o hóspede primeiro
-    let guestId = data.guest_id;
-
-    if (!guestId && data.guest_name) {
-      const guest = await this.createGuest({
-        first_name: data.guest_name.split(' ')[0] || data.guest_name,
-        last_name: data.guest_name.split(' ').slice(1).join(' ') || '',
-        email: data.guest_email || '',
-        phone: data.guest_phone || '',
-      });
-      guestId = guest.id;
+  async deletePayment(
+    id: number, 
+    justification?: { admin_reason: string }
+  ): Promise<void> {
+    if (justification) {
+      await this.delete(`/payments/${id}`, { data: justification });
+    } else {
+      await this.delete(`/payments/${id}`);
     }
-
-    if (!guestId) {
-      throw new Error('Guest ID or guest information is required');
-    }
-
-    const reservationData = {
-      guest_id: guestId,
-      property_id: data.property_id,
-      check_in_date: data.check_in_date,
-      check_out_date: data.check_out_date,
-      adults: data.adults,
-      children: data.children,
-      rooms: data.rooms,
-      total_amount: data.total_amount || 0,
-      source: data.source || 'direct',
-      guest_requests: data.guest_requests,
-    };
-
-    return this.createReservation(reservationData);
   }
 
-  // Método para buscar detalhes completos da reserva
-  async getReservationDetailed(id: number): Promise<ReservationDetailedResponse> {
-    const response = await this.client.get(`/reservations/${id}/detailed`);
+  async updatePaymentStatus(id: number, data: PaymentStatusUpdate): Promise<PaymentResponse> {
+    const response = await this.client.patch<PaymentResponse>(`/payments/${id}/status`, data);
     return response.data;
   }
 
-  // ===== NOVOS MÉTODOS UTILITÁRIOS ADICIONADOS =====
+  async getPaymentByNumber(paymentNumber: string): Promise<PaymentResponse> {
+    const response = await this.get<PaymentResponse>(`/payments/by-number/${paymentNumber}`);
+    return response.data;
+  }
 
-  // Método para fazer download de arquivos
+  async getPaymentsByReservation(reservationId: number): Promise<PaymentResponse[]> {
+    const response = await this.get<PaymentResponse[]>(`/payments/by-reservation/${reservationId}`);
+    return response.data;
+  }
+
+  // ===== ADMIN PAYMENT OPERATIONS =====
+  async getPaymentPermissions(id: number): Promise<PaymentPermissions> {
+    const response = await this.get<PaymentPermissions>(`/payments/${id}/permissions`);
+    return response.data;
+  }
+
+  async getPaymentSecurityWarning(
+    id: number, 
+    operation: 'edit_confirmed' | 'delete_confirmed'
+  ): Promise<PaymentSecurityWarning> {
+    const response = await this.get<PaymentSecurityWarning>(
+      `/payments/${id}/security-warning`,
+      { operation }
+    );
+    return response.data;
+  }
+
+  async updateConfirmedPayment(
+    id: number, 
+    data: PaymentConfirmedUpdate
+  ): Promise<PaymentResponse> {
+    const response = await this.put<PaymentResponse>(`/payments/${id}/confirmed`, data);
+    return response.data;
+  }
+
+  async deleteConfirmedPayment(
+    id: number, 
+    data: PaymentDeleteConfirmed
+  ): Promise<void> {
+    await this.delete(`/payments/${id}/confirmed`, { data });
+  }
+
+  async getPaymentAuditLog(id: number): Promise<any[]> {
+    const response = await this.get<any[]>(`/payments/${id}/audit-log`);
+    return response.data;
+  }
+
+  // ===== UTILITY METHODS =====
   async downloadFile(url: string, filename?: string): Promise<void> {
     try {
       const response = await fetch(url);
@@ -1849,7 +1769,6 @@ async getPaymentAuditLog(id: number): Promise<any[]> {
       document.body.appendChild(link);
       link.click();
 
-      // Limpar
       window.URL.revokeObjectURL(downloadUrl);
       document.body.removeChild(link);
     } catch (error) {
@@ -1858,38 +1777,12 @@ async getPaymentAuditLog(id: number): Promise<any[]> {
     }
   }
 
-  // Método para formatar parâmetros de URL
-  private buildQueryParams(params: Record<string, any>): URLSearchParams {
-    const queryParams = new URLSearchParams();
-    
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== null && value !== undefined && value !== '' && value !== 'all') {
-        if (Array.isArray(value)) {
-          value.forEach(v => queryParams.append(key, v.toString()));
-        } else {
-          queryParams.append(key, value.toString());
-        }
-      }
+  async request<T>(endpoint: string, options?: AxiosRequestConfig): Promise<T> {
+    const response: AxiosResponse<T> = await this.client.request({
+      url: endpoint,
+      ...options,
     });
-    
-    return queryParams;
-  }
-
-  // Método para tratar erros de API
-  private handleApiError(error: any): never {
-    if (error.response) {
-      // Erro da API com resposta
-      const message = error.response.data?.detail || 
-                      error.response.data?.message || 
-                      'Erro na requisição';
-      throw new Error(message);
-    } else if (error.request) {
-      // Erro de rede
-      throw new Error('Erro de conexão. Verifique sua internet.');
-    } else {
-      // Outros erros
-      throw new Error(error.message || 'Erro desconhecido');
-    }
+    return response.data;
   }
 }
 
