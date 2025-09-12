@@ -31,7 +31,8 @@ import {
   DollarSign,
   X,
   Search,
-  Loader2
+  Loader2,
+  FolderOpen
 } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -42,6 +43,7 @@ const navigation = [
   { name: 'Calendário', href: '/dashboard/calendar', icon: Calendar },
   { name: 'Mapa de Quartos', href: '/dashboard/room-map', icon: Map },
   { name: 'Reservas', href: '/dashboard/reservations', icon: Calendar },
+  { name: 'Cadastros', href: '/dashboard/cadastros', icon: FolderOpen },
   { name: 'Pagamentos', href: '/dashboard/payments', icon: DollarSign },
   { name: 'Hóspedes', href: '/dashboard/guests', icon: Users },
   { name: 'Disponibilidade', href: '/dashboard/room-availability', icon: Calendar },
