@@ -1099,6 +1099,37 @@ class PMSApiClient {
     return response.data;
   }
 
+  async getUnpaidReservations(
+    limit: number = 50,
+    propertyId?: number
+  ): Promise<{
+    reservation_id: number;
+    reservation_number: string;
+    guest_name: string;
+    check_in_date: string;
+    check_out_date: string;
+    total_amount: number;
+    status: string;
+    days_until_checkin: number;
+  }[]> {
+    const params: any = { limit };
+    if (propertyId) {
+      params.property_id = propertyId;
+    }
+
+    const response = await this.get<{
+      reservation_id: number;
+      reservation_number: string;
+      guest_name: string;
+      check_in_date: string;
+      check_out_date: string;
+      total_amount: number;
+      status: string;
+      days_until_checkin: number;
+    }[]>('/reservations/unpaid-reservations', params);
+    return response.data;
+  }
+
   // ===== ADVANCED OPERATIONS =====
   async advancedSearchReservations(
     filters: ReservationFilters | ReservationFiltersNew,

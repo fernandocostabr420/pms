@@ -55,6 +55,70 @@ from datetime import timezone
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+@router.get("/unpaid-reservations", response_model=List[Dict[str, Any]])
+def get_unpaid_reservations(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    property_id: Optional[int] = Query(None, description="Filtrar por propriedade"),
+    limit: int = Query(10, ge=1, le=50, description="Número máximo de resultados")
+):
+    """Busca reservas sem nenhum pagamento (R$0)"""
+    try:
+        from app.models.payment import Payment
+        
+        # Subquery para calcular total pago
+        paid_subquery = db.query(
+            Payment.reservation_id,
+            func.sum(Payment.amount).label('total_paid')
+        ).filter(
+            Payment.tenant_id == current_user.tenant_id,
+            Payment.status == 'confirmed',
+            Payment.is_refund == False,
+            Payment.is_active == True
+        ).group_by(Payment.reservation_id).subquery()
+        
+        # Query principal
+        base_query = db.query(Reservation).options(
+            joinedload(Reservation.guest)
+        ).outerjoin(
+            paid_subquery, Reservation.id == paid_subquery.c.reservation_id
+        ).filter(
+            Reservation.tenant_id == current_user.tenant_id,
+            Reservation.is_active == True,
+            Reservation.status.in_(['confirmed', 'pending', 'checked_in']),
+            func.coalesce(paid_subquery.c.total_paid, 0) == 0,  # Sem pagamentos
+            Reservation.total_amount > 0  # Com valor a ser pago
+        )
+        
+        if property_id:
+            base_query = base_query.filter(Reservation.property_id == property_id)
+        
+        reservations = base_query.order_by(desc(Reservation.created_at)).limit(limit).all()
+        
+        result = []
+        for r in reservations:
+            days_until_checkin = (r.check_in_date - date.today()).days
+            
+            result.append({
+                "reservation_id": r.id,
+                "reservation_number": r.reservation_number,
+                "guest_name": r.guest.full_name if r.guest else "N/A",
+                "check_in_date": r.check_in_date.isoformat(),
+                "check_out_date": r.check_out_date.isoformat(),
+                "total_amount": float(r.total_amount),
+                "status": r.status,
+                "days_until_checkin": days_until_checkin
+            })
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Erro ao buscar reservas sem pagamento: {str(e)}")
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao buscar reservas sem pagamento: {str(e)}"
+        )
+
 
 # ===== FUNÇÃO AUXILIAR PARA GERAR VOUCHER PDF =====
 

@@ -11,6 +11,10 @@ from app.api.v1.endpoints import (
 
 api_router = APIRouter()
 
+# WuBook integration
+from app.api.v1.endpoints import wubook
+api_router.include_router(wubook.router, prefix="/wubook", tags=["wubook"])
+
 # Incluir rotas de autenticação
 api_router.include_router(
     auth.router, 

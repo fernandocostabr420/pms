@@ -23,7 +23,8 @@ import {
   Home,
   RefreshCw,
   Globe,
-  Building2
+  Building2,
+  XCircle
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -56,6 +57,18 @@ interface OccupancyData {
   occupancyRate: number;
 }
 
+// Interface para reservas sem pagamento
+interface UnpaidReservation {
+  reservation_id: number;
+  reservation_number: string;
+  guest_name: string;
+  check_in_date: string;
+  check_out_date: string;
+  total_amount: number;
+  status: string;
+  days_until_checkin: number;
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData>({
     summary: null,
@@ -70,6 +83,9 @@ export default function DashboardPage() {
     occupiedRooms: 0,
     occupancyRate: 0
   });
+
+  // NOVO ESTADO - Reservas sem pagamento
+  const [unpaidReservations, setUnpaidReservations] = useState<UnpaidReservation[]>([]);
 
   // ESTADOS - Controle dos Modais
   const [showNewReservationModal, setShowNewReservationModal] = useState(false);
@@ -247,11 +263,12 @@ export default function DashboardPage() {
       }
 
       // Carregar todos os dados em paralelo
-      const [summary, recentReservations, pendingPayments, todaysData] = await Promise.allSettled([
+      const [summary, recentReservations, pendingPayments, todaysData, unpaidRes] = await Promise.allSettled([
         apiClient.getDashboardSummary(),
         apiClient.getRecentReservations(20),
         apiClient.getCheckedInPendingPayments(5),
-        apiClient.getTodaysReservationsImproved(undefined, true)
+        apiClient.getTodaysReservationsImproved(undefined, true),
+        apiClient.getUnpaidReservations(50) // NOVO - Carregar reservas sem pagamento
       ]);
 
       // Carregar ocupação separadamente
@@ -265,8 +282,11 @@ export default function DashboardPage() {
         todaysData: todaysData.status === 'fulfilled' ? todaysData.value : null
       });
 
+      // NOVO - Processar reservas sem pagamento
+      setUnpaidReservations(unpaidRes.status === 'fulfilled' ? unpaidRes.value : []);
+
       // Mostrar erros se houver
-      const errors = [summary, recentReservations, pendingPayments, todaysData]
+      const errors = [summary, recentReservations, pendingPayments, todaysData, unpaidRes]
         .filter(result => result.status === 'rejected')
         .map(result => (result as PromiseRejectedResult).reason);
 
@@ -475,160 +495,154 @@ export default function DashboardPage() {
         </div>
 
         {/* SEÇÃO 1 - Chegadas de Hoje e Check-outs Pendentes */}
-        {(todaysData?.arrivals_count > 0 || todaysData?.pending_checkouts_count > 0) && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Chegadas de Hoje */}
-            {todaysData.arrivals_count > 0 && (
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                  <CardTitle className="text-sm font-medium flex items-center">
-                    <ArrowDownIcon className="h-4 w-4 text-green-600 mr-2" />
-                    Chegadas de Hoje ({todaysData.arrivals_count})
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="max-h-64 overflow-y-auto">
-                    {todaysData.arrivals && todaysData.arrivals.length > 0 ? (
-                      <div className="divide-y divide-gray-100">
-                        {todaysData.arrivals.map((reservation: any) => {
-                          const SourceIcon = getSourceIcon(reservation.source);
-                          return (
-                            <div 
-                              key={reservation.id} 
-                              className="flex items-center justify-between p-3 hover:bg-gray-50 transition-colors cursor-pointer group"
-                              onClick={() => goToReservation(reservation.id)}
-                            >
-                              <div className="flex-1 min-w-0 pr-3">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <p className="text-sm font-medium text-gray-900 truncate">
-                                    {reservation.guest?.full_name || reservation.guest_name || 'Sem nome'}
-                                  </p>
-                                  <span className="text-xs text-gray-400 font-mono">
-                                    #{reservation.reservation_number?.slice(-4)}
-                                  </span>
-                                </div>
-                                
-                                <div className="flex items-center justify-between">
-                                  <span className="text-xs text-gray-500">
-                                    {formatNights(reservation.nights || 0)} • {reservation.adults || 0} adultos
-                                  </span>
-                                  
-                                  <div className="flex items-center gap-1">
-                                    <SourceIcon className={`h-3 w-3 ${getSourceColor(reservation.source)}`} />
-                                    <span className={`text-xs ${getSourceColor(reservation.source)} font-medium`}>
-                                      {getSourceLabel(reservation.source)}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Chegadas de Hoje */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+              <CardTitle className="text-sm font-medium flex items-center">
+                <ArrowDownIcon className="h-4 w-4 text-green-600 mr-2" />
+                Chegadas de Hoje ({todaysData?.arrivals_count || 0})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="max-h-64 overflow-y-auto">
+                {todaysData?.arrivals && todaysData.arrivals.length > 0 ? (
+                  <div className="divide-y divide-gray-100">
+                    {todaysData.arrivals.map((reservation: any) => {
+                      const SourceIcon = getSourceIcon(reservation.source);
+                      return (
+                        <div 
+                          key={reservation.id} 
+                          className="flex items-center justify-between p-3 hover:bg-gray-50 transition-colors cursor-pointer group"
+                          onClick={() => goToReservation(reservation.id)}
+                        >
+                          <div className="flex-1 min-w-0 pr-3">
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="text-sm font-medium text-gray-900 truncate">
+                                {reservation.guest?.full_name || reservation.guest_name || 'Sem nome'}
+                              </p>
+                              <span className="text-xs text-gray-400 font-mono">
+                                #{reservation.reservation_number?.slice(-4)}
+                              </span>
+                            </div>
+                            
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-gray-500">
+                                {formatNights(reservation.nights || 0)} • {reservation.adults || 0} adultos
+                              </span>
                               
-                              <div className="flex flex-col items-end gap-1">
-                                <Badge 
-                                  variant={getStatusVariant(reservation.status)}
-                                  className="text-xs px-2 py-0 h-5"
-                                >
-                                  {getStatusLabel(reservation.status)}
-                                </Badge>
-                                <span className="text-xs font-semibold text-green-600">
-                                  Check-in
+                              <div className="flex items-center gap-1">
+                                <SourceIcon className={`h-3 w-3 ${getSourceColor(reservation.source)}`} />
+                                <span className={`text-xs ${getSourceColor(reservation.source)} font-medium`}>
+                                  {getSourceLabel(reservation.source)}
                                 </span>
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-center py-6">
-                        <ArrowDownIcon className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-                        <p className="text-sm text-gray-500">Nenhuma chegada hoje</p>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Check-outs Pendentes */}
-            {todaysData.pending_checkouts_count > 0 && (
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                  <CardTitle className="text-sm font-medium flex items-center">
-                    <ArrowUpIcon className="h-4 w-4 text-blue-600 mr-2" />
-                    Check-outs Pendentes ({todaysData.pending_checkouts_count})
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="max-h-64 overflow-y-auto">
-                    {todaysData.pending_checkouts && todaysData.pending_checkouts.length > 0 ? (
-                      <div className="divide-y divide-gray-100">
-                        {todaysData.pending_checkouts.map((reservation: any) => {
-                          const daysPending = calculateDaysPending(reservation.check_out_date);
-                          const pendingBalance = calculatePendingBalance(
-                            reservation.total_amount || 0, 
-                            reservation.paid_amount || 0
-                          );
+                          </div>
                           
-                          return (
-                            <div 
-                              key={reservation.id} 
-                              className="flex items-center justify-between p-3 hover:bg-gray-50 transition-colors cursor-pointer group"
-                              onClick={() => goToReservation(reservation.id)}
+                          <div className="flex flex-col items-end gap-1">
+                            <Badge 
+                              variant={getStatusVariant(reservation.status)}
+                              className="text-xs px-2 py-0 h-5"
                             >
-                              <div className="flex-1 min-w-0 pr-3">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <p className="text-sm font-medium text-gray-900 truncate">
-                                    {reservation.guest?.full_name || reservation.guest_name || 'Sem nome'}
-                                  </p>
-                                  <span className="text-xs text-gray-400 font-mono">
-                                    #{reservation.reservation_number?.slice(-4)}
-                                  </span>
-                                </div>
-                                
-                                <div className="flex items-center justify-between">
-                                  <span className="text-xs text-gray-500">
-                                    {daysPending > 0 ? `${daysPending} ${daysPending === 1 ? 'dia' : 'dias'} pendente` : 'Vence hoje'}
-                                  </span>
-                                  
-                                  {reservation.rooms && reservation.rooms.length > 0 && (
-                                    <span className="text-xs text-gray-500">
-                                      Quarto {reservation.rooms[0]?.room_number || 'N/A'}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                              
-                              <div className="flex flex-col items-end gap-1">
-                                <Badge 
-                                  variant={daysPending > 0 ? 'destructive' : 'secondary'}
-                                  className="text-xs px-2 py-0 h-5"
-                                >
-                                  {daysPending > 0 ? 'Atrasado' : 'Hoje'}
-                                </Badge>
-                                {pendingBalance > 0 && (
-                                  <span className="text-xs font-semibold text-red-600">
-                                    R$ {pendingBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-center py-6">
-                        <ArrowUpIcon className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-                        <p className="text-sm text-gray-500">Nenhum check-out pendente</p>
-                      </div>
-                    )}
+                              {getStatusLabel(reservation.status)}
+                            </Badge>
+                            <span className="text-xs font-semibold text-green-600">
+                              Check-in
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        )}
+                ) : (
+                  <div className="text-center py-6">
+                    <ArrowDownIcon className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                    <p className="text-sm text-gray-500">Nenhuma chegada hoje</p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
 
-        {/* SEÇÃO 2 - Últimas Reservas e Saldos em Aberto */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Check-outs Pendentes */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+              <CardTitle className="text-sm font-medium flex items-center">
+                <ArrowUpIcon className="h-4 w-4 text-blue-600 mr-2" />
+                Check-outs Pendentes ({todaysData?.pending_checkouts_count || 0})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="max-h-64 overflow-y-auto">
+                {todaysData?.pending_checkouts && todaysData.pending_checkouts.length > 0 ? (
+                  <div className="divide-y divide-gray-100">
+                    {todaysData.pending_checkouts.map((reservation: any) => {
+                      const daysPending = calculateDaysPending(reservation.check_out_date);
+                      const pendingBalance = calculatePendingBalance(
+                        reservation.total_amount || 0, 
+                        reservation.paid_amount || 0
+                      );
+                      
+                      return (
+                        <div 
+                          key={reservation.id} 
+                          className="flex items-center justify-between p-3 hover:bg-gray-50 transition-colors cursor-pointer group"
+                          onClick={() => goToReservation(reservation.id)}
+                        >
+                          <div className="flex-1 min-w-0 pr-3">
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="text-sm font-medium text-gray-900 truncate">
+                                {reservation.guest?.full_name || reservation.guest_name || 'Sem nome'}
+                              </p>
+                              <span className="text-xs text-gray-400 font-mono">
+                                #{reservation.reservation_number?.slice(-4)}
+                              </span>
+                            </div>
+                            
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-gray-500">
+                                {daysPending > 0 ? `${daysPending} ${daysPending === 1 ? 'dia' : 'dias'} pendente` : 'Vence hoje'}
+                              </span>
+                              
+                              {reservation.rooms && reservation.rooms.length > 0 && (
+                                <span className="text-xs text-gray-500">
+                                  Quarto {reservation.rooms[0]?.room_number || 'N/A'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          
+                          <div className="flex flex-col items-end gap-1">
+                            <Badge 
+                              variant={daysPending > 0 ? 'destructive' : 'secondary'}
+                              className="text-xs px-2 py-0 h-5"
+                            >
+                              {daysPending > 0 ? 'Atrasado' : 'Hoje'}
+                            </Badge>
+                            {pendingBalance > 0 && (
+                              <span className="text-xs font-semibold text-red-600">
+                                R$ {pendingBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-6">
+                    <ArrowUpIcon className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                    <p className="text-sm text-gray-500">Nenhum check-out pendente</p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* SEÇÃO 2 - Últimas Reservas, Saldos em Aberto e Reservas Sem Pagamento */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
           {/* Últimas Reservas */}
           <Card>
@@ -702,48 +716,122 @@ export default function DashboardPage() {
 
           {/* Check-ins com Saldo Pendente */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
               <CardTitle className="text-sm font-medium">Saldos em Aberto</CardTitle>
               <CreditCard className="h-4 w-4 text-red-600" />
             </CardHeader>
-            <CardContent className="space-y-3">
-              {pendingPayments.length > 0 ? (
-                pendingPayments.map((payment) => (
-                  <div 
-                    key={payment.reservation_id} 
-                    className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
-                    onClick={() => goToReservation(payment.reservation_id)}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">
-                        {payment.guest_name}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        Quarto {payment.room_number}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {payment.days_since_checkin} dias desde check-in
-                      </p>
-                    </div>
-                    <div className="flex flex-col items-end">
-                      <Badge 
-                        variant={payment.payment_status === 'overdue' ? 'destructive' : 'secondary'}
-                        className="mb-1"
+            <CardContent className="p-0">
+              <div className="max-h-80 overflow-y-auto">
+                {pendingPayments.length > 0 ? (
+                  <div className="divide-y divide-gray-100">
+                    {pendingPayments.map((payment) => (
+                      <div 
+                        key={payment.reservation_id} 
+                        className="flex items-center justify-between p-3 hover:bg-gray-50 transition-colors cursor-pointer group"
+                        onClick={() => goToReservation(payment.reservation_id)}
                       >
-                        {payment.payment_status === 'overdue' ? 'Atrasado' : 'Pendente'}
-                      </Badge>
-                      <p className="text-xs font-medium text-red-600">
-                        R$ {payment.pending_amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </p>
-                    </div>
+                        <div className="flex-1 min-w-0 pr-3">
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {payment.guest_name}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            Quarto {payment.room_number}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {payment.days_since_checkin} dias desde check-in
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <Badge 
+                            variant={payment.payment_status === 'overdue' ? 'destructive' : 'secondary'}
+                            className="text-xs px-2 py-0 h-5"
+                          >
+                            {payment.payment_status === 'overdue' ? 'Atrasado' : 'Pendente'}
+                          </Badge>
+                          <p className="text-xs font-medium text-red-600">
+                            R$ {payment.pending_amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))
-              ) : (
-                <div className="text-center py-4">
-                  <CheckCircle className="h-8 w-8 text-green-400 mx-auto mb-2" />
-                  <p className="text-sm text-gray-500">Todos os pagamentos em dia!</p>
-                </div>
-              )}
+                ) : (
+                  <div className="text-center py-8">
+                    <CheckCircle className="h-8 w-8 text-green-400 mx-auto mb-2" />
+                    <p className="text-sm text-gray-500">Todos os pagamentos em dia!</p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* NOVO CONTAINER - Reservas Sem Pagamento */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+              <CardTitle className="text-sm font-medium flex items-center">
+                <XCircle className="h-4 w-4 text-red-500 mr-2" />
+                Reservas Sem Pagamento ({unpaidReservations.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="max-h-80 overflow-y-auto">
+                {unpaidReservations.length > 0 ? (
+                  <div className="divide-y divide-gray-100">
+                    {unpaidReservations.map((reservation) => {
+                      const isOverdue = reservation.days_until_checkin < 0;
+                      const isToday = reservation.days_until_checkin === 0;
+                      
+                      return (
+                        <div 
+                          key={reservation.reservation_id} 
+                          className="flex items-center justify-between p-3 hover:bg-gray-50 transition-colors cursor-pointer group"
+                          onClick={() => goToReservation(reservation.reservation_id)}
+                        >
+                          <div className="flex-1 min-w-0 pr-3">
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="text-sm font-medium text-gray-900 truncate">
+                                {reservation.guest_name}
+                              </p>
+                              <span className="text-xs text-gray-400 font-mono">
+                                #{reservation.reservation_number.slice(-4)}
+                              </span>
+                            </div>
+                            
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-gray-500">
+                                {format(new Date(reservation.check_in_date + 'T00:00:00'), 'dd/MM', { locale: ptBR })} • 
+                                {isOverdue ? ' Check-in atrasado' : 
+                                 isToday ? ' Check-in hoje' : 
+                                 ` ${reservation.days_until_checkin} dias`}
+                              </span>
+                            </div>
+                          </div>
+                          
+                          <div className="flex flex-col items-end gap-1">
+                            <Badge 
+                              variant={getStatusVariant(reservation.status)}
+                              className="text-xs px-2 py-0 h-5"
+                            >
+                              {getStatusLabel(reservation.status)}
+                            </Badge>
+                            <span className="text-xs font-semibold text-red-600">
+                              R$ {reservation.total_amount.toLocaleString('pt-BR', { 
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2 
+                              })}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <CheckCircle className="h-8 w-8 text-green-400 mx-auto mb-2" />
+                    <p className="text-sm text-gray-500">Todas as reservas com pagamento!</p>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>

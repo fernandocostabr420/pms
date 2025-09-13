@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     SMTP_USER: Optional[str] = None
     SMTP_PASSWORD: Optional[str] = None
     
+    # WuBook Integration
+    WUBOOK_TOKEN: Optional[str] = None
+    WUBOOK_LCODE: Optional[int] = None
+    
     # ✅ NOVO - Property para timezone object
     @property
     def tz(self):
