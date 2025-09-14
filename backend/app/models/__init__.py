@@ -15,6 +15,11 @@ from .payment import Payment
 # ✅ NOVOS IMPORTS
 from .payment_method import PaymentMethod
 from .sales_channel import SalesChannel
+# ✅ WUBOOK IMPORTS
+from .wubook_configuration import WuBookConfiguration
+from .wubook_room_mapping import WuBookRoomMapping
+from .wubook_rate_plan import WuBookRatePlan
+from .wubook_sync_log import WuBookSyncLog
 
 __all__ = [
     "Tenant",
@@ -30,5 +35,10 @@ __all__ = [
     "Payment",
     # ✅ NOVOS EXPORTS
     "PaymentMethod",
-    "SalesChannel"
+    "SalesChannel",
+    # ✅ WUBOOK EXPORTS
+    "WuBookConfiguration",
+    "WuBookRoomMapping", 
+    "WuBookRatePlan",
+    "WuBookSyncLog"
 ]

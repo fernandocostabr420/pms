@@ -113,6 +113,61 @@ from .reservation import (
     ReservationFilters
 )
 
+# ✅ WuBook schemas - APENAS OS QUE EXISTEM
+from .wubook_configuration import (
+    WuBookConfigurationBase,
+    WuBookConfigurationCreate,
+    WuBookConfigurationUpdate,
+    WuBookConfigurationResponse,
+    WuBookConfigurationListResponse,
+    WuBookTestConnection,
+    WuBookTestConnectionResult,
+    WuBookConfigurationFilters,
+    WuBookConfigurationStats,
+    WuBookSyncRequest,
+    WuBookSyncResult,
+    WuBookChannelMapping,
+    WuBookChannelMappingUpdate
+)
+
+from .wubook_mapping import (
+    # Room Mapping
+    WuBookRoomMappingBase,
+    WuBookRoomMappingCreate,
+    WuBookRoomMappingUpdate,
+    WuBookRoomMappingResponse,
+    WuBookRoomMappingBulkCreate,
+    WuBookRoomSuggestion,
+    # Rate Plan
+    WuBookRatePlanBase,
+    WuBookRatePlanCreate,
+    WuBookRatePlanUpdate,
+    WuBookRatePlanResponse,
+    WuBookRatePlanListResponse,
+    WuBookRateCalculation,
+    WuBookRatePlanValidation
+)
+
+from .wubook_sync import (
+    WuBookSyncLogBase,
+    WuBookSyncLogCreate,
+    WuBookSyncLogUpdate,
+    WuBookSyncLogResponse,
+    WuBookSyncLogListResponse,
+    WuBookSyncLogFilters,
+    WuBookSyncLogSummary,
+    WuBookSyncConflict,
+    WuBookSyncStats,
+    WuBookSyncProgress,
+    WuBookBulkSyncRequest,
+    WuBookSyncSchedule,
+    # Enums
+    SyncTypeEnum,
+    SyncDirectionEnum,
+    SyncStatusEnum,
+    SyncTriggerEnum
+)
+
 __all__ = [
     # Tenant
     "TenantBase",
@@ -195,4 +250,49 @@ __all__ = [
     "AvailabilityRequest",
     "AvailabilityResponse",
     "ReservationFilters",
+    # ✅ WuBook Configuration - APENAS OS QUE EXISTEM
+    "WuBookConfigurationBase",
+    "WuBookConfigurationCreate",
+    "WuBookConfigurationUpdate",
+    "WuBookConfigurationResponse",
+    "WuBookConfigurationListResponse",
+    "WuBookTestConnection",
+    "WuBookTestConnectionResult",
+    "WuBookConfigurationFilters",
+    "WuBookConfigurationStats",
+    "WuBookSyncRequest",
+    "WuBookSyncResult",
+    "WuBookChannelMapping",
+    "WuBookChannelMappingUpdate",
+    # ✅ WuBook Mapping - APENAS OS QUE EXISTEM
+    "WuBookRoomMappingBase",
+    "WuBookRoomMappingCreate",
+    "WuBookRoomMappingUpdate",
+    "WuBookRoomMappingResponse",
+    "WuBookRoomMappingBulkCreate",
+    "WuBookRoomSuggestion",
+    "WuBookRatePlanBase",
+    "WuBookRatePlanCreate",
+    "WuBookRatePlanUpdate",
+    "WuBookRatePlanResponse",
+    "WuBookRatePlanListResponse",
+    "WuBookRateCalculation",
+    "WuBookRatePlanValidation",
+    # ✅ WuBook Sync - APENAS OS QUE EXISTEM
+    "WuBookSyncLogBase",
+    "WuBookSyncLogCreate",
+    "WuBookSyncLogUpdate",
+    "WuBookSyncLogResponse",
+    "WuBookSyncLogListResponse",
+    "WuBookSyncLogFilters",
+    "WuBookSyncLogSummary",
+    "WuBookSyncConflict",
+    "WuBookSyncStats",
+    "WuBookSyncProgress",
+    "WuBookBulkSyncRequest",
+    "WuBookSyncSchedule",
+    "SyncTypeEnum",
+    "SyncDirectionEnum",
+    "SyncStatusEnum",
+    "SyncTriggerEnum",
 ]
