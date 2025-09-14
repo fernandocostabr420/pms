@@ -446,23 +446,22 @@ class WuBookConfigurationService:
                 sync_log.complete_sync(status="error", error=str(sync_error))
                 configuration.update_sync_status(status="error", message=str(sync_error))
                 raise
-            
+
             self.db.commit()
-            
+
             return WuBookSyncResult(
                 sync_log_id=sync_log.id,
                 status=sync_log.status,
-                message=sync_log.last_sync_message or "Sincronização concluída",
+                message=sync_log.error_message or result.get("message", "Sincronização concluída"),
                 started_at=sync_log.started_at,
                 completed_at=sync_log.completed_at,
-                duration_seconds=float(sync_log.duration_seconds) if sync_log.duration_seconds else None,
-                total_items=sync_log.total_items,
+                duration_seconds=float(sync_log.duration_seconds or 0),
                 success_items=sync_log.success_items,
                 error_items=sync_log.error_items,
                 changes_made=sync_log.changes_made or {},
-                errors=[sync_log.error_message] if sync_log.error_message else None
+                total_items=sync_log.total_items
             )
-            
+
         except HTTPException:
             self.db.rollback()
             raise
@@ -874,25 +873,34 @@ class WuBookConfigurationService:
             "message": "Sincronização completa executada",
             "details": results
         }
-    
+
     def _calculate_room_similarity(self, wubook_room: Dict, pms_room: Room) -> Tuple[float, str]:
         """Calcula similaridade entre quarto WuBook e PMS"""
         score = 0.0
         reasons = []
         
         # Comparar número do quarto
-        if wubook_room.get("name") and pms_room.number:
-            if wubook_room["name"].lower() == pms_room.number.lower():
+        wb_name = wubook_room.get("name")
+        pms_number = getattr(pms_room, "room_number", None)
+        
+        if wb_name and pms_number:
+            # Converter ambos para string para comparação
+            wb_name_str = str(wb_name).lower().strip()
+            pms_number_str = str(pms_number).lower().strip()
+            
+            if wb_name_str == pms_number_str:
                 score += 0.5
                 reasons.append("Número idêntico")
-            elif wubook_room["name"].lower() in pms_room.number.lower() or pms_room.number.lower() in wubook_room["name"].lower():
+            elif wb_name_str in pms_number_str or pms_number_str in wb_name_str:
                 score += 0.3
                 reasons.append("Número similar")
         
         # Comparar tipo
-        if wubook_room.get("rtype") and pms_room.room_type_ref:
-            wb_type = wubook_room["rtype"].lower()
-            pms_type = pms_room.room_type_ref.name.lower()
+        wb_rtype = wubook_room.get("rtype")
+        pms_room_type = getattr(pms_room, "room_type", None)
+        if wb_rtype and pms_room_type and getattr(pms_room_type, "name", None):
+            wb_type = str(wb_rtype).lower().strip()
+            pms_type = str(pms_room_type.name).lower().strip()
             
             if wb_type == pms_type:
                 score += 0.3
@@ -902,12 +910,17 @@ class WuBookConfigurationService:
                 reasons.append("Tipo similar")
         
         # Comparar ocupação
-        if wubook_room.get("occupancy") and pms_room.room_type_ref:
-            wb_occ = int(wubook_room.get("occupancy", 0))
-            pms_occ = pms_room.room_type_ref.max_occupancy
-            
-            if wb_occ == pms_occ:
-                score += 0.2
-                reasons.append("Ocupação idêntica")
+        wb_occupancy = wubook_room.get("occupancy")
+        if wb_occupancy and pms_room_type and getattr(pms_room_type, "max_capacity", None):
+            try:
+                wb_occ = int(wb_occupancy)
+                pms_occ = int(pms_room_type.max_capacity)
+                
+                if wb_occ == pms_occ:
+                    score += 0.2
+                    reasons.append("Ocupação idêntica")
+            except (ValueError, TypeError):
+                # Ignorar se não conseguir converter para int
+                pass
         
         return score, " | ".join(reasons) if reasons else "Sem correspondência clara"

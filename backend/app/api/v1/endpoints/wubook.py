@@ -17,6 +17,7 @@ from app.schemas.wubook_configuration import (
 )
 from app.schemas.wubook_mapping import (
     WuBookRoomMappingCreate, WuBookRoomMappingUpdate, WuBookRoomMappingResponse,
+    WuBookRoomMappingCreateRequest,  # ✅ ADICIONAR ESTA LINHA
     WuBookRoomSuggestion, WuBookRatePlanResponse
 )
 from app.schemas.wubook_sync import (
@@ -309,3 +310,84 @@ def wubook_health_check(
             "status": "error",
             "message": f"Erro ao verificar saúde: {str(e)}"
         }
+        
+# ===== ROOM MAPPING ENDPOINTS =====
+
+@router.get("/{config_id}/rooms/mappings", response_model=List[WuBookRoomMappingResponse])
+def list_room_mappings(
+    config_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Lista mapeamentos de quartos"""
+    from app.models.wubook_room_mapping import WuBookRoomMapping
+    
+    # Validar se a configuração existe e pertence ao tenant
+    service = WuBookConfigurationService(db)
+    config = service.get_configuration(config_id, current_user.tenant_id)
+    if not config:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Configuração não encontrada"
+        )
+    
+    # Buscar mapeamentos
+    mappings = db.query(WuBookRoomMapping).filter(
+        WuBookRoomMapping.configuration_id == config_id,
+        WuBookRoomMapping.tenant_id == current_user.tenant_id
+    ).all()
+    
+    return [WuBookRoomMappingResponse.model_validate(mapping) for mapping in mappings]
+
+@router.post("/{config_id}/rooms/mappings", response_model=WuBookRoomMappingResponse)
+def create_room_mapping(
+    config_id: int,
+    mapping_data: WuBookRoomMappingCreateRequest,  # ✅ USAR NOVO SCHEMA
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Cria mapeamento manual de quarto"""
+    from app.models.wubook_room_mapping import WuBookRoomMapping
+    
+    # Validar configuração
+    service = WuBookConfigurationService(db)
+    config = service.get_configuration(config_id, current_user.tenant_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="Configuração não encontrada")
+    
+    # Criar mapeamento
+    mapping = WuBookRoomMapping(
+        tenant_id=current_user.tenant_id,
+        configuration_id=config_id,  # Vem da URL
+        **mapping_data.model_dump()  # Agora sem conflito
+    )
+    
+    db.add(mapping)
+    db.commit()
+    db.refresh(mapping)
+    
+    return WuBookRoomMappingResponse.model_validate(mapping)
+
+@router.delete("/{config_id}/rooms/mappings/{mapping_id}")
+def delete_room_mapping(
+    config_id: int,
+    mapping_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Remove mapeamento de quarto"""
+    from app.models.wubook_room_mapping import WuBookRoomMapping
+    
+    mapping = db.query(WuBookRoomMapping).filter(
+        WuBookRoomMapping.id == mapping_id,
+        WuBookRoomMapping.configuration_id == config_id,
+        WuBookRoomMapping.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not mapping:
+        raise HTTPException(status_code=404, detail="Mapeamento não encontrado")
+    
+    db.delete(mapping)
+    db.commit()
+    
+    return {"message": "Mapeamento removido"}

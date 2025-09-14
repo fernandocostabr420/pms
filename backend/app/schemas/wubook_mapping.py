@@ -322,3 +322,20 @@ class WuBookRatePlanValidation(BaseModel):
     max_stay_ok: bool
     advance_ok: bool
     dates_ok: bool
+    
+
+class WuBookRoomMappingCreateRequest(BaseModel):
+    """Schema para criar mapeamento via endpoint (sem configuration_id da URL)"""
+    room_id: int = Field(..., gt=0, description="ID do quarto PMS")
+    wubook_room_id: str = Field(..., min_length=1, max_length=50, description="ID do quarto WuBook")
+    wubook_room_name: Optional[str] = Field(None, max_length=200, description="Nome do quarto WuBook")  
+    wubook_room_type: Optional[str] = Field(None, max_length=100, description="Tipo do quarto WuBook")
+    
+    # Campos opcionais com defaults seguros
+    is_active: bool = Field(True, description="Se o mapeamento está ativo")
+    is_syncing: bool = Field(True, description="Se deve sincronizar")
+    sync_availability: bool = Field(True, description="Sincronizar disponibilidade")
+    sync_rates: bool = Field(True, description="Sincronizar tarifas") 
+    sync_restrictions: bool = Field(True, description="Sincronizar restrições")
+    min_occupancy: int = Field(1, ge=1, le=20, description="Ocupação mínima")
+    rate_multiplier: Decimal = Field(Decimal("1.0"), ge=0, le=10, description="Multiplicador de tarifa")
