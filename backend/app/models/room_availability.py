@@ -1,8 +1,8 @@
 # backend/app/models/room_availability.py
 
-from sqlalchemy import Column, Integer, Date, Boolean, Numeric, String, Text, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, Date, Boolean, Numeric, String, Text, ForeignKey, UniqueConstraint, DateTime
 from sqlalchemy.orm import relationship
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from app.models.base import BaseModel, TenantMixin
@@ -13,6 +13,8 @@ class RoomAvailability(BaseModel, TenantMixin):
     Modelo de Disponibilidade de Quarto - controla disponibilidade diária de cada quarto.
     Permite definir status de disponibilidade, preços específicos e restrições por data.
     Multi-tenant: cada tenant mantém suas próprias disponibilidades.
+    
+    ✅ ATUALIZADO: Inclui campos para sincronização com Channel Manager (WuBook)
     """
     __tablename__ = "room_availability"
     __table_args__ = (
@@ -41,6 +43,15 @@ class RoomAvailability(BaseModel, TenantMixin):
     # Status de reserva
     is_reserved = Column(Boolean, default=False, nullable=False, index=True)  # Já reservado
     reservation_id = Column(Integer, ForeignKey('reservations.id'), nullable=True, index=True)
+    
+    # ✅ NOVOS CAMPOS: Sincronização com Channel Manager (WuBook)
+    sync_pending = Column(Boolean, default=False, nullable=False, index=True)  # Pendente sincronização
+    wubook_synced = Column(Boolean, default=False, nullable=False, index=True)  # Sincronizado com WuBook
+    wubook_sync_error = Column(Text, nullable=True)  # Erro na sincronização
+    last_wubook_sync = Column(DateTime, nullable=True, index=True)  # Última sincronização
+    
+    # Campo calculado para indicar se está disponível para reserva
+    is_bookable = Column(Boolean, default=True, nullable=False, index=True)
     
     # Informações adicionais
     reason = Column(String(100), nullable=True)  # Motivo do bloqueio/indisponibilidade
@@ -76,7 +87,7 @@ class RoomAvailability(BaseModel, TenantMixin):
             return "available"
     
     @property
-    def is_bookable(self) -> bool:
+    def can_be_booked(self) -> bool:
         """Retorna se o quarto pode ser reservado nesta data"""
         return (
             self.is_available and 
@@ -86,5 +97,98 @@ class RoomAvailability(BaseModel, TenantMixin):
             not self.is_reserved
         )
     
+    # ✅ NOVOS MÉTODOS: Sincronização Channel Manager
+    
+    def mark_for_sync(self):
+        """Marca registro para sincronização"""
+        self.sync_pending = True
+        self.wubook_sync_error = None
+        # Atualiza is_bookable baseado no status atual
+        self.update_bookable_status()
+    
+    def mark_sync_success(self):
+        """Marca sincronização como bem-sucedida"""
+        self.sync_pending = False
+        self.wubook_synced = True
+        self.wubook_sync_error = None
+        self.last_wubook_sync = datetime.utcnow()
+    
+    def mark_sync_error(self, error_message: str):
+        """Marca erro na sincronização"""
+        self.sync_pending = True  # Mantém pendente para tentar novamente
+        self.wubook_synced = False
+        self.wubook_sync_error = error_message
+        self.last_wubook_sync = datetime.utcnow()
+    
+    def update_bookable_status(self):
+        """Atualiza status is_bookable baseado nas condições"""
+        self.is_bookable = self.can_be_booked
+    
+    @property
+    def sync_status(self) -> str:
+        """Retorna status de sincronização legível"""
+        if self.wubook_sync_error:
+            return "error"
+        elif self.sync_pending:
+            return "pending"
+        elif self.wubook_synced:
+            return "synced"
+        else:
+            return "not_synced"
+    
+    @property
+    def needs_sync(self) -> bool:
+        """Verifica se precisa ser sincronizado"""
+        return self.sync_pending or not self.wubook_synced
+    
+    def reset_sync_status(self):
+        """Reset completo do status de sincronização"""
+        self.sync_pending = True
+        self.wubook_synced = False
+        self.wubook_sync_error = None
+        self.last_wubook_sync = None
+    
+    def to_wubook_format(self, wubook_room_id: int) -> dict:
+        """Converte disponibilidade para formato WuBook"""
+        return {
+            'room_id': wubook_room_id,
+            'date': self.date.strftime('%Y-%m-%d'),
+            'available': 1 if self.is_bookable else 0,
+            'closed_to_arrival': 1 if self.closed_to_arrival else 0,
+            'closed_to_departure': 1 if self.closed_to_departure else 0,
+            'min_stay': self.min_stay,
+            'max_stay': self.max_stay if self.max_stay else 0,
+            'rate': float(self.rate_override) if self.rate_override else None
+        }
+    
+    def update_from_wubook(self, wubook_data: dict):
+        """Atualiza disponibilidade a partir de dados WuBook"""
+        # Atualizar disponibilidade
+        wb_available = wubook_data.get('available', 0)
+        self.is_available = wb_available > 0
+        
+        # Atualizar restrições
+        self.closed_to_arrival = bool(wubook_data.get('closed_to_arrival', 0))
+        self.closed_to_departure = bool(wubook_data.get('closed_to_departure', 0))
+        
+        # Atualizar estadia
+        self.min_stay = wubook_data.get('min_stay', 1)
+        if wubook_data.get('max_stay', 0) > 0:
+            self.max_stay = wubook_data.get('max_stay')
+        
+        # Atualizar tarifa se fornecida
+        if wubook_data.get('rate'):
+            self.rate_override = Decimal(str(wubook_data['rate']))
+        
+        # Atualizar status de sincronização
+        self.mark_sync_success()
+        
+        # Atualizar is_bookable
+        self.update_bookable_status()
+    
     def __repr__(self):
-        return f"<RoomAvailability(room_id={self.room_id}, date={self.date}, status={self.status})>"
+        return (
+            f"<RoomAvailability(id={self.id}, room_id={self.room_id}, "
+            f"date={self.date}, status='{self.status}', "
+            f"sync_status='{self.sync_status}')>"
+        )

@@ -156,35 +156,6 @@ class ChannelConfigurationResponse(ChannelConfigurationBase):
     wubook_property_name: Optional[str] = Field(None, description="Nome da propriedade no WuBook")
 
 
-# ============== CHANNEL MAPPING ==============
-
-class ChannelMappingBase(BaseModel):
-    """Base para mapeamento de canal"""
-    channel_id: str = Field(..., min_length=1, description="ID do canal externo")
-    channel_name: str = Field(..., min_length=1, description="Nome do canal externo")
-    pms_channel_id: Optional[int] = Field(None, description="ID do canal no PMS")
-
-
-class ChannelMappingCreate(ChannelMappingBase):
-    """Schema para criar mapeamento de canal"""
-    configuration_id: int = Field(..., gt=0, description="ID da configuração")
-
-
-class ChannelMappingUpdate(BaseModel):
-    """Schema para atualizar mapeamento de canal"""
-    pms_channel_id: Optional[int] = Field(None, description="ID do canal no PMS")
-    channel_name: Optional[str] = Field(None, min_length=1, description="Nome do canal")
-
-
-class ChannelMappingResponse(ChannelMappingBase):
-    """Schema para resposta de mapeamento de canal"""
-    id: int
-    configuration_id: int
-    is_mapped: bool = Field(..., description="Se está mapeado corretamente")
-    created_at: datetime
-    updated_at: datetime
-
-
 # ============== SYNC OPERATIONS ==============
 
 class SyncRequest(BaseModel):
@@ -229,47 +200,14 @@ class SyncResult(BaseModel):
     successful_items: int = Field(0, description="Itens processados com sucesso")
     failed_items: int = Field(0, description="Itens com falha")
     
-    # Detalhes por direção
-    inbound_result: Optional[Dict[str, Any]] = Field(None, description="Resultado WuBook -> PMS")
-    outbound_result: Optional[Dict[str, Any]] = Field(None, description="Resultado PMS -> WuBook")
-    
     # Erros e conflitos
     errors: List[str] = Field(default_factory=list, description="Lista de erros")
-    conflicts: List[Dict[str, Any]] = Field(default_factory=list, description="Conflitos encontrados")
     
     # Alterações realizadas
     changes_summary: Dict[str, int] = Field(default_factory=dict, description="Resumo das alterações")
-    
-    # Metadados
-    sync_log_id: Optional[int] = Field(None, description="ID do log de sincronização")
 
 
-# ============== AVAILABILITY MAPPING ==============
-
-class AvailabilityMappingView(BaseModel):
-    """Schema para visualização de mapeamento de disponibilidade"""
-    date: date = Field(..., description="Data")
-    room_id: int = Field(..., description="ID do quarto")
-    room_number: str = Field(..., description="Número do quarto")
-    room_name: Optional[str] = Field(None, description="Nome do quarto")
-    
-    # Status PMS
-    pms_available: bool = Field(..., description="Disponível no PMS")
-    pms_is_bookable: bool = Field(..., description="Reservável no PMS")
-    pms_rate: Optional[Decimal] = Field(None, description="Tarifa no PMS")
-    pms_min_stay: int = Field(1, description="Estadia mínima no PMS")
-    pms_closed_to_arrival: bool = Field(False, description="Fechado para chegada no PMS")
-    pms_closed_to_departure: bool = Field(False, description="Fechado para saída no PMS")
-    
-    # Status por canal
-    channels: List[Dict[str, Any]] = Field(default_factory=list, description="Status por canal")
-    
-    # Status de sincronização
-    sync_status: str = Field(..., description="Status de sincronização")
-    last_sync: Optional[datetime] = Field(None, description="Última sincronização")
-    sync_pending: bool = Field(False, description="Sincronização pendente")
-    sync_error: Optional[str] = Field(None, description="Erro de sincronização")
-
+# ============== AVAILABILITY CALENDAR ==============
 
 class AvailabilityCalendarRequest(BaseModel):
     """Schema para requisição de calendário de disponibilidade"""
@@ -480,3 +418,39 @@ class ChannelManagerListResponse(BaseModel):
     # Agregações
     summary: Dict[str, Any] = Field(..., description="Resumo dos dados")
     filters_applied: Dict[str, Any] = Field(..., description="Filtros aplicados")
+
+
+# ============== SIMPLE MAPPING VIEWS (SEM RECURSÃO) ==============
+
+class SimpleChannelInfo(BaseModel):
+    """Informações simples de canal para evitar recursão"""
+    channel_id: str
+    channel_name: str
+    sync_status: str
+    last_sync: Optional[str] = None
+
+
+class SimpleAvailabilityView(BaseModel):
+    """Visão simplificada de disponibilidade sem recursão"""
+    date: date
+    room_id: int
+    room_number: str
+    room_name: Optional[str] = None
+    
+    # Status PMS
+    is_available: bool
+    is_bookable: bool
+    rate: Optional[Decimal] = None
+    min_stay: int = 1
+    closed_to_arrival: bool = False
+    closed_to_departure: bool = False
+    
+    # Informações de sincronização simples
+    sync_status: str = "unknown"
+    last_sync: Optional[str] = None
+    sync_pending: bool = False
+    sync_error: Optional[str] = None
+    
+    # Canais (informação simples)
+    mapped_channels: List[str] = Field(default_factory=list)
+    sync_enabled_channels: List[str] = Field(default_factory=list)
