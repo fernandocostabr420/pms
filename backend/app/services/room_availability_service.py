@@ -23,7 +23,7 @@ from app.utils.decorators import audit_operation
 
 
 class RoomAvailabilityService:
-    """Serviço para operações com disponibilidade de quartos"""
+    """Serviço para operações com disponibilidade de quartos - estendido para Channel Manager"""
     
     def __init__(self, db: Session):
         self.db = db
@@ -82,7 +82,8 @@ class RoomAvailabilityService:
     def create_availability(
         self, 
         availability_data: RoomAvailabilityCreate, 
-        tenant_id: int
+        tenant_id: int,
+        mark_for_sync: bool = True
     ) -> RoomAvailability:
         """Cria nova disponibilidade"""
         
@@ -112,6 +113,10 @@ class RoomAvailabilityService:
             **availability_data.model_dump()
         )
         
+        # Marcar para sincronização com channel manager
+        if mark_for_sync:
+            db_availability.mark_sync_pending()
+        
         try:
             self.db.add(db_availability)
             self.db.commit()
@@ -126,7 +131,8 @@ class RoomAvailabilityService:
         self, 
         availability_id: int, 
         availability_data: RoomAvailabilityUpdate, 
-        tenant_id: int
+        tenant_id: int,
+        mark_for_sync: bool = True
     ) -> Optional[RoomAvailability]:
         """Atualiza disponibilidade existente"""
         
@@ -140,6 +146,10 @@ class RoomAvailabilityService:
             setattr(availability, field, value)
         
         availability.updated_at = datetime.utcnow()
+        
+        # Marcar para sincronização
+        if mark_for_sync:
+            availability.mark_sync_pending()
         
         try:
             self.db.commit()
@@ -158,6 +168,7 @@ class RoomAvailabilityService:
         
         availability.is_active = False
         availability.updated_at = datetime.utcnow()
+        availability.mark_sync_pending()  # Sincronizar remoção
         
         self.db.commit()
         return True
@@ -165,7 +176,8 @@ class RoomAvailabilityService:
     def bulk_update_availability(
         self, 
         bulk_data: BulkAvailabilityUpdate, 
-        tenant_id: int
+        tenant_id: int,
+        mark_for_sync: bool = True
     ) -> Dict[str, Any]:
         """Atualização em massa de disponibilidades"""
         
@@ -204,6 +216,10 @@ class RoomAvailabilityService:
                         for field, value in update_data.items():
                             setattr(existing, field, value)
                         existing.updated_at = datetime.utcnow()
+                        
+                        if mark_for_sync:
+                            existing.mark_sync_pending()
+                        
                         updated_count += 1
                     else:
                         # Criar novo
@@ -213,6 +229,10 @@ class RoomAvailabilityService:
                             date=target_date,
                             **update_data
                         )
+                        
+                        if mark_for_sync:
+                            new_availability.mark_sync_pending()
+                        
                         self.db.add(new_availability)
                         created_count += 1
                         
@@ -417,6 +437,109 @@ class RoomAvailabilityService:
                 }
                 for a in availabilities
             ]
+        }
+
+    # ========== MÉTODOS ESPECÍFICOS PARA CHANNEL MANAGER ==========
+
+    def get_pending_sync_availabilities(
+        self,
+        tenant_id: int,
+        room_ids: Optional[List[int]] = None,
+        limit: int = 100
+    ) -> List[RoomAvailability]:
+        """Busca disponibilidades pendentes de sincronização"""
+        query = self.db.query(RoomAvailability).filter(
+            RoomAvailability.tenant_id == tenant_id,
+            RoomAvailability.sync_pending == True,
+            RoomAvailability.is_active == True
+        )
+        
+        if room_ids:
+            query = query.filter(RoomAvailability.room_id.in_(room_ids))
+        
+        return query.limit(limit).all()
+
+    def mark_availability_synced(
+        self,
+        availability_ids: List[int],
+        tenant_id: int,
+        sync_timestamp: Optional[str] = None
+    ) -> int:
+        """Marca disponibilidades como sincronizadas"""
+        count = self.db.query(RoomAvailability).filter(
+            RoomAvailability.id.in_(availability_ids),
+            RoomAvailability.tenant_id == tenant_id
+        ).update({
+            RoomAvailability.wubook_synced: True,
+            RoomAvailability.sync_pending: False,
+            RoomAvailability.last_wubook_sync: sync_timestamp or datetime.utcnow().isoformat(),
+            RoomAvailability.wubook_sync_error: None
+        }, synchronize_session=False)
+        
+        self.db.commit()
+        return count
+
+    def mark_availability_sync_error(
+        self,
+        availability_ids: List[int],
+        tenant_id: int,
+        error_message: str
+    ) -> int:
+        """Marca erro na sincronização de disponibilidades"""
+        count = self.db.query(RoomAvailability).filter(
+            RoomAvailability.id.in_(availability_ids),
+            RoomAvailability.tenant_id == tenant_id
+        ).update({
+            RoomAvailability.sync_pending: True,
+            RoomAvailability.wubook_sync_error: error_message
+        }, synchronize_session=False)
+        
+        self.db.commit()
+        return count
+
+    def get_channel_manager_overview(
+        self,
+        tenant_id: int,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None
+    ) -> Dict[str, Any]:
+        """Visão geral para o Channel Manager"""
+        
+        if not date_from:
+            date_from = date.today()
+        if not date_to:
+            date_to = date_from + timedelta(days=7)
+        
+        # Estatísticas de sincronização
+        sync_stats = self.db.query(
+            func.count(RoomAvailability.id).label('total'),
+            func.sum(case((RoomAvailability.wubook_synced == True, 1), else_=0)).label('synced'),
+            func.sum(case((RoomAvailability.sync_pending == True, 1), else_=0)).label('pending'),
+            func.sum(case((RoomAvailability.wubook_sync_error.isnot(None), 1), else_=0)).label('errors')
+        ).filter(
+            RoomAvailability.tenant_id == tenant_id,
+            RoomAvailability.is_active == True,
+            RoomAvailability.date >= date_from,
+            RoomAvailability.date <= date_to
+        ).first()
+        
+        # Estatísticas de disponibilidade
+        availability_stats = self.get_availability_stats(tenant_id, date_from, date_to)
+        
+        return {
+            'period': {
+                'date_from': date_from.isoformat(),
+                'date_to': date_to.isoformat(),
+                'days': (date_to - date_from).days + 1
+            },
+            'sync_status': {
+                'total_records': sync_stats.total or 0,
+                'synced': sync_stats.synced or 0,
+                'pending': sync_stats.pending or 0,
+                'errors': sync_stats.errors or 0,
+                'sync_rate': round((sync_stats.synced or 0) / max(sync_stats.total or 1, 1) * 100, 2)
+            },
+            'availability': availability_stats
         }
 
     def _apply_filters(self, query, tenant_id: int, filters: RoomAvailabilityFilters):

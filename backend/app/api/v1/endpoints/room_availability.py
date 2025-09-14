@@ -1,13 +1,15 @@
 # backend/app/api/v1/endpoints/room_availability.py
 
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, BackgroundTasks
 from sqlalchemy.orm import Session
 from datetime import date, timedelta
 import math
+import logging
 
 from app.core.database import get_db
 from app.services.room_availability_service import RoomAvailabilityService
+from app.integrations.wubook.sync_service import WuBookSyncService
 from app.schemas.room_availability import (
     RoomAvailabilityCreate,
     RoomAvailabilityUpdate,
@@ -24,6 +26,7 @@ from app.api.deps import get_current_active_user
 from app.models.user import User
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/", response_model=RoomAvailabilityListResponse)
@@ -59,6 +62,11 @@ def list_availabilities(
     has_rate_override: Optional[bool] = Query(None, description="Tem preço específico"),
     min_rate: Optional[float] = Query(None, ge=0, description="Preço mínimo"),
     max_rate: Optional[float] = Query(None, ge=0, description="Preço máximo"),
+    
+    # Filtros de sincronização WuBook (NOVOS)
+    sync_pending: Optional[bool] = Query(None, description="Pendente de sincronização"),
+    wubook_synced: Optional[bool] = Query(None, description="Sincronizado com WuBook"),
+    has_sync_error: Optional[bool] = Query(None, description="Com erro de sincronização"),
     
     # Busca textual
     search: Optional[str] = Query(None, description="Busca textual")
@@ -166,7 +174,8 @@ def create_availability(
     availability_data: RoomAvailabilityCreate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    skip_sync: bool = Query(False, description="Pular sincronização automática")
 ):
     """Cria nova disponibilidade"""
     availability_service = RoomAvailabilityService(db)
@@ -174,7 +183,8 @@ def create_availability(
     try:
         availability = availability_service.create_availability(
             availability_data, 
-            current_user.tenant_id
+            current_user.tenant_id,
+            mark_for_sync=not skip_sync
         )
         
         response_data = RoomAvailabilityResponse.model_validate(availability)
@@ -196,7 +206,8 @@ def update_availability(
     availability_data: RoomAvailabilityUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    skip_sync: bool = Query(False, description="Pular sincronização automática")
 ):
     """Atualiza disponibilidade existente"""
     availability_service = RoomAvailabilityService(db)
@@ -205,7 +216,8 @@ def update_availability(
         availability = availability_service.update_availability(
             availability_id, 
             availability_data, 
-            current_user.tenant_id
+            current_user.tenant_id,
+            mark_for_sync=not skip_sync
         )
         
         if not availability:
@@ -253,13 +265,18 @@ def bulk_update_availability(
     bulk_data: BulkAvailabilityUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    skip_sync: bool = Query(False, description="Pular sincronização automática")
 ):
     """Atualização em massa de disponibilidades"""
     availability_service = RoomAvailabilityService(db)
     
     try:
-        result = availability_service.bulk_update_availability(bulk_data, current_user.tenant_id)
+        result = availability_service.bulk_update_availability(
+            bulk_data, 
+            current_user.tenant_id,
+            mark_for_sync=not skip_sync
+        )
         return result
         
     except ValueError as e:
@@ -447,3 +464,260 @@ def get_room_availability_by_date(
             response_data.property_name = availability.room.property_obj.name
     
     return response_data
+
+
+# ============== ENDPOINTS ESPECÍFICOS PARA CHANNEL MANAGER ==============
+
+@router.get("/channel-manager/overview", response_model=Dict[str, Any])
+def get_channel_manager_overview(
+    date_from: Optional[date] = Query(None, description="Data inicial"),
+    date_to: Optional[date] = Query(None, description="Data final"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Visão geral do Channel Manager com estatísticas de sincronização"""
+    availability_service = RoomAvailabilityService(db)
+    
+    overview = availability_service.get_channel_manager_overview(
+        current_user.tenant_id,
+        date_from=date_from,
+        date_to=date_to
+    )
+    
+    return overview
+
+
+@router.get("/sync/pending", response_model=List[RoomAvailabilityResponse])
+def get_pending_sync_availabilities(
+    room_ids: Optional[List[int]] = Query(None, description="Filtrar por quartos específicos"),
+    limit: int = Query(100, ge=1, le=1000, description="Limite de registros"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Lista disponibilidades pendentes de sincronização"""
+    availability_service = RoomAvailabilityService(db)
+    
+    availabilities = availability_service.get_pending_sync_availabilities(
+        current_user.tenant_id,
+        room_ids=room_ids,
+        limit=limit
+    )
+    
+    # Converter para response
+    result = []
+    for availability in availabilities:
+        response_data = RoomAvailabilityResponse.model_validate(availability)
+        response_data.status = availability.status
+        response_data.is_bookable = availability.is_bookable
+        
+        if availability.room:
+            response_data.room_number = availability.room.room_number
+            response_data.room_name = availability.room.name
+            if availability.room.room_type:
+                response_data.room_type_name = availability.room.room_type.name
+        
+        result.append(response_data)
+    
+    return result
+
+
+@router.post("/sync/mark-synced", response_model=Dict[str, Any])
+def mark_availabilities_synced(
+    availability_ids: List[int],
+    sync_timestamp: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Marca disponibilidades como sincronizadas"""
+    availability_service = RoomAvailabilityService(db)
+    
+    try:
+        count = availability_service.mark_availability_synced(
+            availability_ids,
+            current_user.tenant_id,
+            sync_timestamp
+        )
+        
+        return {
+            "success": True,
+            "message": f"{count} disponibilidades marcadas como sincronizadas",
+            "count": count
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro ao marcar sync: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno: {str(e)}"
+        )
+
+
+@router.post("/sync/mark-error", response_model=Dict[str, Any])
+def mark_availabilities_sync_error(
+    availability_ids: List[int],
+    error_message: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Marca erro na sincronização de disponibilidades"""
+    availability_service = RoomAvailabilityService(db)
+    
+    try:
+        count = availability_service.mark_availability_sync_error(
+            availability_ids,
+            current_user.tenant_id,
+            error_message
+        )
+        
+        return {
+            "success": True,
+            "message": f"{count} disponibilidades marcadas com erro",
+            "count": count
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro ao marcar erro de sync: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno: {str(e)}"
+        )
+
+
+@router.post("/sync/wubook/manual", response_model=Dict[str, Any])
+def manual_wubook_sync(
+    configuration_id: int,
+    direction: str = Query("bidirectional", description="Direção: inbound, outbound, bidirectional"),
+    room_ids: Optional[List[int]] = Query(None, description="Quartos específicos"),
+    date_from: Optional[date] = Query(None, description="Data inicial"),
+    date_to: Optional[date] = Query(None, description="Data final"),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Sincronização manual com WuBook"""
+    
+    # Validar direção
+    valid_directions = ["inbound", "outbound", "bidirectional"]
+    if direction not in valid_directions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Direção deve ser uma de: {', '.join(valid_directions)}"
+        )
+    
+    try:
+        sync_service = WuBookSyncService(db)
+        
+        if direction == "inbound":
+            # Sincronizar do WuBook para PMS
+            result = sync_service.sync_availability_from_wubook(
+                tenant_id=current_user.tenant_id,
+                configuration_id=configuration_id,
+                start_date=(date_from or date.today()).strftime('%Y-%m-%d'),
+                end_date=(date_to or date.today() + timedelta(days=30)).strftime('%Y-%m-%d'),
+                room_ids=room_ids
+            )
+            
+        elif direction == "outbound":
+            # Sincronizar do PMS para WuBook
+            result = sync_service.sync_availability_to_wubook(
+                tenant_id=current_user.tenant_id,
+                configuration_id=configuration_id,
+                room_ids=room_ids,
+                date_from=date_from,
+                date_to=date_to
+            )
+            
+        else:  # bidirectional
+            # Sincronização bidirecional
+            result = sync_service.sync_bidirectional_availability(
+                tenant_id=current_user.tenant_id,
+                configuration_id=configuration_id,
+                date_from=date_from,
+                date_to=date_to
+            )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Erro na sincronização manual: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro na sincronização: {str(e)}"
+        )
+
+
+@router.get("/sync/wubook/status/{configuration_id}", response_model=Dict[str, Any])
+def get_wubook_sync_status(
+    configuration_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Status da sincronização WuBook"""
+    try:
+        sync_service = WuBookSyncService(db)
+        status_info = sync_service.get_sync_status(
+            current_user.tenant_id,
+            configuration_id
+        )
+        
+        return status_info
+        
+    except Exception as e:
+        logger.error(f"Erro ao buscar status: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao buscar status: {str(e)}"
+        )
+
+
+@router.post("/sync/wubook/reset-errors", response_model=Dict[str, Any])
+def reset_sync_errors(
+    room_ids: Optional[List[int]] = Query(None, description="Quartos específicos"),
+    date_from: Optional[date] = Query(None, description="Data inicial"),
+    date_to: Optional[date] = Query(None, description="Data final"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Reset erros de sincronização e marca como pendente novamente"""
+    try:
+        from app.models.room_availability import RoomAvailability
+        from sqlalchemy import and_
+        
+        # Query base
+        query = db.query(RoomAvailability).filter(
+            RoomAvailability.tenant_id == current_user.tenant_id,
+            RoomAvailability.wubook_sync_error.isnot(None),
+            RoomAvailability.is_active == True
+        )
+        
+        # Aplicar filtros
+        if room_ids:
+            query = query.filter(RoomAvailability.room_id.in_(room_ids))
+        
+        if date_from:
+            query = query.filter(RoomAvailability.date >= date_from)
+            
+        if date_to:
+            query = query.filter(RoomAvailability.date <= date_to)
+        
+        # Update
+        count = query.update({
+            RoomAvailability.wubook_sync_error: None,
+            RoomAvailability.sync_pending: True
+        }, synchronize_session=False)
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": f"{count} erros de sincronização resetados",
+            "count": count
+        }
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Erro ao resetar erros: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno: {str(e)}"
+        )

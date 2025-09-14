@@ -6,7 +6,7 @@ from app.api.v1.endpoints import (
     auth, users, tenants, audit, properties, 
     room_types, rooms, guests, reservations,
     room_availability, map, payments,  # ✅ NOVO IMPORT
-    payment_methods, sales_channels
+    payment_methods, sales_channels, 
 )
 
 api_router = APIRouter()
@@ -195,3 +195,5 @@ api_router.include_router(
     prefix="/payments", 
     tags=["Pagamentos"]
 )
+
+
