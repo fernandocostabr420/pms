@@ -69,7 +69,7 @@ class WuBookSyncService:
         except Exception as e:
             logger.error(f"Erro ao sincronizar quartos: {str(e)}")
             raise
-    
+
     def sync_availability_from_wubook(
         self,
         tenant_id: int,
@@ -78,7 +78,7 @@ class WuBookSyncService:
         end_date: str,
         room_ids: Optional[List[int]] = None
     ) -> Dict[str, Any]:
-        """Sincronizar disponibilidade do WuBook para o PMS"""
+        """Sincronizar disponibilidade do WuBook para o PMS - CORRIGIDO"""
         
         if not self.db:
             raise ValueError("Database session required for availability sync")
@@ -123,56 +123,143 @@ class WuBookSyncService:
                 start_date, end_date, wubook_room_ids
             )
             
+            # CORREÇÃO PRINCIPAL: Verificar tipo e estrutura dos dados recebidos
+            logger.debug(f"WuBook availability type: {type(wubook_availability)}")
+            logger.debug(f"WuBook availability content: {wubook_availability}")
+            
+            if not wubook_availability:
+                return {
+                    "success": True,
+                    "message": "Nenhuma disponibilidade encontrada no WuBook",
+                    "synced_count": 0
+                }
+            
             # Criar mapa de mapeamentos
             mapping_dict = {m.wubook_room_id: m for m in mappings}
             
             synced_count = 0
             errors = []
             
-            # Processar cada disponibilidade
-            for wb_avail in wubook_availability:
-                try:
-                    mapping = mapping_dict.get(wb_avail.get('room_id'))
-                    if not mapping:
-                        continue
+            # CORREÇÃO: Processar dados baseado na estrutura real retornada pelo WuBook
+            try:
+                if isinstance(wubook_availability, dict):
+                    # WuBook fetch_rooms_values retorna dict com room_id como chave
+                    for room_id_str, daily_data in wubook_availability.items():
+                        mapping = mapping_dict.get(room_id_str)
+                        if not mapping:
+                            logger.debug(f"Mapeamento não encontrado para room_id: {room_id_str}")
+                            continue
+                        
+                        # daily_data é uma lista de dados diários
+                        if isinstance(daily_data, list):
+                            for day_index, day_data in enumerate(daily_data):
+                                try:
+                                    # Calcular data baseada no índice e data inicial
+                                    base_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+                                    avail_date = base_date + timedelta(days=day_index)
+                                    
+                                    # Buscar ou criar disponibilidade no PMS
+                                    pms_avail = self.db.query(RoomAvailability).filter(
+                                        RoomAvailability.room_id == mapping.room_id,
+                                        RoomAvailability.date == avail_date,
+                                        RoomAvailability.tenant_id == tenant_id
+                                    ).first()
+                                    
+                                    if not pms_avail:
+                                        pms_avail = RoomAvailability(
+                                            tenant_id=tenant_id,
+                                            room_id=mapping.room_id,
+                                            date=avail_date
+                                        )
+                                        self.db.add(pms_avail)
+                                    
+                                    # Atualizar campos baseado na estrutura WuBook
+                                    if isinstance(day_data, dict):
+                                        wb_available = day_data.get('avail', 0)
+                                        pms_avail.is_available = wb_available > 0
+                                        pms_avail.closed_to_arrival = bool(day_data.get('closed_arrival', 0))
+                                        pms_avail.closed_to_departure = bool(day_data.get('closed_departure', 0))
+                                        pms_avail.min_stay = day_data.get('min_stay', 1)
+                                        
+                                        if day_data.get('max_stay', 0) > 0:
+                                            pms_avail.max_stay = day_data.get('max_stay')
+                                    else:
+                                        # Se day_data não é dict, usar valores padrão
+                                        pms_avail.is_available = True
+                                        pms_avail.min_stay = 1
+                                    
+                                    pms_avail.mark_sync_success()
+                                    pms_avail.update_bookable_status()
+                                    synced_count += 1
+                                    
+                                except Exception as e:
+                                    error_msg = f"Erro ao processar dia {day_index} do quarto {room_id_str}: {str(e)}"
+                                    errors.append(error_msg)
+                                    logger.error(error_msg)
+                        else:
+                            logger.warning(f"daily_data não é lista para room {room_id_str}: {type(daily_data)}")
+                            
+                elif isinstance(wubook_availability, list):
+                    # Se for lista (formato antigo/alternativo)
+                    for wb_avail in wubook_availability:
+                        try:
+                            if isinstance(wb_avail, dict):
+                                room_id = wb_avail.get('room_id')
+                                mapping = mapping_dict.get(room_id)
+                                if not mapping:
+                                    continue
+                                
+                                # Converter data
+                                avail_date = datetime.strptime(wb_avail['date'], '%Y-%m-%d').date()
+                                
+                                # Buscar ou criar disponibilidade no PMS
+                                pms_avail = self.db.query(RoomAvailability).filter(
+                                    RoomAvailability.room_id == mapping.room_id,
+                                    RoomAvailability.date == avail_date,
+                                    RoomAvailability.tenant_id == tenant_id
+                                ).first()
+                                
+                                if not pms_avail:
+                                    pms_avail = RoomAvailability(
+                                        tenant_id=tenant_id,
+                                        room_id=mapping.room_id,
+                                        date=avail_date
+                                    )
+                                    self.db.add(pms_avail)
+                                
+                                # Atualizar disponibilidade
+                                wb_available = wb_avail.get('available', 0)
+                                pms_avail.is_available = wb_available > 0
+                                pms_avail.mark_sync_success()
+                                
+                                synced_count += 1
+                            else:
+                                errors.append(f"Item da lista não é dict: {type(wb_avail)}")
+                                
+                        except Exception as e:
+                            error_msg = f"Erro ao processar item da lista: {str(e)}"
+                            errors.append(error_msg)
+                            logger.error(error_msg)
+                else:
+                    # Tipo inesperado
+                    error_msg = f"Tipo inesperado de wubook_availability: {type(wubook_availability)}"
+                    errors.append(error_msg)
+                    logger.error(error_msg)
                     
-                    # Converter data
-                    avail_date = datetime.strptime(wb_avail['date'], '%Y-%m-%d').date()
-                    
-                    # Buscar ou criar disponibilidade no PMS
-                    pms_avail = self.db.query(RoomAvailability).filter(
-                        RoomAvailability.room_id == mapping.room_id,
-                        RoomAvailability.date == avail_date,
-                        RoomAvailability.tenant_id == tenant_id
-                    ).first()
-                    
-                    if not pms_avail:
-                        pms_avail = RoomAvailability(
-                            tenant_id=tenant_id,
-                            room_id=mapping.room_id,
-                            date=avail_date
-                        )
-                        self.db.add(pms_avail)
-                    
-                    # Atualizar disponibilidade
-                    wb_available = wb_avail.get('available', 0)
-                    pms_avail.is_available = wb_available > 0
-                    pms_avail.mark_sync_success()
-                    
-                    synced_count += 1
-                    
-                except Exception as e:
-                    errors.append(f"Erro no quarto {wb_avail.get('room_id')}: {str(e)}")
-                    logger.error(f"Erro ao sincronizar disponibilidade: {str(e)}")
+            except Exception as e:
+                error_msg = f"Erro ao processar dados do WuBook: {str(e)}"
+                errors.append(error_msg)
+                logger.error(error_msg)
             
             # Commit das alterações
-            self.db.commit()
+            if synced_count > 0:
+                self.db.commit()
             
             return {
-                "success": True,
-                "message": f"Sincronização concluída",
+                "success": synced_count > 0 or len(errors) == 0,
+                "message": f"Sincronização concluída: {synced_count} sucessos, {len(errors)} erros",
                 "synced_count": synced_count,
-                "errors": errors
+                "errors": errors[:5]  # Limitar para evitar logs excessivos
             }
             
         except Exception as e:
@@ -189,7 +276,7 @@ class WuBookSyncService:
         date_from: Optional[date] = None,
         date_to: Optional[date] = None
     ) -> Dict[str, Any]:
-        """Sincronizar disponibilidade do PMS para o WuBook"""
+        """Sincronizar disponibilidade do PMS para o WuBook - CORRIGIDO"""
         
         if not self.db:
             raise ValueError("Database session required for availability sync")
@@ -271,22 +358,71 @@ class WuBookSyncService:
                 
                 wubook_updates.append(wubook_data)
             
-            # Enviar para WuBook
+            # CORREÇÃO PRINCIPAL: Enviar para WuBook com tratamento robusto
             if wubook_updates:
-                result = client.update_availability(wubook_updates)
+                try:
+                    result = client.update_availability(wubook_updates)
+                    
+                    # IMPORTANTE: Verificar o tipo do resultado
+                    logger.debug(f"WuBook result type: {type(result)}, content: {result}")
+                    
+                    if isinstance(result, dict):
+                        # Resultado é dicionário - verificar sucesso
+                        if result.get("success"):
+                            # Marcar como sincronizado
+                            for avail in availabilities:
+                                avail.mark_sync_success()
+                            
+                            self.db.commit()
+                            
+                            return {
+                                "success": True,
+                                "message": f"Sincronização para WuBook concluída",
+                                "synced_count": len(wubook_updates),
+                                "wubook_response": result
+                            }
+                        else:
+                            # Erro reportado pelo WuBook
+                            error_msg = result.get("message", "Erro desconhecido no WuBook")
+                            logger.error(f"Erro WuBook: {error_msg}")
+                            
+                            return {
+                                "success": False,
+                                "message": f"Erro no WuBook: {error_msg}",
+                                "synced_count": 0,
+                                "wubook_response": result
+                            }
+                    
+                    elif isinstance(result, str):
+                        # Resultado é string - erro na comunicação
+                        logger.error(f"Erro WuBook (string): {result}")
+                        
+                        return {
+                            "success": False,
+                            "message": f"Erro na comunicação: {result}",
+                            "synced_count": 0
+                        }
+                    
+                    else:
+                        # Tipo inesperado
+                        error_msg = f"Resposta inesperada do WuBook: {type(result)} - {result}"
+                        logger.error(error_msg)
+                        
+                        return {
+                            "success": False,
+                            "message": error_msg,
+                            "synced_count": 0
+                        }
                 
-                # Marcar como sincronizado
-                for avail in availabilities:
-                    avail.mark_sync_success()
-                
-                self.db.commit()
-                
-                return {
-                    "success": True,
-                    "message": f"Sincronização para WuBook concluída",
-                    "synced_count": len(wubook_updates),
-                    "wubook_response": result
-                }
+                except Exception as wubook_error:
+                    error_msg = f"Erro ao comunicar com WuBook: {str(wubook_error)}"
+                    logger.error(error_msg)
+                    
+                    return {
+                        "success": False,
+                        "message": error_msg,
+                        "synced_count": 0
+                    }
             else:
                 return {
                     "success": True,
@@ -307,35 +443,59 @@ class WuBookSyncService:
         date_from: Optional[date] = None,
         date_to: Optional[date] = None
     ) -> Dict[str, Any]:
-        """Sincronização bidirecional de disponibilidade"""
+        """Sincronização bidirecional de disponibilidade - CORRIGIDO"""
         
         try:
             # Primeiro: sincronizar do WuBook para PMS
-            from_wubook = self.sync_availability_from_wubook(
-                tenant_id=tenant_id,
-                configuration_id=configuration_id,
-                start_date=(date_from or date.today()).strftime('%Y-%m-%d'),
-                end_date=(date_to or date.today() + timedelta(days=30)).strftime('%Y-%m-%d')
-            )
+            try:
+                from_wubook = self.sync_availability_from_wubook(
+                    tenant_id=tenant_id,
+                    configuration_id=configuration_id,
+                    start_date=(date_from or date.today()).strftime('%Y-%m-%d'),
+                    end_date=(date_to or date.today() + timedelta(days=30)).strftime('%Y-%m-%d')
+                )
+            except Exception as e:
+                logger.error(f"Erro na sincronização FROM WuBook: {str(e)}")
+                from_wubook = {
+                    "success": False,
+                    "message": f"Erro FROM WuBook: {str(e)}",
+                    "synced_count": 0
+                }
             
             # Segundo: sincronizar do PMS para WuBook
-            to_wubook = self.sync_availability_to_wubook(
-                tenant_id=tenant_id,
-                configuration_id=configuration_id,
-                date_from=date_from,
-                date_to=date_to
-            )
+            try:
+                to_wubook = self.sync_availability_to_wubook(
+                    tenant_id=tenant_id,
+                    configuration_id=configuration_id,
+                    date_from=date_from,
+                    date_to=date_to
+                )
+            except Exception as e:
+                logger.error(f"Erro na sincronização TO WuBook: {str(e)}")
+                to_wubook = {
+                    "success": False,
+                    "message": f"Erro TO WuBook: {str(e)}",
+                    "synced_count": 0
+                }
+            
+            # Verificar se ambas as sincronizações foram bem-sucedidas
+            overall_success = from_wubook.get("success", False) and to_wubook.get("success", False)
             
             return {
-                "success": True,
-                "message": "Sincronização bidirecional concluída",
+                "success": overall_success,
+                "message": "Sincronização bidirecional concluída" if overall_success else "Sincronização bidirecional com erros",
                 "from_wubook": from_wubook,
                 "to_wubook": to_wubook
             }
             
         except Exception as e:
             logger.error(f"Erro na sincronização bidirecional: {str(e)}")
-            raise
+            return {
+                "success": False,
+                "message": f"Erro na sincronização bidirecional: {str(e)}",
+                "from_wubook": {"success": False, "message": "Não executado devido a erro"},
+                "to_wubook": {"success": False, "message": "Não executado devido a erro"}
+            }
     
     def get_sync_status(self, tenant_id: int, configuration_id: int) -> Dict[str, Any]:
         """Busca status da sincronização"""
@@ -373,3 +533,29 @@ class WuBookSyncService:
         except Exception as e:
             logger.error(f"Erro ao buscar status: {str(e)}")
             return {"error": str(e)}
+    
+    def test_connection(self, configuration_id: Optional[int] = None) -> Dict[str, Any]:
+        """Testa conexão com WuBook"""
+        try:
+            if configuration_id and self.db:
+                config = self.db.query(WuBookConfiguration).filter(
+                    WuBookConfiguration.id == configuration_id
+                ).first()
+                if not config:
+                    return {
+                        "success": False,
+                        "message": f"Configuração {configuration_id} não encontrada"
+                    }
+                client = self.get_client_for_configuration(config)
+            else:
+                client = self.get_default_client()
+            
+            # Usar método de teste do cliente
+            return client.test_connection()
+            
+        except Exception as e:
+            logger.error(f"Erro ao testar conexão: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Erro na conexão: {str(e)}"
+            }

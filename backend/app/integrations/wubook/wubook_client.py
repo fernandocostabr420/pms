@@ -37,10 +37,21 @@ class WuBookClient:
         try:
             logger.debug(f"Buscando quartos do WuBook para lcode: {self.lcode}")
             result = self.server.fetch_rooms(self.token, self.lcode)
+            
+            # CORREÇÃO: Verificar se result é uma lista/tupla com pelo menos 2 elementos
+            if not isinstance(result, (list, tuple)) or len(result) < 2:
+                raise Exception(f"Resposta WuBook inválida: {result}")
+                
             if result[0] == 0:
                 logger.info(f"Encontrados {len(result[1])} quartos no WuBook")
                 return result[1]
-            raise Exception(f"Erro WuBook: {result[1]}")
+            else:
+                raise Exception(f"Erro WuBook (código {result[0]}): {result[1]}")
+                
+        except xmlrpc.client.Fault as fault:
+            error_msg = f"Erro XML-RPC: {fault.faultCode} - {fault.faultString}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
         except Exception as e:
             logger.error(f"Erro ao buscar quartos: {str(e)}")
             raise
@@ -58,29 +69,37 @@ class WuBookClient:
             result = self.server.fetch_rooms_values(
                 self.token, self.lcode, dfrom_european, dto_european, rooms or []
             )
+            
+            # CORREÇÃO: Verificar estrutura da resposta
+            if not isinstance(result, (list, tuple)) or len(result) < 2:
+                raise Exception(f"Resposta WuBook inválida: {result}")
+                
             if result[0] == 0:
                 logger.info(f"Disponibilidade obtida com sucesso")
                 return result[1]
-            raise Exception(f"Erro WuBook: {result[1]}")
+            else:
+                raise Exception(f"Erro WuBook (código {result[0]}): {result[1]}")
+                
+        except xmlrpc.client.Fault as fault:
+            error_msg = f"Erro XML-RPC: {fault.faultCode} - {fault.faultString}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
         except Exception as e:
             logger.error(f"Erro ao buscar disponibilidade: {str(e)}")
             raise
     
-    def update_availability(self, availability_data: List[Dict]):
+    def update_availability(self, availability_data: List[Dict]) -> Dict[str, Any]:
         """
-        Atualizar disponibilidade - CORRIGIDO para usar formato correto do WuBook
+        Atualizar disponibilidade - CORRIGIDO para garantir retorno consistente
         
-        availability_data: Lista de dicts com:
-        - room_id: ID do quarto no WuBook  
-        - date: Data (será convertida para formato europeu)
-        - available: 1 ou 0
-        - closed_to_arrival: 1 ou 0 (opcional)
-        - closed_to_departure: 1 ou 0 (opcional)
-        - min_stay: número (opcional)
-        - max_stay: número (opcional)
-        - no_ota: 1 ou 0 (opcional)
+        SEMPRE retorna um dicionário com 'success' e 'message'
         """
         try:
+            # Verificar se há dados para enviar
+            if not availability_data:
+                logger.warning("Nenhum dado de disponibilidade para atualizar")
+                return {"success": True, "message": "Nenhum dado para atualizar"}
+            
             # Agrupar dados por room_id
             rooms_grouped = {}
             for item in availability_data:
@@ -89,12 +108,16 @@ class WuBookClient:
                     rooms_grouped[room_id] = []
                 
                 # Converter data para formato europeu
-                date_european = self._date_to_european_format(item['date'])
+                try:
+                    date_european = self._date_to_european_format(item['date'])
+                except Exception as e:
+                    logger.error(f"Erro ao converter data {item['date']}: {e}")
+                    continue
                 
                 # Montar estrutura do dia conforme documentação WuBook
                 day_data = {
                     'date': date_european,
-                    'avail': item.get('available', 1)  # WuBook usa 'avail', não 'available'
+                    'avail': item.get('available', 1)  # WuBook usa 'avail'
                 }
                 
                 # Campos opcionais - usando nomes corretos do WuBook
@@ -105,37 +128,81 @@ class WuBookClient:
                 if 'max_stay' in item:
                     day_data['max_stay'] = item['max_stay']
                 if 'closed_to_arrival' in item:
-                    day_data['closed_arrival'] = item['closed_to_arrival']  # WuBook usa 'closed_arrival'
+                    day_data['closed_arrival'] = item['closed_to_arrival']
                 if 'closed_to_departure' in item:
-                    day_data['closed_departure'] = item['closed_to_departure']  # WuBook usa 'closed_departure'
+                    day_data['closed_departure'] = item['closed_to_departure']
                 
                 rooms_grouped[room_id].append(day_data)
+            
+            # Verificar se há dados válidos após processamento
+            if not rooms_grouped:
+                return {"success": False, "message": "Nenhum dado válido para sincronizar"}
             
             # Montar estrutura final conforme documentação WuBook
             rooms_data = []
             for room_id, days in rooms_grouped.items():
-                rooms_data.append({
-                    'id': room_id,
-                    'days': days
-                })
+                if days:  # Só adicionar se há dias válidos
+                    rooms_data.append({
+                        'id': room_id,
+                        'days': days
+                    })
+            
+            if not rooms_data:
+                return {"success": False, "message": "Nenhum quarto com dados válidos"}
             
             logger.debug(f"Enviando atualização para {len(rooms_data)} quartos")
             logger.debug(f"Total de {sum(len(r['days']) for r in rooms_data)} dias")
             
-            # Enviar para WuBook usando update_sparse_avail
-            result = self.server.update_sparse_avail(
-                self.token, self.lcode, rooms_data
-            )
-            
-            # WuBook retorna [0, None] para sucesso ou [erro_code, mensagem] para erro
-            if result[0] == 0:
-                logger.info("Disponibilidade atualizada com sucesso no WuBook")
-                return {"success": True, "message": "Atualização realizada com sucesso"}
-            else:
-                error_msg = f"Erro WuBook: {result[1]}"
+            # CORREÇÃO PRINCIPAL: Enviar para WuBook com tratamento robusto de erros
+            try:
+                result = self.server.update_sparse_avail(
+                    self.token, self.lcode, rooms_data
+                )
+                
+                # IMPORTANTE: Verificar se result é uma lista/tupla
+                if not isinstance(result, (list, tuple)) or len(result) < 1:
+                    error_msg = f"Resposta WuBook inesperada: {type(result)} - {result}"
+                    logger.error(error_msg)
+                    return {"success": False, "message": error_msg}
+                
+                # WuBook retorna [0, None] para sucesso ou [erro_code, mensagem] para erro
+                status_code = result[0]
+                response_data = result[1] if len(result) > 1 else None
+                
+                if status_code == 0:
+                    logger.info("Disponibilidade atualizada com sucesso no WuBook")
+                    return {
+                        "success": True, 
+                        "message": "Atualização realizada com sucesso",
+                        "rooms_updated": len(rooms_data),
+                        "days_updated": sum(len(r['days']) for r in rooms_data)
+                    }
+                else:
+                    error_msg = f"Erro WuBook (código {status_code}): {response_data}"
+                    logger.error(error_msg)
+                    return {"success": False, "message": error_msg}
+                    
+            except xmlrpc.client.Fault as fault:
+                error_msg = f"Erro XML-RPC: {fault.faultCode} - {fault.faultString}"
                 logger.error(error_msg)
                 return {"success": False, "message": error_msg}
                 
         except Exception as e:
-            logger.error(f"Erro ao atualizar disponibilidade: {str(e)}")
-            return {"success": False, "message": str(e)}
+            error_msg = f"Erro ao atualizar disponibilidade: {str(e)}"
+            logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+    
+    def test_connection(self) -> Dict[str, Any]:
+        """Testa conexão com WuBook"""
+        try:
+            rooms = self.fetch_rooms()
+            return {
+                "success": True, 
+                "message": f"Conexão OK. {len(rooms)} quartos encontrados.",
+                "rooms_count": len(rooms)
+            }
+        except Exception as e:
+            return {
+                "success": False, 
+                "message": f"Erro na conexão: {str(e)}"
+            }

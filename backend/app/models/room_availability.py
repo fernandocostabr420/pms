@@ -4,6 +4,7 @@ from sqlalchemy import Column, Integer, Date, Boolean, Numeric, String, Text, Fo
 from sqlalchemy.orm import relationship
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Dict, Any, Optional, List
 
 from app.models.base import BaseModel, TenantMixin
 
@@ -44,7 +45,7 @@ class RoomAvailability(BaseModel, TenantMixin):
     is_reserved = Column(Boolean, default=False, nullable=False, index=True)  # Já reservado
     reservation_id = Column(Integer, ForeignKey('reservations.id'), nullable=True, index=True)
     
-    # ✅ NOVOS CAMPOS: Sincronização com Channel Manager (WuBook)
+    # ✅ CAMPOS DE SINCRONIZAÇÃO: Channel Manager (WuBook)
     sync_pending = Column(Boolean, default=False, nullable=False, index=True)  # Pendente sincronização
     wubook_synced = Column(Boolean, default=False, nullable=False, index=True)  # Sincronizado com WuBook
     wubook_sync_error = Column(Text, nullable=True)  # Erro na sincronização
@@ -97,30 +98,30 @@ class RoomAvailability(BaseModel, TenantMixin):
             not self.is_reserved
         )
     
-    # ✅ NOVOS MÉTODOS: Sincronização Channel Manager
+    # ===== MÉTODOS DE SINCRONIZAÇÃO COM CHANNEL MANAGER =====
     
-    def mark_for_sync(self):
+    def mark_for_sync(self) -> None:
         """Marca registro para sincronização"""
         self.sync_pending = True
         self.wubook_sync_error = None
         # Atualiza is_bookable baseado no status atual
         self.update_bookable_status()
     
-    def mark_sync_success(self):
+    def mark_sync_success(self) -> None:
         """Marca sincronização como bem-sucedida"""
         self.sync_pending = False
         self.wubook_synced = True
         self.wubook_sync_error = None
         self.last_wubook_sync = datetime.utcnow()
     
-    def mark_sync_error(self, error_message: str):
+    def mark_sync_error(self, error_message: str) -> None:
         """Marca erro na sincronização"""
         self.sync_pending = True  # Mantém pendente para tentar novamente
         self.wubook_synced = False
         self.wubook_sync_error = error_message
         self.last_wubook_sync = datetime.utcnow()
     
-    def update_bookable_status(self):
+    def update_bookable_status(self) -> None:
         """Atualiza status is_bookable baseado nas condições"""
         self.is_bookable = self.can_be_booked
     
@@ -141,19 +142,29 @@ class RoomAvailability(BaseModel, TenantMixin):
         """Verifica se precisa ser sincronizado"""
         return self.sync_pending or not self.wubook_synced
     
-    def reset_sync_status(self):
+    def reset_sync_status(self) -> None:
         """Reset completo do status de sincronização"""
         self.sync_pending = True
         self.wubook_synced = False
         self.wubook_sync_error = None
         self.last_wubook_sync = None
     
-    def to_wubook_format(self, wubook_room_id: str) -> dict:
-        """Converte disponibilidade para formato WuBook - CORRIGIDO"""
+    # ===== CONVERSÃO PARA/DE WUBOOK =====
+    
+    def to_wubook_format(self, wubook_room_id: str) -> Dict[str, Any]:
+        """
+        Converte disponibilidade para formato WuBook - CORRIGIDO
+        
+        Args:
+            wubook_room_id: ID do quarto no sistema WuBook
+            
+        Returns:
+            Dict com dados formatados para API WuBook
+        """
         wb_data = {
             'room_id': wubook_room_id,  # ID do quarto no WuBook (string)
             'date': self.date,  # Será convertido pelo WuBookClient
-            'available': 1 if self.is_bookable else 0,  # Cliente converte para 'avail'
+            'available': 1 if self.is_bookable else 0,  # WuBook converte para 'avail'
             'min_stay': self.min_stay or 1
         }
         
@@ -161,7 +172,7 @@ class RoomAvailability(BaseModel, TenantMixin):
         if self.max_stay:
             wb_data['max_stay'] = self.max_stay
         
-        # Restrições - usando nomes que o cliente vai converter
+        # Restrições - usando nomes que o cliente converte para formato WuBook
         if self.closed_to_arrival:
             wb_data['closed_to_arrival'] = 1
         
@@ -174,34 +185,164 @@ class RoomAvailability(BaseModel, TenantMixin):
         
         return wb_data
     
-    def update_from_wubook(self, wubook_data: dict):
-        """Atualiza disponibilidade a partir de dados WuBook - CORRIGIDO"""
-        # Atualizar disponibilidade - WuBook usa 'avail'
-        wb_available = wubook_data.get('avail', 0)
-        self.is_available = wb_available > 0
+    def update_from_wubook(self, wubook_data: Dict[str, Any]) -> None:
+        """
+        Atualiza disponibilidade a partir de dados WuBook - CORRIGIDO
         
-        # Atualizar restrições - WuBook usa nomes diferentes
-        self.closed_to_arrival = bool(wubook_data.get('closed_arrival', 0))
-        self.closed_to_departure = bool(wubook_data.get('closed_departure', 0))
+        Args:
+            wubook_data: Dados recebidos da API WuBook
+        """
+        try:
+            # Atualizar disponibilidade - WuBook usa 'avail'
+            wb_available = wubook_data.get('avail', 0)
+            self.is_available = wb_available > 0
+            
+            # Atualizar restrições - WuBook usa nomes diferentes
+            self.closed_to_arrival = bool(wubook_data.get('closed_arrival', 0))
+            self.closed_to_departure = bool(wubook_data.get('closed_departure', 0))
+            
+            # Atualizar estadia
+            self.min_stay = wubook_data.get('min_stay', 1)
+            max_stay_value = wubook_data.get('max_stay', 0)
+            if max_stay_value > 0:
+                self.max_stay = max_stay_value
+            else:
+                self.max_stay = None
+            
+            # Atualizar tarifa se fornecida - WuBook pode usar 'price'
+            if wubook_data.get('price'):
+                try:
+                    self.rate_override = Decimal(str(wubook_data['price']))
+                except (ValueError, TypeError):
+                    # Se não conseguir converter, manter valor atual
+                    pass
+            
+            # Atualizar status de sincronização
+            self.mark_sync_success()
+            
+            # Atualizar is_bookable
+            self.update_bookable_status()
+            
+        except Exception as e:
+            # Se houver erro na atualização, marcar como erro de sync
+            self.mark_sync_error(f"Erro ao atualizar a partir do WuBook: {str(e)}")
+    
+    def get_sync_info(self) -> Dict[str, Any]:
+        """Retorna informações de sincronização para debug/monitoring"""
+        return {
+            "sync_status": self.sync_status,
+            "sync_pending": self.sync_pending,
+            "wubook_synced": self.wubook_synced,
+            "last_sync": self.last_wubook_sync.isoformat() if self.last_wubook_sync else None,
+            "sync_error": self.wubook_sync_error,
+            "needs_sync": self.needs_sync
+        }
+    
+    # ===== MÉTODOS DE UTILIDADE =====
+    
+    def apply_changes(self, **kwargs) -> None:
+        """
+        Aplica alterações e marca para sincronização se necessário
         
-        # Atualizar estadia
-        self.min_stay = wubook_data.get('min_stay', 1)
-        if wubook_data.get('max_stay', 0) > 0:
-            self.max_stay = wubook_data.get('max_stay')
+        Args:
+            **kwargs: Campos a serem atualizados
+        """
+        sync_required_fields = {
+            'is_available', 'is_blocked', 'is_out_of_order', 'is_maintenance',
+            'rate_override', 'min_stay', 'max_stay', 
+            'closed_to_arrival', 'closed_to_departure'
+        }
         
-        # Atualizar tarifa se fornecida - WuBook pode usar 'price'
-        if wubook_data.get('price'):
-            self.rate_override = Decimal(str(wubook_data['price']))
+        needs_sync = False
         
-        # Atualizar status de sincronização
-        self.mark_sync_success()
+        for field, value in kwargs.items():
+            if hasattr(self, field):
+                setattr(self, field, value)
+                if field in sync_required_fields:
+                    needs_sync = True
         
-        # Atualizar is_bookable
+        # Atualizar status is_bookable
         self.update_bookable_status()
+        
+        # Marcar para sincronização se houve mudanças relevantes
+        if needs_sync:
+            self.mark_for_sync()
+    
+    def clone_for_date(self, new_date: date, **overrides) -> 'RoomAvailability':
+        """
+        Cria uma nova disponibilidade baseada nesta para outra data
+        
+        Args:
+            new_date: Nova data
+            **overrides: Campos a sobrescrever
+            
+        Returns:
+            Nova instância de RoomAvailability
+        """
+        new_availability = RoomAvailability(
+            tenant_id=self.tenant_id,
+            room_id=self.room_id,
+            date=new_date,
+            is_available=self.is_available,
+            is_blocked=self.is_blocked,
+            is_out_of_order=self.is_out_of_order,
+            is_maintenance=self.is_maintenance,
+            rate_override=self.rate_override,
+            min_stay=self.min_stay,
+            max_stay=self.max_stay,
+            closed_to_arrival=self.closed_to_arrival,
+            closed_to_departure=self.closed_to_departure,
+            reason=self.reason,
+            notes=self.notes,
+            metadata_json=self.metadata_json
+        )
+        
+        # Aplicar overrides
+        for field, value in overrides.items():
+            if hasattr(new_availability, field):
+                setattr(new_availability, field, value)
+        
+        # Nova disponibilidade sempre precisa ser sincronizada
+        new_availability.mark_for_sync()
+        
+        return new_availability
+    
+    def validate_business_rules(self) -> List[str]:
+        """
+        Valida regras de negócio e retorna lista de erros
+        
+        Returns:
+            Lista de mensagens de erro (vazia se válido)
+        """
+        errors = []
+        
+        # Validar estadia mínima/máxima
+        if self.min_stay < 1:
+            errors.append("Estadia mínima deve ser pelo menos 1 dia")
+        
+        if self.max_stay and self.max_stay < self.min_stay:
+            errors.append("Estadia máxima não pode ser menor que a mínima")
+        
+        # Validar tarifa
+        if self.rate_override and self.rate_override <= 0:
+            errors.append("Tarifa deve ser positiva")
+        
+        # Validar disponibilidade vs restrições
+        if not self.is_available and (self.closed_to_arrival or self.closed_to_departure):
+            errors.append("Quarto indisponível não deveria ter restrições de chegada/saída")
+        
+        return errors
+    
+    def is_valid(self) -> bool:
+        """Verifica se a disponibilidade está válida"""
+        return len(self.validate_business_rules()) == 0
     
     def __repr__(self):
         return (
             f"<RoomAvailability(id={self.id}, room_id={self.room_id}, "
             f"date={self.date}, status='{self.status}', "
-            f"sync_status='{self.sync_status}')>"
+            f"sync_status='{self.sync_status}', bookable={self.is_bookable})>"
         )
+    
+    def __str__(self):
+        return f"Room {self.room_id} on {self.date} - {self.status}"

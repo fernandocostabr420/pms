@@ -142,6 +142,7 @@ class WuBookAvailabilitySyncService:
         for avail in availabilities:
             mapping = mapping_dict.get(avail.room_id)
             if not mapping:
+                logger.debug(f"Mapeamento não encontrado para room_id: {avail.room_id}")
                 continue
             
             # Formato correto para WuBook
@@ -173,6 +174,7 @@ class WuBookAvailabilitySyncService:
             
             wubook_data.append(wb_data)
         
+        logger.debug(f"Convertidos {len(wubook_data)} itens de disponibilidade para WuBook")
         return wubook_data
     
     def _convert_wubook_to_pms_availability(
@@ -188,7 +190,7 @@ class WuBookAvailabilitySyncService:
         try:
             # Log para debug - ver o que WuBook realmente retorna
             logger.debug(f"WuBook data type: {type(wubook_data)}")
-            logger.debug(f"WuBook data: {wubook_data}")
+            logger.debug(f"WuBook data sample: {str(wubook_data)[:500]}")
             
             # WuBook fetch_rooms_values retorna dict com room_id como chave
             if isinstance(wubook_data, dict):
@@ -260,6 +262,7 @@ class WuBookAvailabilitySyncService:
         except Exception as e:
             logger.error(f"Erro ao converter disponibilidade WuBook: {str(e)}")
         
+        logger.debug(f"Convertidas {len(pms_availabilities)} disponibilidades do WuBook")
         return pms_availabilities
     
     def sync_availability_to_wubook(
@@ -271,7 +274,7 @@ class WuBookAvailabilitySyncService:
         date_to: Optional[date] = None,
         force_sync_all: bool = False
     ) -> Dict[str, Any]:
-        """Sincroniza disponibilidade do PMS para WuBook"""
+        """Sincroniza disponibilidade do PMS para WuBook - CORRIGIDO"""
         
         try:
             # Buscar configuração
@@ -355,7 +358,7 @@ class WuBookAvailabilitySyncService:
             # Criar cliente WuBook
             client = WuBookClient(config.wubook_token, config.wubook_lcode)
             
-            # Enviar para WuBook
+            # CORREÇÃO PRINCIPAL: Tratamento robusto da resposta
             success_count = 0
             error_count = 0
             errors = []
@@ -364,21 +367,63 @@ class WuBookAvailabilitySyncService:
                 # Atualizar disponibilidade no WuBook
                 result = client.update_availability(wubook_data)
                 
-                if result.get("success"):
-                    # Marcar como sincronizado
-                    sync_timestamp = datetime.utcnow().isoformat()
-                    for avail in availabilities:
-                        avail.mark_sync_success()
+                # IMPORTANTE: Verificar o tipo e conteúdo do resultado
+                logger.debug(f"Resultado WuBook type: {type(result)}, content: {result}")
+                
+                if isinstance(result, dict):
+                    # Resultado correto - é um dicionário
+                    if result.get("success"):
+                        # Sucesso
+                        sync_timestamp = datetime.utcnow().isoformat()
+                        for avail in availabilities:
+                            avail.mark_sync_success()
+                        
+                        success_count = len(availabilities)
+                        
+                        # Atualizar configuração
+                        config.last_sync_at = sync_timestamp
+                        config.last_sync_status = "success"
+                        config.error_count = 0
+                        
+                        logger.info(f"Sincronização bem-sucedida: {success_count} itens")
+                        
+                    else:
+                        # Erro reportado pela WuBook
+                        error_message = result.get("message", "Erro desconhecido no WuBook")
+                        errors.append(error_message)
+                        
+                        # Marcar erro
+                        for avail in availabilities:
+                            avail.mark_sync_error(error_message)
+                        
+                        error_count = len(availabilities)
+                        
+                        # Atualizar configuração
+                        config.last_error_at = datetime.utcnow().isoformat()
+                        config.error_count += 1
+                        
+                        logger.error(f"Erro WuBook: {error_message}")
+                        
+                elif isinstance(result, str):
+                    # Se result é string, houve erro na serialização/comunicação
+                    error_message = f"Erro na comunicação com WuBook: {result}"
+                    logger.error(error_message)
+                    errors.append(error_message)
                     
-                    success_count = len(availabilities)
+                    # Marcar erro em todas as disponibilidades
+                    for avail in availabilities:
+                        avail.mark_sync_error(error_message)
+                    
+                    error_count = len(availabilities)
                     
                     # Atualizar configuração
-                    config.last_sync_at = sync_timestamp
-                    config.last_sync_status = "success"
-                    config.error_count = 0
+                    config.last_error_at = datetime.utcnow().isoformat()
+                    config.error_count += 1
                     
                 else:
-                    error_message = result.get("message", "Erro desconhecido no WuBook")
+                    # Tipo inesperado
+                    error_message = f"Tipo de resultado inesperado: {type(result)} - {result}"
+                    logger.error(error_message)
                     errors.append(error_message)
                     
                     # Marcar erro
