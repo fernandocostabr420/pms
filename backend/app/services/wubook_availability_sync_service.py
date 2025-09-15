@@ -135,7 +135,7 @@ class WuBookAvailabilitySyncService:
         availabilities: List[RoomAvailability], 
         mappings: List[WuBookRoomMapping]
     ) -> List[Dict[str, Any]]:
-        """Converte disponibilidade PMS para formato WuBook"""
+        """Converte disponibilidade PMS para formato WuBook - CORRIGIDO"""
         mapping_dict = {m.room_id: m for m in mappings}
         wubook_data = []
         
@@ -144,20 +144,26 @@ class WuBookAvailabilitySyncService:
             if not mapping:
                 continue
             
-            # Formato básico WuBook
+            # Formato correto para WuBook
             wb_data = {
-                'room_id': mapping.wubook_room_id,
-                'date': avail.date.strftime('%Y-%m-%d'),
-                'available': 1 if avail.is_bookable else 0,
-                'closed_to_arrival': 1 if avail.closed_to_arrival else 0,
-                'closed_to_departure': 1 if avail.closed_to_departure else 0,
-                'min_stay': avail.min_stay
+                'room_id': mapping.wubook_room_id,  # ID do quarto no WuBook
+                'date': avail.date,  # Será convertido pelo WuBookClient
+                'available': 1 if avail.is_bookable else 0,  # Cliente converte para 'avail'
+                'min_stay': avail.min_stay or 1
             }
             
             # Campos opcionais
             if avail.max_stay:
                 wb_data['max_stay'] = avail.max_stay
             
+            # Restrições de chegada/saída
+            if avail.closed_to_arrival:
+                wb_data['closed_to_arrival'] = 1
+            
+            if avail.closed_to_departure:
+                wb_data['closed_to_departure'] = 1
+            
+            # Tarifa se disponível e sincronização habilitada
             if avail.rate_override and mapping.sync_rates:
                 # Aplicar multiplicador se configurado
                 rate = float(avail.rate_override)
@@ -171,63 +177,88 @@ class WuBookAvailabilitySyncService:
     
     def _convert_wubook_to_pms_availability(
         self, 
-        wubook_data: List[Dict[str, Any]], 
+        wubook_data: Any, 
         mappings: List[WuBookRoomMapping],
         tenant_id: int
     ) -> List[RoomAvailability]:
-        """Converte disponibilidade WuBook para formato PMS"""
+        """Converte disponibilidade WuBook para formato PMS - CORRIGIDO"""
         wubook_mapping_dict = {m.wubook_room_id: m for m in mappings}
         pms_availabilities = []
         
-        for wb_data in wubook_data:
-            mapping = wubook_mapping_dict.get(wb_data.get('room_id'))
-            if not mapping:
-                continue
+        try:
+            # Log para debug - ver o que WuBook realmente retorna
+            logger.debug(f"WuBook data type: {type(wubook_data)}")
+            logger.debug(f"WuBook data: {wubook_data}")
             
-            try:
-                # Converter data
-                avail_date = datetime.strptime(wb_data['date'], '%Y-%m-%d').date()
+            # WuBook fetch_rooms_values retorna dict com room_id como chave
+            if isinstance(wubook_data, dict):
+                for room_id_str, daily_data in wubook_data.items():
+                    mapping = wubook_mapping_dict.get(room_id_str)
+                    if not mapping:
+                        logger.debug(f"Mapeamento não encontrado para room_id: {room_id_str}")
+                        continue
+                    
+                    # daily_data é uma lista de dados diários
+                    if isinstance(daily_data, list):
+                        for day_index, day_data in enumerate(daily_data):
+                            try:
+                                # Calcular data baseada no índice
+                                base_date = date.today()  # Seria melhor ter a data base do request
+                                avail_date = base_date + timedelta(days=day_index)
+                                
+                                # Buscar ou criar disponibilidade PMS
+                                pms_avail = self.db.query(RoomAvailability).filter(
+                                    RoomAvailability.room_id == mapping.room_id,
+                                    RoomAvailability.date == avail_date,
+                                    RoomAvailability.tenant_id == tenant_id
+                                ).first()
+                                
+                                if not pms_avail:
+                                    pms_avail = RoomAvailability(
+                                        tenant_id=tenant_id,
+                                        room_id=mapping.room_id,
+                                        date=avail_date
+                                    )
+                                    self.db.add(pms_avail)
+                                
+                                # Atualizar campos - day_data pode ser dict ou outro formato
+                                if isinstance(day_data, dict):
+                                    wb_available = day_data.get('avail', 0)
+                                    pms_avail.is_available = wb_available > 0
+                                    pms_avail.closed_to_arrival = bool(day_data.get('closed_arrival', 0))
+                                    pms_avail.closed_to_departure = bool(day_data.get('closed_departure', 0))
+                                    pms_avail.min_stay = day_data.get('min_stay', 1)
+                                    
+                                    if day_data.get('max_stay', 0) > 0:
+                                        pms_avail.max_stay = day_data.get('max_stay')
+                                    
+                                    if day_data.get('price') and mapping.sync_rates:
+                                        rate = Decimal(str(day_data['price']))
+                                        # Aplicar divisor se há multiplicador
+                                        if mapping.rate_multiplier != 1.0:
+                                            rate = rate / Decimal(str(mapping.rate_multiplier))
+                                        pms_avail.rate_override = rate
+                                else:
+                                    # Se não é dict, usar valores padrão
+                                    pms_avail.is_available = True
+                                    pms_avail.min_stay = 1
+                                
+                                # Marcar como sincronizado
+                                pms_avail.mark_sync_success()
+                                pms_avail.update_bookable_status()
+                                
+                                pms_availabilities.append(pms_avail)
+                                
+                            except Exception as e:
+                                logger.error(f"Erro ao processar dia {day_index}: {str(e)}")
+                                continue
+                    else:
+                        logger.warning(f"daily_data não é lista para room {room_id_str}: {type(daily_data)}")
+            else:
+                logger.warning(f"wubook_data não é dict: {type(wubook_data)}")
                 
-                # Buscar ou criar disponibilidade PMS
-                pms_avail = self.db.query(RoomAvailability).filter(
-                    RoomAvailability.room_id == mapping.room_id,
-                    RoomAvailability.date == avail_date,
-                    RoomAvailability.tenant_id == tenant_id
-                ).first()
-                
-                if not pms_avail:
-                    pms_avail = RoomAvailability(
-                        tenant_id=tenant_id,
-                        room_id=mapping.room_id,
-                        date=avail_date
-                    )
-                    self.db.add(pms_avail)
-                
-                # Atualizar campos
-                wb_available = wb_data.get('available', 0)
-                pms_avail.is_available = wb_available > 0
-                pms_avail.closed_to_arrival = bool(wb_data.get('closed_to_arrival', 0))
-                pms_avail.closed_to_departure = bool(wb_data.get('closed_to_departure', 0))
-                pms_avail.min_stay = wb_data.get('min_stay', 1)
-                
-                if 'max_stay' in wb_data:
-                    pms_avail.max_stay = wb_data['max_stay']
-                
-                if 'rate' in wb_data and mapping.sync_rates:
-                    rate = Decimal(str(wb_data['rate']))
-                    # Aplicar divisor se há multiplicador
-                    if mapping.rate_multiplier != 1.0:
-                        rate = rate / Decimal(str(mapping.rate_multiplier))
-                    pms_avail.rate_override = rate
-                
-                # Marcar como sincronizado
-                pms_avail.mark_sync_success()
-                
-                pms_availabilities.append(pms_avail)
-                
-            except Exception as e:
-                logger.error(f"Erro ao converter disponibilidade WuBook: {str(e)}")
-                continue
+        except Exception as e:
+            logger.error(f"Erro ao converter disponibilidade WuBook: {str(e)}")
         
         return pms_availabilities
     
@@ -337,7 +368,7 @@ class WuBookAvailabilitySyncService:
                     # Marcar como sincronizado
                     sync_timestamp = datetime.utcnow().isoformat()
                     for avail in availabilities:
-                        avail.mark_sync_success(sync_timestamp)
+                        avail.mark_sync_success()
                     
                     success_count = len(availabilities)
                     

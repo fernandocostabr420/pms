@@ -148,37 +148,50 @@ class RoomAvailability(BaseModel, TenantMixin):
         self.wubook_sync_error = None
         self.last_wubook_sync = None
     
-    def to_wubook_format(self, wubook_room_id: int) -> dict:
-        """Converte disponibilidade para formato WuBook"""
-        return {
-            'room_id': wubook_room_id,
-            'date': self.date.strftime('%Y-%m-%d'),
-            'available': 1 if self.is_bookable else 0,
-            'closed_to_arrival': 1 if self.closed_to_arrival else 0,
-            'closed_to_departure': 1 if self.closed_to_departure else 0,
-            'min_stay': self.min_stay,
-            'max_stay': self.max_stay if self.max_stay else 0,
-            'rate': float(self.rate_override) if self.rate_override else None
+    def to_wubook_format(self, wubook_room_id: str) -> dict:
+        """Converte disponibilidade para formato WuBook - CORRIGIDO"""
+        wb_data = {
+            'room_id': wubook_room_id,  # ID do quarto no WuBook (string)
+            'date': self.date,  # Será convertido pelo WuBookClient
+            'available': 1 if self.is_bookable else 0,  # Cliente converte para 'avail'
+            'min_stay': self.min_stay or 1
         }
+        
+        # Campos opcionais
+        if self.max_stay:
+            wb_data['max_stay'] = self.max_stay
+        
+        # Restrições - usando nomes que o cliente vai converter
+        if self.closed_to_arrival:
+            wb_data['closed_to_arrival'] = 1
+        
+        if self.closed_to_departure:
+            wb_data['closed_to_departure'] = 1
+        
+        # Tarifa se disponível
+        if self.rate_override:
+            wb_data['rate'] = float(self.rate_override)
+        
+        return wb_data
     
     def update_from_wubook(self, wubook_data: dict):
-        """Atualiza disponibilidade a partir de dados WuBook"""
-        # Atualizar disponibilidade
-        wb_available = wubook_data.get('available', 0)
+        """Atualiza disponibilidade a partir de dados WuBook - CORRIGIDO"""
+        # Atualizar disponibilidade - WuBook usa 'avail'
+        wb_available = wubook_data.get('avail', 0)
         self.is_available = wb_available > 0
         
-        # Atualizar restrições
-        self.closed_to_arrival = bool(wubook_data.get('closed_to_arrival', 0))
-        self.closed_to_departure = bool(wubook_data.get('closed_to_departure', 0))
+        # Atualizar restrições - WuBook usa nomes diferentes
+        self.closed_to_arrival = bool(wubook_data.get('closed_arrival', 0))
+        self.closed_to_departure = bool(wubook_data.get('closed_departure', 0))
         
         # Atualizar estadia
         self.min_stay = wubook_data.get('min_stay', 1)
         if wubook_data.get('max_stay', 0) > 0:
             self.max_stay = wubook_data.get('max_stay')
         
-        # Atualizar tarifa se fornecida
-        if wubook_data.get('rate'):
-            self.rate_override = Decimal(str(wubook_data['rate']))
+        # Atualizar tarifa se fornecida - WuBook pode usar 'price'
+        if wubook_data.get('price'):
+            self.rate_override = Decimal(str(wubook_data['price']))
         
         # Atualizar status de sincronização
         self.mark_sync_success()
