@@ -1,4 +1,4 @@
-# backend/app/services/reservation_service.py - COMPLETO COM MULTI-SELECT PARA STATUS E CANAL + ESTACIONAMENTO
+# backend/app/services/reservation_service.py - COMPLETO COM MULTI-SELECT PARA STATUS E CANAL + ESTACIONAMENTO + RESTRIÇÕES
 
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -37,6 +37,12 @@ from app.utils.decorators import (
     create_audit_log
 )
 from app.services.audit_formatting_service import AuditFormattingService
+
+# ✅ NOVO: Imports para validação de restrições
+from app.services.restriction_validation_service import RestrictionValidationService
+from app.schemas.reservation_restriction import (
+    RestrictionValidationRequest, RestrictionValidationResponse
+)
 
 
 class ReservationService:
@@ -180,13 +186,36 @@ class ReservationService:
         all_rooms = rooms_query.all()
         room_ids = [r.id for r in all_rooms]
         
-        # Verificar disponibilidade
+        # Verificar disponibilidade básica
         availability = self.check_room_availability(
             room_ids, check_in_date, check_out_date, tenant_id, exclude_reservation_id
         )
         
-        # Retornar apenas quartos disponíveis
-        return [room for room in all_rooms if availability.get(room.id, False)]
+        # Filtrar quartos disponíveis por ocupação
+        available_rooms_basic = [room for room in all_rooms if availability.get(room.id, False)]
+        
+        # ✅ NOVO: Validar restrições para cada quarto disponível
+        available_rooms_final = []
+        restriction_service = RestrictionValidationService(self.db)
+        
+        for room in available_rooms_basic:
+            validation_request = RestrictionValidationRequest(
+                property_id=property_id,
+                room_id=room.id,
+                room_type_id=room.room_type_id,
+                check_in_date=check_in_date,
+                check_out_date=check_out_date
+            )
+            
+            validation_result = restriction_service.validate_reservation_restrictions(
+                validation_request, tenant_id
+            )
+            
+            if validation_result.is_valid:
+                available_rooms_final.append(room)
+        
+        # Retornar apenas quartos que passaram em todas as validações
+        return available_rooms_final
 
     def check_availability(self, availability_request: AvailabilityRequest, tenant_id: int) -> AvailabilityResponse:
         """Verifica disponibilidade geral para uma consulta"""
@@ -233,7 +262,9 @@ class ReservationService:
             available=len(available_rooms) > 0,
             available_rooms=rooms_data,
             total_available_rooms=len(available_rooms),
-            conflicting_reservations=conflicting_reservations if conflicting_reservations else None
+            conflicting_reservations=conflicting_reservations if conflicting_reservations else None,
+            # ✅ NOVO: Informação sobre se restrições foram aplicadas
+            restrictions_applied=True  # Sempre True pois agora validamos restrições
         )
 
     # ===== MÉTODO PRINCIPAL: GET_RESERVATIONS COM MULTI-SELECT E FILTRO DE ESTACIONAMENTO =====
@@ -713,6 +744,22 @@ class ReservationService:
                 detail=f"Quartos não disponíveis no período: {unavailable_rooms}"
             )
 
+        # ✅ NOVO: Validar restrições de reserva
+        restriction_validation = self._validate_reservation_restrictions(
+            property_id=reservation_data.property_id,
+            room_ids=room_ids,
+            check_in_date=reservation_data.check_in_date,
+            check_out_date=reservation_data.check_out_date,
+            tenant_id=tenant_id
+        )
+        
+        if not restriction_validation.is_valid:
+            violations_text = "; ".join([v.violation_message for v in restriction_validation.violations])
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Restrições violadas: {violations_text}"
+            )
+
         # ✅ NOVO: Validar estacionamento
         parking_validation = self._validate_parking_request(
             reservation_data, property_obj, tenant_id
@@ -909,6 +956,23 @@ class ReservationService:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Quartos não disponíveis no novo período: {unavailable_rooms}"
+                )
+
+            # ✅ NOVO: Validar restrições se datas mudaram
+            restriction_validation = self._validate_reservation_restrictions(
+                property_id=reservation_obj.property_id,
+                room_ids=current_room_ids,
+                check_in_date=new_check_in,
+                check_out_date=new_check_out,
+                tenant_id=tenant_id,
+                exclude_reservation_id=reservation_id
+            )
+            
+            if not restriction_validation.is_valid:
+                violations_text = "; ".join([v.violation_message for v in restriction_validation.violations])
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Restrições violadas no novo período: {violations_text}"
                 )
 
         # PROCESSAR ATUALIZAÇÃO DE QUARTOS - SOLUÇÃO DEFINITIVA
@@ -1853,3 +1917,76 @@ class ReservationService:
         }
         
         return detailed_response
+
+    # ============== VALIDAÇÃO DE RESTRIÇÕES ==============
+    
+    def _validate_reservation_restrictions(
+        self,
+        property_id: int,
+        room_ids: List[int],
+        check_in_date: date,
+        check_out_date: date,
+        tenant_id: int,
+        exclude_reservation_id: Optional[int] = None
+    ) -> RestrictionValidationResponse:
+        """
+        Valida restrições de reserva para múltiplos quartos.
+        Retorna a primeira violação encontrada ou sucesso se todos válidos.
+        """
+        restriction_service = RestrictionValidationService(self.db)
+        
+        # Validar cada quarto individualmente
+        for room_id in room_ids:
+            # Buscar room_type_id
+            room = self.db.query(Room).filter(
+                Room.id == room_id,
+                Room.tenant_id == tenant_id
+            ).first()
+            
+            if not room:
+                continue  # Pular quartos não encontrados
+            
+            validation_request = RestrictionValidationRequest(
+                property_id=property_id,
+                room_id=room_id,
+                room_type_id=room.room_type_id,
+                check_in_date=check_in_date,
+                check_out_date=check_out_date
+            )
+            
+            validation_result = restriction_service.validate_reservation_restrictions(
+                validation_request, tenant_id
+            )
+            
+            # Se algum quarto tem violação, retornar imediatamente
+            if not validation_result.is_valid:
+                return validation_result
+        
+        # Se chegou aqui, todos os quartos são válidos
+        return RestrictionValidationResponse(
+            is_valid=True,
+            violations=[],
+            warnings=[],
+            property_id=property_id,
+            room_id=None,
+            room_type_id=None,
+            check_in_date=check_in_date,
+            check_out_date=check_out_date,
+            nights=(check_out_date - check_in_date).days,
+            applicable_restrictions=[]
+        )
+    
+    def validate_reservation_restrictions_public(
+        self,
+        property_id: int,
+        room_ids: List[int],
+        check_in_date: date,
+        check_out_date: date,
+        tenant_id: int
+    ) -> RestrictionValidationResponse:
+        """
+        Método público para validar restrições (para uso em endpoints específicos).
+        """
+        return self._validate_reservation_restrictions(
+            property_id, room_ids, check_in_date, check_out_date, tenant_id
+        )

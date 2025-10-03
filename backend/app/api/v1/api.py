@@ -7,7 +7,8 @@ from app.api.v1.endpoints import (
     room_types, rooms, guests, reservations,
     room_availability, map, payments,
     payment_methods, sales_channels, channel_manager,
-    rate_plans  # ✅ ADICIONADO
+    rate_plans,  # ✅ ADICIONADO
+    restrictions  # ✅ NOVO: Adicionado para sistema de restrições
 )
 
 api_router = APIRouter()
@@ -119,6 +120,13 @@ api_router.include_router(
     rate_plans.router,
     prefix="/rate-plans", 
     tags=["Planos de Tarifa"]
+)
+
+# ✅ NOVO: Incluir rotas de restrições de reserva
+api_router.include_router(
+    restrictions.router,
+    prefix="/restrictions", 
+    tags=["Restrições de Reserva"]
 )
 
 # Channel Manager Integration

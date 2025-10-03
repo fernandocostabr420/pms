@@ -21,9 +21,15 @@ from app.schemas.room_availability import (
 )
 from app.utils.decorators import audit_operation
 
+# ✅ NOVO: Imports para validação de restrições
+from app.services.restriction_validation_service import RestrictionValidationService
+from app.schemas.reservation_restriction import (
+    RestrictionValidationRequest, RestrictionValidationResponse
+)
+
 
 class RoomAvailabilityService:
-    """Serviço para operações com disponibilidade de quartos - estendido para Channel Manager"""
+    """Serviço para operações com disponibilidade de quartos - estendido para Channel Manager e Restrições"""
     
     def __init__(self, db: Session):
         self.db = db
@@ -378,9 +384,13 @@ class RoomAvailabilityService:
         room_id: int, 
         check_in_date: date, 
         check_out_date: date, 
-        tenant_id: int
+        tenant_id: int,
+        validate_restrictions: bool = True
     ) -> Dict[str, Any]:
-        """Verifica disponibilidade de um quarto em período específico"""
+        """
+        Verifica disponibilidade de um quarto em período específico
+        ✅ NOVO: Agora inclui validação de restrições
+        """
         
         # Gerar lista de datas (excluindo check-out)
         current_date = check_in_date
@@ -389,7 +399,7 @@ class RoomAvailabilityService:
             dates.append(current_date)
             current_date += timedelta(days=1)
         
-        # Buscar disponibilidades
+        # Buscar disponibilidades do RoomAvailability
         availabilities = self.db.query(RoomAvailability).filter(
             RoomAvailability.room_id == room_id,
             RoomAvailability.date.in_(dates),
@@ -400,6 +410,7 @@ class RoomAvailabilityService:
         # Verificar cada data
         conflicts = []
         total_rate = Decimal('0.00')
+        restriction_violations = []
         
         for target_date in dates:
             availability = next(
@@ -421,11 +432,41 @@ class RoomAvailabilityService:
             if availability.rate_override:
                 total_rate += availability.rate_override
         
-        is_available = len(conflicts) == 0
+        # ✅ NOVO: Validar restrições se solicitado
+        if validate_restrictions:
+            # Buscar dados do quarto para validação
+            room = self.db.query(Room).filter(
+                Room.id == room_id,
+                Room.tenant_id == tenant_id
+            ).first()
+            
+            if room:
+                restriction_validation = self._validate_room_restrictions(
+                    property_id=room.property_id,
+                    room_id=room_id,
+                    room_type_id=room.room_type_id,
+                    check_in_date=check_in_date,
+                    check_out_date=check_out_date,
+                    tenant_id=tenant_id
+                )
+                
+                if not restriction_validation.is_valid:
+                    for violation in restriction_validation.violations:
+                        restriction_violations.append({
+                            'type': 'restriction',
+                            'restriction_type': violation.restriction_type,
+                            'message': violation.violation_message,
+                            'date_affected': violation.date_affected.isoformat() if violation.date_affected else None,
+                            'can_override': violation.can_override
+                        })
+        
+        # Determinar se está disponível (sem conflitos básicos nem de restrições)
+        is_available = len(conflicts) == 0 and len(restriction_violations) == 0
         
         return {
             'available': is_available,
             'conflicts': conflicts,
+            'restriction_violations': restriction_violations,  # ✅ NOVO
             'nights': len(dates),
             'total_rate': total_rate,
             'details': [
@@ -438,6 +479,104 @@ class RoomAvailabilityService:
                 for a in availabilities
             ]
         }
+
+    # ✅ NOVO: Método para validar restrições individualmente
+    def check_room_availability_with_restrictions(
+        self,
+        room_id: int,
+        check_in_date: date,
+        check_out_date: date,
+        tenant_id: int
+    ) -> Dict[str, Any]:
+        """
+        Versão específica que sempre valida restrições.
+        Wrapper para o método principal com validate_restrictions=True
+        """
+        return self.check_room_availability(
+            room_id=room_id,
+            check_in_date=check_in_date,
+            check_out_date=check_out_date,
+            tenant_id=tenant_id,
+            validate_restrictions=True
+        )
+
+    # ✅ NOVO: Método para verificar múltiplos quartos com restrições
+    def check_multiple_rooms_availability(
+        self,
+        room_ids: List[int],
+        check_in_date: date,
+        check_out_date: date,
+        tenant_id: int,
+        validate_restrictions: bool = True
+    ) -> Dict[int, Dict[str, Any]]:
+        """
+        Verifica disponibilidade de múltiplos quartos incluindo restrições.
+        Retorna dict {room_id: availability_data}
+        """
+        results = {}
+        
+        for room_id in room_ids:
+            try:
+                availability = self.check_room_availability(
+                    room_id=room_id,
+                    check_in_date=check_in_date,
+                    check_out_date=check_out_date,
+                    tenant_id=tenant_id,
+                    validate_restrictions=validate_restrictions
+                )
+                results[room_id] = availability
+            except Exception as e:
+                results[room_id] = {
+                    'available': False,
+                    'conflicts': [{'date': 'error', 'reason': str(e)}],
+                    'restriction_violations': [],
+                    'nights': 0,
+                    'total_rate': 0,
+                    'details': []
+                }
+        
+        return results
+
+    # ✅ NOVO: Método auxiliar para validação de restrições
+    def _validate_room_restrictions(
+        self,
+        property_id: int,
+        room_id: int,
+        room_type_id: int,
+        check_in_date: date,
+        check_out_date: date,
+        tenant_id: int
+    ) -> RestrictionValidationResponse:
+        """Valida restrições para um quarto específico"""
+        try:
+            restriction_service = RestrictionValidationService(self.db)
+            
+            validation_request = RestrictionValidationRequest(
+                property_id=property_id,
+                room_id=room_id,
+                room_type_id=room_type_id,
+                check_in_date=check_in_date,
+                check_out_date=check_out_date
+            )
+            
+            return restriction_service.validate_reservation_restrictions(
+                validation_request, tenant_id
+            )
+        except Exception as e:
+            # Em caso de erro na validação, retornar como válido para não bloquear
+            print(f"Erro na validação de restrições: {e}")
+            return RestrictionValidationResponse(
+                is_valid=True,
+                violations=[],
+                warnings=[],
+                property_id=property_id,
+                room_id=room_id,
+                room_type_id=room_type_id,
+                check_in_date=check_in_date,
+                check_out_date=check_out_date,
+                nights=(check_out_date - check_in_date).days,
+                applicable_restrictions=[]
+            )
 
     # ========== MÉTODOS ESPECÍFICOS PARA CHANNEL MANAGER ==========
 
@@ -540,6 +679,83 @@ class RoomAvailabilityService:
                 'sync_rate': round((sync_stats.synced or 0) / max(sync_stats.total or 1, 1) * 100, 2)
             },
             'availability': availability_stats
+        }
+
+    # ✅ NOVO: Método para análise de restrições no período
+    def get_restrictions_impact_overview(
+        self,
+        tenant_id: int,
+        property_id: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None
+    ) -> Dict[str, Any]:
+        """
+        Análise do impacto das restrições na disponibilidade.
+        Útil para dashboards do Channel Manager.
+        """
+        if not date_from:
+            date_from = date.today()
+        if not date_to:
+            date_to = date_from + timedelta(days=30)
+        
+        # Buscar todos os quartos no escopo
+        rooms_query = self.db.query(Room).filter(
+            Room.tenant_id == tenant_id,
+            Room.is_active == True
+        )
+        
+        if property_id:
+            rooms_query = rooms_query.filter(Room.property_id == property_id)
+        
+        rooms = rooms_query.all()
+        
+        total_room_days = len(rooms) * ((date_to - date_from).days + 1)
+        restricted_room_days = 0
+        restriction_types_count = {}
+        
+        # Para cada quarto, verificar restrições no período
+        for room in rooms:
+            current_date = date_from
+            while current_date <= date_to:
+                # Verificar se há restrições nesta data
+                validation = self._validate_room_restrictions(
+                    property_id=room.property_id,
+                    room_id=room.id,
+                    room_type_id=room.room_type_id,
+                    check_in_date=current_date,
+                    check_out_date=current_date + timedelta(days=1),
+                    tenant_id=tenant_id
+                )
+                
+                if not validation.is_valid:
+                    restricted_room_days += 1
+                    
+                    # Contar tipos de restrição
+                    for violation in validation.violations:
+                        restriction_type = violation.restriction_type
+                        restriction_types_count[restriction_type] = restriction_types_count.get(restriction_type, 0) + 1
+                
+                current_date += timedelta(days=1)
+        
+        restriction_impact_rate = (restricted_room_days / total_room_days * 100) if total_room_days > 0 else 0
+        
+        return {
+            'period': {
+                'date_from': date_from.isoformat(),
+                'date_to': date_to.isoformat(),
+                'total_days': (date_to - date_from).days + 1
+            },
+            'scope': {
+                'total_rooms': len(rooms),
+                'property_id': property_id
+            },
+            'impact': {
+                'total_room_days': total_room_days,
+                'restricted_room_days': restricted_room_days,
+                'available_room_days': total_room_days - restricted_room_days,
+                'restriction_impact_rate': round(restriction_impact_rate, 2)
+            },
+            'restriction_types': restriction_types_count
         }
 
     def _apply_filters(self, query, tenant_id: int, filters: RoomAvailabilityFilters):

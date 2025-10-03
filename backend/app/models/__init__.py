@@ -20,6 +20,8 @@ from .wubook_configuration import WuBookConfiguration
 from .wubook_room_mapping import WuBookRoomMapping
 from .wubook_rate_plan import WuBookRatePlan
 from .wubook_sync_log import WuBookSyncLog
+# ✅ RESTRICTIONS IMPORT
+from .reservation_restriction import ReservationRestriction
 
 __all__ = [
     "Tenant",
@@ -40,5 +42,7 @@ __all__ = [
     "WuBookConfiguration",
     "WuBookRoomMapping", 
     "WuBookRatePlan",
-    "WuBookSyncLog"
+    "WuBookSyncLog",
+    # ✅ RESTRICTIONS EXPORT
+    "ReservationRestriction"
 ]
