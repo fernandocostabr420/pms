@@ -26,6 +26,243 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# ============== ENDPOINTS AUXILIARES ==============
+# IMPORTANTE: Estes endpoints devem vir ANTES de /{restriction_id} para evitar conflitos de rota
+
+@router.get("/types", response_model=Dict[str, str])
+def get_restriction_types():
+    """Lista tipos de restrição disponíveis"""
+    return {
+        RestrictionTypeEnum.MIN_STAY: "Estadia mínima",
+        RestrictionTypeEnum.MAX_STAY: "Estadia máxima", 
+        RestrictionTypeEnum.CLOSED_TO_ARRIVAL: "Fechado para chegada",
+        RestrictionTypeEnum.CLOSED_TO_DEPARTURE: "Fechado para saída",
+        RestrictionTypeEnum.STOP_SELL: "Vendas bloqueadas",
+        RestrictionTypeEnum.MIN_ADVANCE_BOOKING: "Antecedência mínima",
+        RestrictionTypeEnum.MAX_ADVANCE_BOOKING: "Antecedência máxima"
+    }
+
+
+@router.get("/scopes", response_model=Dict[str, str])
+def get_restriction_scopes():
+    """Lista escopos de aplicação disponíveis"""
+    return {
+        RestrictionScopeEnum.PROPERTY: "Toda a propriedade",
+        RestrictionScopeEnum.ROOM_TYPE: "Tipo de quarto específico",
+        RestrictionScopeEnum.ROOM: "Quarto específico"
+    }
+
+
+@router.get("/sources", response_model=Dict[str, str])
+def get_restriction_sources():
+    """Lista origens de restrição disponíveis"""
+    return {
+        RestrictionSourceEnum.MANUAL: "Criação manual",
+        RestrictionSourceEnum.CHANNEL_MANAGER: "Channel Manager",
+        RestrictionSourceEnum.YIELD_MANAGEMENT: "Yield Management",
+        RestrictionSourceEnum.BULK_IMPORT: "Importação em massa",
+        RestrictionSourceEnum.API: "API externa"
+    }
+
+
+@router.get("/stats", response_model=Dict[str, Any])
+def get_restriction_stats(
+    property_id: Optional[int] = Query(None),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Estatísticas de restrições"""
+    from app.models.reservation_restriction import ReservationRestriction
+    from sqlalchemy import func, case
+    
+    query = db.query(
+        func.count(ReservationRestriction.id).label('total_restrictions'),
+        func.count(case([(ReservationRestriction.is_active == True, 1)])).label('active_restrictions'),
+        func.count(case([(ReservationRestriction.sync_pending == True, 1)])).label('pending_sync'),
+        func.count(case([(ReservationRestriction.sync_error.isnot(None), 1)])).label('sync_errors')
+    ).filter(
+        ReservationRestriction.tenant_id == current_user.tenant_id
+    )
+    
+    if property_id:
+        query = query.filter(ReservationRestriction.property_id == property_id)
+    
+    if date_from:
+        query = query.filter(ReservationRestriction.date_to >= date_from)
+    
+    if date_to:
+        query = query.filter(ReservationRestriction.date_from <= date_to)
+    
+    stats = query.first()
+    
+    # Estatísticas por tipo
+    type_stats = db.query(
+        ReservationRestriction.restriction_type,
+        func.count(ReservationRestriction.id).label('count')
+    ).filter(
+        ReservationRestriction.tenant_id == current_user.tenant_id,
+        ReservationRestriction.is_active == True
+    ).group_by(ReservationRestriction.restriction_type).all()
+    
+    return {
+        "total_restrictions": stats.total_restrictions or 0,
+        "active_restrictions": stats.active_restrictions or 0,
+        "pending_sync": stats.pending_sync or 0,
+        "sync_errors": stats.sync_errors or 0,
+        "by_type": {stat.restriction_type: stat.count for stat in type_stats}
+    }
+
+
+# ============== OPERAÇÕES EM MASSA ==============
+
+@router.post("/bulk", response_model=BulkRestrictionResult)
+def bulk_restriction_operation(
+    operation_data: BulkRestrictionOperation,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Executa operação em massa com restrições"""
+    restriction_service = RestrictionService(db)
+    
+    logger.info(f"Iniciando operação em massa: {operation_data.operation} por usuário {current_user.id}")
+    
+    # Validar escopo da operação
+    if not operation_data.property_ids or len(operation_data.property_ids) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pelo menos uma propriedade deve ser especificada"
+        )
+    
+    # Validar período
+    if operation_data.date_to < operation_data.date_from:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Data final deve ser posterior à data inicial"
+        )
+    
+    # Executar operação
+    result = restriction_service.bulk_restriction_operation(
+        operation_data=operation_data,
+        tenant_id=current_user.tenant_id,
+        user=current_user
+    )
+    
+    logger.info(f"Operação em massa concluída: {result.message}")
+    return result
+
+
+# ============== VALIDAÇÃO DE RESTRIÇÕES ==============
+
+@router.post("/validate", response_model=RestrictionValidationResponse)
+def validate_restrictions(
+    validation_request: RestrictionValidationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Valida se uma reserva pode ser feita baseada nas restrições existentes"""
+    validation_service = RestrictionValidationService(db)
+    
+    # Calcular nights se não fornecido
+    if not validation_request.nights:
+        validation_request.nights = (
+            validation_request.check_out_date - validation_request.check_in_date
+        ).days
+    
+    # Calcular advance_days se não fornecido
+    if not validation_request.advance_days:
+        from datetime import datetime
+        today = datetime.now().date()
+        validation_request.advance_days = (validation_request.check_in_date - today).days
+    
+    result = validation_service.validate_reservation_restrictions(
+        validation_request=validation_request,
+        tenant_id=current_user.tenant_id
+    )
+    
+    logger.info(f"Validação de restrições: {'✅ VÁLIDA' if result.is_valid else '❌ INVÁLIDA'} "
+                f"({len(result.violations)} violações, {len(result.warnings)} avisos)")
+    
+    return result
+
+
+# ============== CALENDAR GRID ==============
+
+@router.post("/calendar", response_model=CalendarRestrictionResponse)
+def get_restriction_calendar(
+    calendar_request: CalendarRestrictionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Gera calendário de restrições para visualização"""
+    validation_service = RestrictionValidationService(db)
+    
+    # Validar período máximo para performance
+    days_diff = (calendar_request.date_to - calendar_request.date_from).days
+    if days_diff > 90:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Período máximo de 90 dias para calendário"
+        )
+    
+    result = validation_service.get_restriction_calendar(
+        calendar_request=calendar_request,
+        tenant_id=current_user.tenant_id
+    )
+    
+    logger.info(f"Calendário gerado: {result.total_days} dias, "
+                f"{result.days_with_restrictions} com restrições, "
+                f"{result.total_restrictions} restrições total")
+    
+    return result
+
+
+# ============== ENDPOINTS DE SINCRONIZAÇÃO ==============
+
+@router.get("/sync/pending", response_model=ReservationRestrictionListResponse)
+def list_pending_sync_restrictions(
+    property_id: Optional[int] = Query(None),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Lista restrições pendentes de sincronização"""
+    restriction_service = RestrictionService(db)
+    
+    filters = ReservationRestrictionFilters(
+        property_id=property_id,
+        sync_pending=True,
+        is_active=True
+    )
+    
+    skip = (page - 1) * per_page
+    
+    restrictions = restriction_service.get_restrictions(
+        tenant_id=current_user.tenant_id,
+        filters=filters,
+        skip=skip,
+        limit=per_page
+    )
+    
+    total = restriction_service.count_restrictions(
+        tenant_id=current_user.tenant_id,
+        filters=filters
+    )
+    
+    pages = math.ceil(total / per_page) if total > 0 else 1
+    
+    return ReservationRestrictionListResponse(
+        restrictions=[ReservationRestrictionResponse.from_orm(r) for r in restrictions],
+        total=total,
+        page=page,
+        pages=pages,
+        per_page=per_page
+    )
+
+
 # ============== CRUD BÁSICO ==============
 
 @router.get("", response_model=ReservationRestrictionListResponse)
@@ -273,207 +510,6 @@ def delete_restriction(
         )
 
 
-# ============== OPERAÇÕES EM MASSA ==============
-
-@router.post("/bulk", response_model=BulkRestrictionResult)
-def bulk_restriction_operation(
-    operation_data: BulkRestrictionOperation,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Executa operação em massa com restrições"""
-    restriction_service = RestrictionService(db)
-    
-    logger.info(f"Iniciando operação em massa: {operation_data.operation} por usuário {current_user.id}")
-    
-    # Validar escopo da operação
-    if len(operation_data.property_ids) == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Pelo menos uma propriedade deve ser especificada"
-        )
-    
-    # Validar período
-    if operation_data.date_to < operation_data.date_from:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Data final deve ser posterior à data inicial"
-        )
-    
-    # Limitar período para performance
-    days_diff = (operation_data.date_to - operation_data.date_from).days
-    if days_diff > 365:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Período máximo de 365 dias para operações em massa"
-        )
-    
-    # Executar operação
-    result = restriction_service.bulk_restriction_operation(
-        operation_data=operation_data,
-        tenant_id=current_user.tenant_id,
-        user=current_user
-    )
-    
-    logger.info(f"Operação em massa concluída: {result.message}")
-    return result
-
-
-# ============== VALIDAÇÃO DE RESTRIÇÕES ==============
-
-@router.post("/validate", response_model=RestrictionValidationResponse)
-def validate_restrictions(
-    validation_request: RestrictionValidationRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Valida se uma reserva pode ser feita baseada nas restrições existentes"""
-    validation_service = RestrictionValidationService(db)
-    
-    # Calcular days se não fornecido
-    if not validation_request.nights:
-        validation_request.nights = (
-            validation_request.check_out_date - validation_request.check_in_date
-        ).days
-    
-    # Calcular advance_days se não fornecido
-    if not validation_request.advance_days:
-        from datetime import datetime
-        today = datetime.now().date()
-        validation_request.advance_days = (validation_request.check_in_date - today).days
-    
-    result = validation_service.validate_reservation_restrictions(
-        validation_request=validation_request,
-        tenant_id=current_user.tenant_id
-    )
-    
-    logger.info(f"Validação de restrições: {'✅ VÁLIDA' if result.is_valid else '❌ INVÁLIDA'} "
-                f"({len(result.violations)} violações, {len(result.warnings)} avisos)")
-    
-    return result
-
-
-# ============== CALENDAR GRID ==============
-
-@router.post("/calendar", response_model=CalendarRestrictionResponse)
-def get_restriction_calendar(
-    calendar_request: CalendarRestrictionRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Gera calendário de restrições para visualização"""
-    validation_service = RestrictionValidationService(db)
-    
-    # Validar período máximo para performance
-    days_diff = (calendar_request.date_to - calendar_request.date_from).days
-    if days_diff > 90:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Período máximo de 90 dias para calendário"
-        )
-    
-    result = validation_service.get_restriction_calendar(
-        calendar_request=calendar_request,
-        tenant_id=current_user.tenant_id
-    )
-    
-    logger.info(f"Calendário gerado: {result.total_days} dias, "
-                f"{result.days_with_restrictions} com restrições, "
-                f"{result.total_restrictions} restrições total")
-    
-    return result
-
-
-# ============== ENDPOINTS AUXILIARES ==============
-
-@router.get("/types", response_model=Dict[str, str])
-def get_restriction_types():
-    """Lista tipos de restrição disponíveis"""
-    return {
-        RestrictionTypeEnum.MIN_STAY: "Estadia mínima",
-        RestrictionTypeEnum.MAX_STAY: "Estadia máxima", 
-        RestrictionTypeEnum.CLOSED_TO_ARRIVAL: "Fechado para chegada",
-        RestrictionTypeEnum.CLOSED_TO_DEPARTURE: "Fechado para saída",
-        RestrictionTypeEnum.STOP_SELL: "Vendas bloqueadas",
-        RestrictionTypeEnum.MIN_ADVANCE_BOOKING: "Antecedência mínima",
-        RestrictionTypeEnum.MAX_ADVANCE_BOOKING: "Antecedência máxima"
-    }
-
-
-@router.get("/scopes", response_model=Dict[str, str])
-def get_restriction_scopes():
-    """Lista escopos de aplicação disponíveis"""
-    return {
-        RestrictionScopeEnum.PROPERTY: "Toda a propriedade",
-        RestrictionScopeEnum.ROOM_TYPE: "Tipo de quarto específico",
-        RestrictionScopeEnum.ROOM: "Quarto específico"
-    }
-
-
-@router.get("/sources", response_model=Dict[str, str])
-def get_restriction_sources():
-    """Lista origens de restrição disponíveis"""
-    return {
-        RestrictionSourceEnum.MANUAL: "Criação manual",
-        RestrictionSourceEnum.CHANNEL_MANAGER: "Channel Manager",
-        RestrictionSourceEnum.YIELD_MANAGEMENT: "Yield Management",
-        RestrictionSourceEnum.BULK_IMPORT: "Importação em massa",
-        RestrictionSourceEnum.API: "API externa"
-    }
-
-
-@router.get("/stats", response_model=Dict[str, Any])
-def get_restriction_stats(
-    property_id: Optional[int] = Query(None),
-    date_from: Optional[date] = Query(None),
-    date_to: Optional[date] = Query(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Estatísticas de restrições"""
-    from sqlalchemy import func, case
-    
-    query = db.query(
-        func.count(ReservationRestriction.id).label('total_restrictions'),
-        func.count(case([(ReservationRestriction.is_active == True, 1)])).label('active_restrictions'),
-        func.count(case([(ReservationRestriction.sync_pending == True, 1)])).label('pending_sync'),
-        func.count(case([(ReservationRestriction.sync_error.isnot(None), 1)])).label('sync_errors')
-    ).filter(
-        ReservationRestriction.tenant_id == current_user.tenant_id
-    )
-    
-    if property_id:
-        query = query.filter(ReservationRestriction.property_id == property_id)
-    
-    if date_from:
-        query = query.filter(ReservationRestriction.date_to >= date_from)
-    
-    if date_to:
-        query = query.filter(ReservationRestriction.date_from <= date_to)
-    
-    stats = query.first()
-    
-    # Estatísticas por tipo
-    type_stats = db.query(
-        ReservationRestriction.restriction_type,
-        func.count(ReservationRestriction.id).label('count')
-    ).filter(
-        ReservationRestriction.tenant_id == current_user.tenant_id,
-        ReservationRestriction.is_active == True
-    ).group_by(ReservationRestriction.restriction_type).all()
-    
-    return {
-        "total_restrictions": stats.total_restrictions or 0,
-        "active_restrictions": stats.active_restrictions or 0,
-        "pending_sync": stats.pending_sync or 0,
-        "sync_errors": stats.sync_errors or 0,
-        "by_type": {stat.restriction_type: stat.count for stat in type_stats}
-    }
-
-
-# ============== ENDPOINTS DE SINCRONIZAÇÃO ==============
-
 @router.post("/{restriction_id}/sync", response_model=MessageResponse)
 def mark_restriction_for_sync(
     restriction_id: int,
@@ -505,45 +541,3 @@ def mark_restriction_for_sync(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Erro interno do servidor"
         )
-
-
-@router.get("/sync/pending", response_model=ReservationRestrictionListResponse)
-def list_pending_sync_restrictions(
-    property_id: Optional[int] = Query(None),
-    page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=100),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    """Lista restrições pendentes de sincronização"""
-    restriction_service = RestrictionService(db)
-    
-    filters = ReservationRestrictionFilters(
-        property_id=property_id,
-        sync_pending=True,
-        is_active=True
-    )
-    
-    skip = (page - 1) * per_page
-    
-    restrictions = restriction_service.get_restrictions(
-        tenant_id=current_user.tenant_id,
-        filters=filters,
-        skip=skip,
-        limit=per_page
-    )
-    
-    total = restriction_service.count_restrictions(
-        tenant_id=current_user.tenant_id,
-        filters=filters
-    )
-    
-    pages = math.ceil(total / per_page) if total > 0 else 1
-    
-    return ReservationRestrictionListResponse(
-        restrictions=[ReservationRestrictionResponse.from_orm(r) for r in restrictions],
-        total=total,
-        page=page,
-        pages=pages,
-        per_page=per_page
-    )
