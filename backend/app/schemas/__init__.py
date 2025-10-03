@@ -113,6 +113,26 @@ from .reservation import (
     ReservationFilters
 )
 
+# ✅ NOVO: Rate Plan schemas
+from .rate_plan import (
+    RatePlanBase,
+    RatePlanCreate,
+    RatePlanUpdate,
+    RatePlanResponse,
+    RatePlanListResponse,
+    RatePlanFilters,
+    PricingRuleBase,
+    PricingRuleCreate,
+    PricingRuleUpdate,
+    PricingRuleResponse,
+    BulkPricingOperation,
+    BulkPricingResult,
+    RateCalculationRequest,
+    RateCalculationResponse,
+    RatePlanTypeEnum,
+    PricingModeEnum
+)
+
 # ✅ WuBook schemas - APENAS OS QUE EXISTEM
 from .wubook_configuration import (
     WuBookConfigurationBase,
@@ -250,6 +270,23 @@ __all__ = [
     "AvailabilityRequest",
     "AvailabilityResponse",
     "ReservationFilters",
+    # ✅ NOVO: Rate Plan
+    "RatePlanBase",
+    "RatePlanCreate",
+    "RatePlanUpdate",
+    "RatePlanResponse",
+    "RatePlanListResponse",
+    "RatePlanFilters",
+    "PricingRuleBase",
+    "PricingRuleCreate",
+    "PricingRuleUpdate",
+    "PricingRuleResponse",
+    "BulkPricingOperation",
+    "BulkPricingResult",
+    "RateCalculationRequest",
+    "RateCalculationResponse",
+    "RatePlanTypeEnum",
+    "PricingModeEnum",
     # ✅ WuBook Configuration - APENAS OS QUE EXISTEM
     "WuBookConfigurationBase",
     "WuBookConfigurationCreate",

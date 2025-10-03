@@ -13,24 +13,41 @@ class WuBookRatePlan(BaseModel, TenantMixin):
     """
     Modelo para planos tarifários do WuBook.
     Gerencia diferentes planos de preços e suas regras.
+    ✅ ATUALIZADO: Compatível com novo sistema de Rate Plans
     """
     __tablename__ = "wubook_rate_plans"
     
-    # Configuração à qual pertence este rate plan
-    configuration_id = Column(Integer, ForeignKey('wubook_configurations.id'), nullable=False, index=True)
+    # Configuração à qual pertence este rate plan (opcional para planos PMS-only)
+    configuration_id = Column(Integer, ForeignKey('wubook_configurations.id'), nullable=True, index=True)
+    
+    # ✅ NOVOS CAMPOS: Relacionamentos com PMS
+    room_type_id = Column(Integer, ForeignKey('room_types.id'), nullable=True, index=True)
+    property_id = Column(Integer, ForeignKey('properties.id'), nullable=True, index=True)
     
     # Identificação do Rate Plan
-    wubook_rate_plan_id = Column(String(50), nullable=False, index=True)
+    wubook_rate_plan_id = Column(String(50), nullable=True, index=True)  # Agora opcional para planos PMS
     name = Column(String(200), nullable=False)
-    code = Column(String(50), nullable=False, index=True)
+    
+    # ✅ CAMPO RENOMEADO: code (sem prefixo wubook)
+    rate_plan_code = Column(String(50), nullable=False, index=True)  # Mantendo nome original mas adicionando alias
+    code = Column(String(50), nullable=False, index=True)  # ✅ NOVO: Alias para compatibilidade
+    
     description = Column(Text, nullable=True)
     
-    # Tipo de Rate Plan
-    plan_type = Column(String(30), default="standard", nullable=False)
-    # standard, non_refundable, package, corporate, long_stay, early_booking, last_minute
+    # ✅ CAMPO RENOMEADO: rate_plan_type (era plan_type)
+    rate_plan_type = Column(String(30), default="standard", nullable=False)
+    # standard, promotional, seasonal, package, corporate
+    
+    # ✅ NOVO CAMPO: Modo de precificação
+    pricing_mode = Column(String(20), default="per_room", nullable=False)
+    # per_room, per_person, flat_rate
     
     # Status
     is_active = Column(Boolean, default=True, nullable=False, index=True)
+    
+    # ✅ NOVO CAMPO: Plano padrão
+    is_default = Column(Boolean, default=False, nullable=False, index=True)
+    
     is_visible = Column(Boolean, default=True, nullable=False)  # Visível nos canais
     is_bookable = Column(Boolean, default=True, nullable=False)  # Pode receber reservas
     
@@ -43,8 +60,8 @@ class WuBookRatePlan(BaseModel, TenantMixin):
     derivation_value = Column(Numeric(10, 3), nullable=True)  # Ex: -10.0 para 10% desconto
     
     # Validade do Rate Plan
-    valid_from = Column(Date, nullable=True)
-    valid_to = Column(Date, nullable=True)
+    valid_from = Column(String(30), nullable=True)  # ✅ ALTERADO: String para compatibilidade com schemas
+    valid_to = Column(String(30), nullable=True)    # ✅ ALTERADO: String para compatibilidade com schemas
     
     # Dias da semana aplicáveis (JSON array com números 0-6, onde 0=segunda)
     applicable_days = Column(JSON, nullable=True, default=list)
@@ -101,31 +118,49 @@ class WuBookRatePlan(BaseModel, TenantMixin):
     # Metadados
     metadata_json = Column(JSON, nullable=True, default=dict)
     
-    # Constraints
+    # ✅ CONSTRAINTS ATUALIZADAS
     __table_args__ = (
+        # Constraint para planos WuBook (quando configuration_id existe)
         UniqueConstraint('tenant_id', 'configuration_id', 'wubook_rate_plan_id', 
                          name='uq_wubook_rate_plan'),
-        UniqueConstraint('tenant_id', 'configuration_id', 'code', 
-                         name='uq_wubook_rate_plan_code'),
+        # Constraint para códigos únicos por tenant
+        UniqueConstraint('tenant_id', 'rate_plan_code', name='uq_rate_plan_code'),
+        # ✅ NOVA: Constraint para códigos únicos (campo novo)
+        UniqueConstraint('tenant_id', 'code', name='uq_rate_plan_code_alias'),
     )
     
-    # Relacionamentos
+    # ✅ RELACIONAMENTOS ATUALIZADOS
     configuration = relationship("WuBookConfiguration", back_populates="rate_plans")
+    room_type = relationship("RoomType", backref="rate_plans")  # ✅ NOVO
+    property_obj = relationship("Property", backref="rate_plans")  # ✅ NOVO (property é palavra reservada)
     parent_plan = relationship("WuBookRatePlan", remote_side="WuBookRatePlan.id", backref="derived_plans")
     
     def __repr__(self):
         return (f"<WuBookRatePlan(id={self.id}, name='{self.name}', "
-                f"code='{self.code}', type='{self.plan_type}', active={self.is_active})>")
+                f"code='{self.code}', type='{self.rate_plan_type}', active={self.is_active})>")
     
+    # ✅ PROPRIEDADES ATUALIZADAS
     @property
     def is_valid(self) -> bool:
         """Verifica se o rate plan está válido para hoje"""
         today = date.today()
         
-        if self.valid_from and today < self.valid_from:
-            return False
-        if self.valid_to and today > self.valid_to:
-            return False
+        # ✅ CORRIGIDO: Lidar com campos string de data
+        if self.valid_from:
+            try:
+                valid_from_date = datetime.fromisoformat(self.valid_from).date()
+                if today < valid_from_date:
+                    return False
+            except (ValueError, TypeError):
+                pass
+        
+        if self.valid_to:
+            try:
+                valid_to_date = datetime.fromisoformat(self.valid_to).date()
+                if today > valid_to_date:
+                    return False
+            except (ValueError, TypeError):
+                pass
         
         return self.is_active and self.is_bookable
     
@@ -138,6 +173,7 @@ class WuBookRatePlan(BaseModel, TenantMixin):
         today_weekday = datetime.now().weekday()
         return today_weekday in self.applicable_days
     
+    # ✅ MÉTODOS MANTIDOS E MELHORADOS
     def calculate_rate(self, occupancy: int, checkin_date: date = None) -> Optional[Decimal]:
         """Calcula a tarifa base para uma ocupação"""
         base_rate = None
@@ -150,6 +186,9 @@ class WuBookRatePlan(BaseModel, TenantMixin):
             base_rate = self.base_rate_triple
         elif occupancy >= 4 and self.base_rate_quad:
             base_rate = self.base_rate_quad
+        else:
+            # ✅ FALLBACK: Usar double como padrão se não houver específico
+            base_rate = self.base_rate_double or self.base_rate_single
         
         if base_rate and self.is_derived and self.parent_rate_plan_id:
             # Aplicar derivação se for um plano derivado
@@ -203,6 +242,7 @@ class WuBookRatePlan(BaseModel, TenantMixin):
         if self.available_channels and str(channel_id) in self.available_channels:
             self.available_channels.remove(str(channel_id))
     
+    # ✅ MÉTODO ATUALIZADO: Melhor validação de datas
     def validate_booking(self, checkin: date, checkout: date, advance_days: int = None) -> tuple[bool, str]:
         """
         Valida se uma reserva pode ser feita com este rate plan
@@ -266,3 +306,67 @@ class WuBookRatePlan(BaseModel, TenantMixin):
             self.sync_error = None
         else:
             self.sync_error = error or "Erro desconhecido"
+    
+    # ✅ NOVOS MÉTODOS: Para compatibilidade com schemas
+    def set_as_default(self, session) -> None:
+        """Define este plano como padrão, removendo flag de outros"""
+        # Remove is_default de outros planos do mesmo tenant/room_type
+        if self.room_type_id:
+            session.query(WuBookRatePlan).filter(
+                WuBookRatePlan.tenant_id == self.tenant_id,
+                WuBookRatePlan.room_type_id == self.room_type_id,
+                WuBookRatePlan.id != self.id
+            ).update({"is_default": False})
+        else:
+            # Se não tem room_type, é global
+            session.query(WuBookRatePlan).filter(
+                WuBookRatePlan.tenant_id == self.tenant_id,
+                WuBookRatePlan.room_type_id.is_(None),
+                WuBookRatePlan.id != self.id
+            ).update({"is_default": False})
+        
+        self.is_default = True
+    
+    def get_applicable_rooms(self, session) -> List:
+        """Retorna quartos aos quais este rate plan se aplica"""
+        from app.models.room import Room
+        
+        query = session.query(Room).filter(
+            Room.tenant_id == self.tenant_id,
+            Room.is_active == True
+        )
+        
+        # Filtrar por room_type se especificado
+        if self.room_type_id:
+            query = query.filter(Room.room_type_id == self.room_type_id)
+        
+        # Filtrar por property se especificado
+        if self.property_id:
+            query = query.filter(Room.property_id == self.property_id)
+        
+        return query.all()
+    
+    def get_rate_for_occupancy(self, occupancy: int) -> Optional[Decimal]:
+        """Obtém taxa base para ocupação específica (método auxiliar)"""
+        if occupancy == 1:
+            return self.base_rate_single
+        elif occupancy == 2:
+            return self.base_rate_double or self.base_rate_single
+        elif occupancy == 3:
+            return self.base_rate_triple or self.base_rate_double or self.base_rate_single
+        elif occupancy == 4:
+            return self.base_rate_quad or self.base_rate_triple or self.base_rate_double
+        else:
+            # Para ocupação > 4, usar quádruplo como base
+            return self.base_rate_quad or self.base_rate_double
+    
+    # ✅ PROPERTY PARA RETROCOMPATIBILIDADE
+    @property
+    def plan_type(self) -> str:
+        """Alias para rate_plan_type (retrocompatibilidade)"""
+        return self.rate_plan_type
+    
+    @plan_type.setter
+    def plan_type(self, value: str) -> None:
+        """Setter para plan_type (retrocompatibilidade)"""
+        self.rate_plan_type = value
