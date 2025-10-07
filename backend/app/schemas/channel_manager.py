@@ -1,6 +1,6 @@
 # backend/app/schemas/channel_manager.py
 
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator
 from typing import Optional, List, Dict, Any, Union
 from datetime import date, datetime
 from decimal import Decimal
@@ -454,3 +454,186 @@ class SimpleAvailabilityView(BaseModel):
     # Canais (informação simples)
     mapped_channels: List[str] = Field(default_factory=list)
     sync_enabled_channels: List[str] = Field(default_factory=list)
+
+
+# ============== BULK EDIT INTEGRATION ==============
+
+class BulkAvailabilityUpdateExtended(BulkAvailabilityUpdate):
+    """Versão estendida do BulkAvailabilityUpdate com mais opções"""
+    
+    # Campos adicionais para bulk edit avançado
+    rate_override: Optional[Decimal] = Field(None, ge=0, description="Preço override")
+    min_stay: Optional[int] = Field(None, ge=1, le=30, description="Estadia mínima")
+    max_stay: Optional[int] = Field(None, ge=1, le=30, description="Estadia máxima")
+    closed_to_arrival: Optional[bool] = Field(None, description="Fechado para chegada")
+    closed_to_departure: Optional[bool] = Field(None, description="Fechado para saída")
+    
+    # Operações matemáticas
+    price_operation: Optional[str] = Field(None, description="Operação de preço: set, increase_amount, increase_percent, etc")
+    price_value: Optional[Decimal] = Field(None, description="Valor para operação de preço")
+    
+    # Filtros adicionais
+    days_of_week: Optional[List[int]] = Field(None, description="Dias da semana específicos (0-6)")
+    overwrite_existing: bool = Field(True, description="Sobrescrever valores existentes")
+    
+    @field_validator('days_of_week')
+    @classmethod
+    def validate_days_of_week(cls, v):
+        if v:
+            for day in v:
+                if day < 0 or day > 6:
+                    raise ValueError("Dias da semana devem estar entre 0 (Domingo) e 6 (Sábado)")
+        return v
+    
+    @field_validator('price_operation')
+    @classmethod
+    def validate_price_operation(cls, v):
+        if v:
+            valid_operations = ['set', 'increase_amount', 'increase_percent', 'decrease_amount', 'decrease_percent']
+            if v not in valid_operations:
+                raise ValueError(f"Operação deve ser uma de: {', '.join(valid_operations)}")
+        return v
+
+
+class BulkOperationResultExtended(BulkOperationResult):
+    """Versão estendida do resultado de operação em massa"""
+    
+    # Breakdown detalhado por tipo de operação
+    price_updates: int = Field(0, description="Atualizações de preço")
+    availability_updates: int = Field(0, description="Atualizações de disponibilidade")
+    restriction_updates: int = Field(0, description="Atualizações de restrições")
+    
+    # Estatísticas por quarto
+    rooms_affected: List[Dict[str, Any]] = Field(default_factory=list, description="Quartos afetados")
+    
+    # Preview dos resultados (para dry-run)
+    sample_changes: List[Dict[str, Any]] = Field(default_factory=list, description="Amostra das mudanças")
+    
+    # Task assíncrona (se aplicável)
+    async_task_id: Optional[str] = Field(None, description="ID da task assíncrona")
+    is_async: bool = Field(False, description="Se está sendo processado assincronamente")
+
+
+class BulkEditScope(BaseModel):
+    """Schema para definir escopo de bulk edit"""
+    scope_type: str = Field(..., description="Tipo do escopo: property, room_type, specific_rooms")
+    property_id: int = Field(..., gt=0, description="ID da propriedade")
+    room_type_id: Optional[int] = Field(None, gt=0, description="ID do tipo de quarto")
+    room_ids: Optional[List[int]] = Field(None, description="IDs específicos dos quartos")
+    
+    @field_validator('scope_type')
+    @classmethod
+    def validate_scope_type(cls, v):
+        valid_scopes = ['property', 'room_type', 'specific_rooms']
+        if v not in valid_scopes:
+            raise ValueError(f"Escopo deve ser um de: {', '.join(valid_scopes)}")
+        return v
+    
+    @model_validator(mode='after')
+    def validate_scope_requirements(self):
+        if self.scope_type == 'room_type' and not self.room_type_id:
+            raise ValueError("room_type_id é obrigatório para escopo room_type")
+        
+        if self.scope_type == 'specific_rooms' and not self.room_ids:
+            raise ValueError("room_ids é obrigatório para escopo specific_rooms")
+        
+        return self
+
+
+class BulkEditPreview(BaseModel):
+    """Schema para preview de bulk edit"""
+    scope: BulkEditScope = Field(..., description="Escopo da operação")
+    date_from: date = Field(..., description="Data inicial")
+    date_to: date = Field(..., description="Data final")
+    
+    # Estimativas
+    estimated_rooms_affected: int = Field(0, description="Quartos que serão afetados")
+    estimated_dates_affected: int = Field(0, description="Datas que serão afetadas")
+    estimated_records_to_process: int = Field(0, description="Registros a serem processados")
+    estimated_processing_time_seconds: float = Field(0.0, description="Tempo estimado de processamento")
+    
+    # Validações
+    validation_errors: List[str] = Field(default_factory=list, description="Erros de validação")
+    validation_warnings: List[str] = Field(default_factory=list, description="Avisos")
+    
+    # Amostra dos dados
+    sample_affected_rooms: List[Dict[str, Any]] = Field(default_factory=list, description="Amostra dos quartos afetados")
+
+
+# ============== INTEGRATION WITH EXISTING SCHEMAS ==============
+
+class AvailabilityCalendarResponseExtended(AvailabilityCalendarResponse):
+    """Versão estendida do calendário com suporte a bulk edit"""
+    
+    # Metadados para bulk edit
+    bulk_edit_metadata: Optional[Dict[str, Any]] = Field(None, description="Metadados para bulk edit")
+    
+    # Estatísticas adicionais
+    rooms_with_restrictions: int = Field(0, description="Quartos com restrições ativas")
+    rooms_with_custom_pricing: int = Field(0, description="Quartos com preço customizado")
+    average_occupancy_rate: float = Field(0.0, description="Taxa média de ocupação")
+
+
+class ChannelManagerOverviewExtended(ChannelManagerOverview):
+    """Versão estendida do overview com estatísticas de bulk edit"""
+    
+    # Estatísticas de bulk operations
+    bulk_operations_last_30_days: int = Field(0, description="Operações em massa nos últimos 30 dias")
+    last_bulk_operation_date: Optional[datetime] = Field(None, description="Data da última operação em massa")
+    
+    # Status de tasks assíncronas
+    active_bulk_tasks: int = Field(0, description="Tasks de bulk edit ativas")
+    failed_bulk_tasks_today: int = Field(0, description="Tasks falharam hoje")
+
+
+# ============== HELPER SCHEMAS ==============
+
+class BulkEditOperationLog(BaseModel):
+    """Schema para log de operações de bulk edit"""
+    operation_id: str = Field(..., description="ID da operação")
+    user_id: int = Field(..., description="ID do usuário")
+    user_name: Optional[str] = Field(None, description="Nome do usuário")
+    
+    # Detalhes da operação
+    operation_type: str = Field(..., description="Tipo da operação")
+    scope_summary: Dict[str, Any] = Field(..., description="Resumo do escopo")
+    
+    # Resultados
+    items_processed: int = Field(0, description="Itens processados")
+    items_successful: int = Field(0, description="Itens bem-sucedidos")
+    items_failed: int = Field(0, description="Itens com falha")
+    
+    # Timing
+    started_at: datetime = Field(..., description="Início")
+    completed_at: Optional[datetime] = Field(None, description="Fim")
+    duration_seconds: Optional[float] = Field(None, description="Duração")
+    
+    # Status
+    status: str = Field(..., description="Status: completed, failed, in_progress")
+    error_message: Optional[str] = Field(None, description="Mensagem de erro se houver")
+
+
+class BulkEditStats(BaseModel):
+    """Schema para estatísticas de bulk edit"""
+    
+    # Contadores gerais
+    total_operations_all_time: int = Field(0, description="Total de operações")
+    total_operations_last_30_days: int = Field(0, description="Operações nos últimos 30 dias")
+    total_operations_today: int = Field(0, description="Operações hoje")
+    
+    # Por tipo de operação
+    operations_by_type: Dict[str, int] = Field(default_factory=dict, description="Operações por tipo")
+    
+    # Performance
+    average_processing_time_seconds: float = Field(0.0, description="Tempo médio de processamento")
+    largest_operation_items: int = Field(0, description="Maior operação (itens processados)")
+    
+    # Success rate
+    success_rate_percentage: float = Field(0.0, description="Taxa de sucesso (%)")
+    
+    # Usuários mais ativos
+    top_users: List[Dict[str, Any]] = Field(default_factory=list, description="Usuários mais ativos")
+    
+    # Período da análise
+    period_start: datetime = Field(..., description="Início do período")
+    period_end: datetime = Field(..., description="Fim do período")

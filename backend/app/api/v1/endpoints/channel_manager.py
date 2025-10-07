@@ -43,6 +43,16 @@ from app.models.wubook_sync_log import WuBookSyncLog
 from app.models.room_availability import RoomAvailability
 from app.models.room import Room
 
+# ✅ IMPORTS PARA BULK EDIT
+from app.schemas.bulk_edit import (
+    BulkEditRequest, BulkEditResult, BulkEditValidationRequest, BulkEditValidationResult
+)
+from app.services.bulk_edit_service import BulkEditService
+from app.tasks.bulk_edit_job import (
+    bulk_edit_async, bulk_edit_with_progress, bulk_edit_validation_async,
+    get_bulk_edit_progress, cancel_bulk_edit_task
+)
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -698,6 +708,406 @@ def bulk_update_availability(
             completed_at=completed_at,
             duration_seconds=duration
         )
+
+
+# ============== BULK EDIT ENDPOINTS ==============
+
+@router.post("/bulk-edit", response_model=BulkEditResult)
+def execute_bulk_edit(
+    bulk_request: BulkEditRequest,
+    background_tasks: BackgroundTasks,
+    async_processing: bool = Query(False, description="Processar de forma assíncrona"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Executa operação de bulk edit no Channel Manager
+    
+    Permite alterar em massa:
+    - Preços (rate_override)
+    - Disponibilidade (is_available, is_blocked)
+    - Restrições (min_stay, max_stay, closed_to_arrival, closed_to_departure)
+    - Stop-sell
+    
+    Suporta escopo por:
+    - Toda a propriedade
+    - Tipo de quarto específico
+    - Quartos específicos
+    """
+    try:
+        logger.info(f"Bulk edit solicitado - User: {current_user.id}, "
+                   f"Escopo: {bulk_request.scope}, "
+                   f"Operações: {len(bulk_request.operations)}, "
+                   f"Async: {async_processing}")
+        
+        # Validação rápida do período
+        days_diff = (bulk_request.date_to - bulk_request.date_from).days
+        if days_diff > 366:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Período não pode exceder 366 dias"
+            )
+        
+        # Se async ou muitas operações, processar em background
+        if async_processing or days_diff > 90 or len(bulk_request.operations) > 5:
+            # Executar assincronamente
+            task = bulk_edit_with_progress.delay(
+                bulk_edit_data=bulk_request.dict(),
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id
+            )
+            
+            logger.info(f"Bulk edit executando assincronamente - Task ID: {task.id}")
+            
+            # Retornar resultado parcial com task ID
+            return BulkEditResult(
+                operation_id=f"async_{task.id}",
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
+                total_items_targeted=0,
+                total_operations_executed=0,
+                successful_operations=0,
+                failed_operations=0,
+                skipped_operations=0,
+                started_at=datetime.utcnow(),
+                completed_at=datetime.utcnow(),
+                duration_seconds=0.0,
+                dry_run=bulk_request.dry_run,
+                processing_errors=[f"Processamento assíncrono iniciado - Task ID: {task.id}"],
+                request_summary={"async_task_id": task.id}
+            )
+        
+        else:
+            # Executar sincronamente
+            service = BulkEditService(db)
+            result = service.execute_bulk_edit(
+                bulk_request, 
+                current_user.tenant_id, 
+                current_user
+            )
+            
+            logger.info(f"Bulk edit síncrono concluído - {result.operation_id}")
+            return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro em bulk edit: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno: {str(e)}"
+        )
+
+
+@router.post("/bulk-edit/validate", response_model=BulkEditValidationResult)
+def validate_bulk_edit(
+    validation_request: BulkEditValidationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Valida operação de bulk edit antes da execução
+    
+    Retorna:
+    - Estimativas de processamento
+    - Conflitos potenciais
+    - Avisos e erros
+    - Quartos e datas afetados
+    """
+    try:
+        service = BulkEditService(db)
+        
+        # Forçar dry_run na validação
+        bulk_request = validation_request.bulk_edit_request
+        bulk_request.dry_run = True
+        
+        # Executar dry-run para obter detalhes
+        result = service.execute_bulk_edit(
+            bulk_request,
+            current_user.tenant_id,
+            current_user
+        )
+        
+        # Converter para ValidationResult
+        validation_result = BulkEditValidationResult(
+            is_valid=len(result.validation_errors) == 0,
+            estimated_items_to_process=result.total_items_targeted,
+            estimated_duration_seconds=max(result.total_items_targeted * 0.01, 1.0),  # Estimativa
+            validation_errors=result.validation_errors,
+            validation_warnings=[],
+            affected_rooms=[],
+            recommendations=[]
+        )
+        
+        # Adicionar detalhes se disponível
+        if result.detailed_results:
+            # Agrupar por quarto
+            rooms_data = {}
+            for item in result.detailed_results[:100]:  # Limitar para não sobrecarregar
+                room_key = item.room_id
+                if room_key not in rooms_data:
+                    rooms_data[room_key] = {
+                        "room_id": item.room_id,
+                        "operations_count": 0,
+                        "dates_affected": set()
+                    }
+                rooms_data[room_key]["operations_count"] += 1
+                rooms_data[room_key]["dates_affected"].add(str(item.date))
+            
+            validation_result.affected_rooms = [
+                {
+                    "room_id": data["room_id"],
+                    "operations_count": data["operations_count"],
+                    "dates_count": len(data["dates_affected"])
+                }
+                for data in rooms_data.values()
+            ]
+        
+        # Adicionar recomendações
+        if result.total_items_targeted > 1000:
+            validation_result.recommendations.append(
+                "Operação grande detectada. Recomendamos processamento assíncrono."
+            )
+        
+        if bulk_request.sync_immediately and result.total_items_targeted > 500:
+            validation_result.recommendations.append(
+                "Sincronização imediata em operação grande pode ser lenta. "
+                "Considere sync_immediately=false."
+            )
+        
+        return validation_result
+        
+    except Exception as e:
+        logger.error(f"Erro na validação de bulk edit: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro na validação: {str(e)}"
+        )
+
+
+@router.get("/bulk-edit/progress/{task_id}")
+def get_bulk_edit_task_progress(
+    task_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Obtém progresso de uma task assíncrona de bulk edit
+    
+    Args:
+        task_id: ID da task Celery
+        
+    Returns:
+        Informações de progresso em tempo real
+    """
+    try:
+        progress = get_bulk_edit_progress(task_id)
+        
+        if progress is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Task não encontrada"
+            )
+        
+        return progress
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao obter progresso da task {task_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro ao obter progresso"
+        )
+
+
+@router.delete("/bulk-edit/cancel/{task_id}")
+def cancel_bulk_edit_task_endpoint(
+    task_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Cancela uma task assíncrona de bulk edit
+    
+    Args:
+        task_id: ID da task Celery
+        
+    Returns:
+        Confirmação de cancelamento
+    """
+    try:
+        success = cancel_bulk_edit_task(task_id)
+        
+        if success:
+            logger.info(f"Task {task_id} cancelada pelo usuário {current_user.id}")
+            return MessageResponse(
+                message=f"Task {task_id} cancelada com sucesso",
+                success=True
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Não foi possível cancelar a task"
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao cancelar task {task_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro ao cancelar task"
+        )
+
+
+@router.post("/bulk-edit/dry-run", response_model=BulkEditResult)
+def bulk_edit_dry_run(
+    bulk_request: BulkEditRequest,
+    detailed_results: bool = Query(True, description="Incluir resultados detalhados"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Executa simulação de bulk edit (dry-run)
+    
+    Mostra exatamente o que seria alterado sem aplicar as mudanças.
+    Útil para preview antes da execução real.
+    """
+    try:
+        # Forçar dry_run
+        bulk_request.dry_run = True
+        
+        service = BulkEditService(db)
+        result = service.execute_bulk_edit(
+            bulk_request,
+            current_user.tenant_id,
+            current_user
+        )
+        
+        # Limitar detalhes se muitos resultados
+        if result.detailed_results and len(result.detailed_results) > 1000:
+            if not detailed_results:
+                result.detailed_results = None
+            else:
+                # Manter apenas os primeiros 1000
+                result.detailed_results = result.detailed_results[:1000]
+                result.processing_errors.append(
+                    f"Resultados limitados a 1000 itens (total: {result.total_items_targeted})"
+                )
+        
+        logger.info(f"Dry-run concluído - {result.operation_id}, "
+                   f"{result.total_items_targeted} itens analisados")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Erro em dry-run: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro no dry-run: {str(e)}"
+        )
+
+
+@router.get("/bulk-edit/templates")
+def get_bulk_edit_templates(
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Retorna templates pré-definidos para operações comuns de bulk edit
+    """
+    templates = {
+        "stop_sell_weekend": {
+            "name": "Stop Sell - Finais de Semana",
+            "description": "Bloquear vendas nos finais de semana",
+            "operations": [
+                {
+                    "target": "stop_sell",
+                    "operation": "set_value",
+                    "value": True
+                }
+            ],
+            "days_of_week": [5, 6],  # Sábado e Domingo
+            "suggested_scope": "property"
+        },
+        "high_season_pricing": {
+            "name": "Preços Alta Temporada",
+            "description": "Aumentar preços em 25% para alta temporada",
+            "operations": [
+                {
+                    "target": "price",
+                    "operation": "increase_percent",
+                    "value": 25.0
+                }
+            ],
+            "suggested_scope": "property"
+        },
+        "minimum_stay_peak": {
+            "name": "Estadia Mínima - Período de Pico",
+            "description": "Definir estadia mínima de 3 noites",
+            "operations": [
+                {
+                    "target": "min_stay",
+                    "operation": "set_value",
+                    "value": 3
+                }
+            ],
+            "suggested_scope": "property"
+        },
+        "closed_to_arrival_sunday": {
+            "name": "CTA - Domingos",
+            "description": "Fechar chegadas aos domingos",
+            "operations": [
+                {
+                    "target": "closed_to_arrival",
+                    "operation": "set_value",
+                    "value": True
+                }
+            ],
+            "days_of_week": [6],  # Domingo
+            "suggested_scope": "property"
+        },
+        "open_all_restrictions": {
+            "name": "Abrir Todas as Restrições",
+            "description": "Remove todas as restrições e abre vendas",
+            "operations": [
+                {
+                    "target": "availability",
+                    "operation": "set_value",
+                    "value": True
+                },
+                {
+                    "target": "blocked",
+                    "operation": "set_value",
+                    "value": False
+                },
+                {
+                    "target": "min_stay",
+                    "operation": "set_value",
+                    "value": 1
+                },
+                {
+                    "target": "closed_to_arrival",
+                    "operation": "set_value",
+                    "value": False
+                },
+                {
+                    "target": "closed_to_departure",
+                    "operation": "set_value",
+                    "value": False
+                }
+            ],
+            "suggested_scope": "property"
+        }
+    }
+    
+    return {
+        "templates": templates,
+        "total_templates": len(templates),
+        "usage_notes": [
+            "Templates são pontos de partida - ajuste conforme necessário",
+            "Sempre execute dry-run antes de aplicar mudanças",
+            "Templates com days_of_week aplicam apenas aos dias especificados"
+        ]
+    }
 
 
 # ============== HEALTH AND MONITORING ==============
