@@ -344,6 +344,332 @@ class BulkEditService:
         
         return result
     
+    # ============== EXECUÇÃO REAL - MÉTODO FALTANDO ==============
+    
+    def _execute_real_operations(
+        self,
+        request: BulkEditRequest,
+        target_rooms: List[Room],
+        target_dates: List[date],
+        result: BulkEditResult,
+        tenant_id: int,
+        user: User,
+        request_obj: Optional[Any] = None
+    ) -> BulkEditResult:
+        """Executa operações reais no banco de dados"""
+        
+        detailed_results = []
+        
+        try:
+            for room in target_rooms:
+                for target_date in target_dates:
+                    # Obter ou criar registro de availability
+                    availability_record = self._get_or_create_availability_record(
+                        room, target_date, tenant_id, request.create_missing_records
+                    )
+                    
+                    if not availability_record and not request.create_missing_records:
+                        # Pular se não deve criar registros e não existe
+                        for operation in request.operations:
+                            item_result = BulkEditItemResult(
+                                room_id=room.id,
+                                date=target_date,
+                                target=operation.target,
+                                operation=operation.operation,
+                                success=False,
+                                error_message="Registro de availability não existe",
+                                skipped=True
+                            )
+                            detailed_results.append(item_result)
+                            result.total_operations_executed += 1
+                            result.skipped_operations += 1
+                        continue
+                    
+                    for operation in request.operations:
+                        try:
+                            item_result = self._execute_single_real_operation(
+                                operation, room, target_date, availability_record, 
+                                request, tenant_id
+                            )
+                            
+                            # Garantir serialização segura do resultado
+                            item_result = self._ensure_item_result_serializable(item_result)
+                            detailed_results.append(item_result)
+                            
+                            result.total_operations_executed += 1
+                            
+                            if item_result.success:
+                                result.successful_operations += 1
+                                if item_result.created_record:
+                                    result.records_created += 1
+                                else:
+                                    result.records_updated += 1
+                            elif item_result.skipped:
+                                result.skipped_operations += 1
+                            else:
+                                result.failed_operations += 1
+                                
+                        except Exception as e:
+                            error_msg = safe_str(e)
+                            logger.error(f"Erro na operação real: {error_msg}")
+                            result.failed_operations += 1
+                            result.processing_errors.append(error_msg)
+            
+            # Commit todas as alterações
+            self.db.commit()
+            
+            # Atualizar contadores finais
+            result.detailed_results = detailed_results
+            
+            # Agrupar resultados por target para estatísticas
+            result.results_by_target = self._group_results_by_target(detailed_results)
+            
+            # Trigger sync se solicitado
+            if request.sync_immediately and result.successful_operations > 0:
+                try:
+                    sync_result = self._trigger_sync_after_bulk_edit(
+                        target_rooms, target_dates, tenant_id
+                    )
+                    result.sync_triggered = True
+                    result.sync_job_id = sync_result.get('job_id')
+                except Exception as e:
+                    logger.warning(f"Erro ao disparar sync: {safe_str(e)}")
+                    result.processing_errors.append(f"Sync falhou: {safe_str(e)}")
+            
+        except Exception as e:
+            self.db.rollback()
+            error_msg = safe_str(e)
+            logger.error(f"Erro geral na execução real: {error_msg}")
+            result.processing_errors.append(f"Erro na execução: {error_msg}")
+        
+        return result
+
+    def _execute_single_real_operation(
+        self,
+        operation: BulkEditOperation,
+        room: Room,
+        target_date: date,
+        availability_record: Optional[RoomAvailability],
+        request: BulkEditRequest,
+        tenant_id: int
+    ) -> BulkEditItemResult:
+        """Executa uma operação individual real no banco"""
+        
+        try:
+            created_record = False
+            
+            # Criar registro se necessário
+            if not availability_record:
+                if not request.create_missing_records:
+                    return BulkEditItemResult(
+                        room_id=room.id,
+                        date=target_date,
+                        target=operation.target,
+                        operation=operation.operation,
+                        success=False,
+                        error_message="Registro de availability não existe",
+                        skipped=True
+                    )
+                
+                availability_record = self._create_new_availability_record(
+                    room, target_date, tenant_id
+                )
+                created_record = True
+            
+            # Obter valor atual
+            old_value = self._get_current_value(availability_record, operation.target)
+            
+            # Calcular novo valor
+            new_value = self._calculate_new_value(old_value, operation)
+            
+            # Aplicar a mudança
+            self._apply_value_to_record(availability_record, operation.target, new_value)
+            
+            # Marcar para sincronização se necessário
+            if request.sync_immediately:
+                availability_record.sync_pending = True
+            
+            # Adicionar motivo se fornecido
+            if request.reason:
+                availability_record.reason = request.reason
+            
+            # Atualizar timestamps
+            availability_record.updated_at = datetime.utcnow()
+            
+            return BulkEditItemResult(
+                room_id=room.id,
+                date=target_date,
+                target=operation.target,
+                operation=operation.operation,
+                success=True,
+                old_value=ensure_json_serializable(old_value),
+                new_value=ensure_json_serializable(new_value),
+                created_record=created_record
+            )
+            
+        except Exception as e:
+            return BulkEditItemResult(
+                room_id=room.id,
+                date=target_date,
+                target=operation.target,
+                operation=operation.operation,
+                success=False,
+                error_message=safe_str(e)
+            )
+
+    def _get_or_create_availability_record(
+        self,
+        room: Room,
+        target_date: date,
+        tenant_id: int,
+        create_if_missing: bool = True
+    ) -> Optional[RoomAvailability]:
+        """Obtém ou cria um registro de availability"""
+        
+        # Tentar buscar registro existente
+        existing = self.db.query(RoomAvailability).filter(
+            RoomAvailability.room_id == room.id,
+            RoomAvailability.date == target_date,
+            RoomAvailability.tenant_id == tenant_id,
+            RoomAvailability.is_active == True
+        ).first()
+        
+        if existing:
+            return existing
+        
+        if not create_if_missing:
+            return None
+        
+        # Criar novo registro
+        return self._create_new_availability_record(room, target_date, tenant_id)
+
+    def _create_new_availability_record(
+        self,
+        room: Room,
+        target_date: date,
+        tenant_id: int
+    ) -> RoomAvailability:
+        """Cria um novo registro de availability com valores padrão"""
+        
+        new_record = RoomAvailability(
+            room_id=room.id,
+            date=target_date,
+            tenant_id=tenant_id,
+            is_available=True,
+            is_blocked=False,
+            rate_override=None,
+            min_stay=1,
+            max_stay=30,
+            closed_to_arrival=False,
+            closed_to_departure=False,
+            sync_pending=False,
+            reason=None,
+            is_active=True,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        
+        self.db.add(new_record)
+        self.db.flush()  # Para obter o ID sem commit
+        
+        return new_record
+
+    def _apply_value_to_record(
+        self,
+        record: RoomAvailability,
+        target: BulkEditTarget,
+        value: Any
+    ) -> None:
+        """Aplica um valor a um campo específico do registro"""
+        
+        if target == BulkEditTarget.PRICE:
+            record.rate_override = value
+        elif target == BulkEditTarget.AVAILABILITY:
+            record.is_available = bool(value)
+        elif target == BulkEditTarget.BLOCKED:
+            record.is_blocked = bool(value)
+        elif target == BulkEditTarget.MIN_STAY:
+            record.min_stay = int(value) if value is not None else None
+        elif target == BulkEditTarget.MAX_STAY:
+            record.max_stay = int(value) if value is not None else None
+        elif target == BulkEditTarget.CLOSED_TO_ARRIVAL:
+            record.closed_to_arrival = bool(value)
+        elif target == BulkEditTarget.CLOSED_TO_DEPARTURE:
+            record.closed_to_departure = bool(value)
+        elif target == BulkEditTarget.STOP_SELL:
+            # Stop sell = não disponível E bloqueado
+            if bool(value):
+                record.is_available = False
+                record.is_blocked = True
+            else:
+                record.is_available = True
+                record.is_blocked = False
+        else:
+            raise ValueError(f"Target não suportado: {target}")
+
+    def _group_results_by_target(self, detailed_results: List[BulkEditItemResult]) -> Dict[str, Dict[str, int]]:
+        """Agrupa resultados por target para estatísticas"""
+        
+        grouped = {}
+        
+        for result in detailed_results:
+            target_key = result.target.value
+            
+            if target_key not in grouped:
+                grouped[target_key] = {
+                    "total": 0,
+                    "successful": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                    "created": 0,
+                    "updated": 0
+                }
+            
+            grouped[target_key]["total"] += 1
+            
+            if result.success:
+                grouped[target_key]["successful"] += 1
+                if result.created_record:
+                    grouped[target_key]["created"] += 1
+                else:
+                    grouped[target_key]["updated"] += 1
+            elif result.skipped:
+                grouped[target_key]["skipped"] += 1
+            else:
+                grouped[target_key]["failed"] += 1
+        
+        return grouped
+
+    def _trigger_sync_after_bulk_edit(
+        self,
+        target_rooms: List[Room],
+        target_dates: List[date],
+        tenant_id: int
+    ) -> Dict[str, Any]:
+        """Dispara sincronização após bulk edit"""
+        
+        try:
+            # Aqui você pode implementar a lógica de sincronização específica
+            # Por exemplo, chamar o serviço de sincronização WuBook
+            
+            room_ids = [room.id for room in target_rooms]
+            date_from = min(target_dates)
+            date_to = max(target_dates)
+            
+            # Placeholder - implementar conforme sua lógica de sync
+            logger.info(f"Sync triggered para quartos {room_ids} no período {date_from} a {date_to}")
+            
+            return {
+                "job_id": f"sync_bulk_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+                "status": "triggered",
+                "room_count": len(room_ids),
+                "date_range": f"{date_from} to {date_to}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Erro ao disparar sync: {safe_str(e)}")
+            raise
+    
     # ============== OPERAÇÕES INDIVIDUAIS ==============
     
     def _simulate_single_operation(
