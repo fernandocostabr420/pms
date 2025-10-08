@@ -8,6 +8,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import logging
 import uuid
 import math
+import json
 
 from app.models.user import User
 from app.models.room import Room
@@ -29,6 +30,53 @@ from app.utils.decorators import AuditContext
 logger = logging.getLogger(__name__)
 
 
+def safe_str(value: Any) -> str:
+    """Converte qualquer valor para string de forma segura"""
+    if value is None:
+        return "None"
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Exception):
+        return f"{type(value).__name__}: {str(value)}"
+    try:
+        return str(value)
+    except Exception:
+        return f"Erro na conversão para string: {type(value).__name__}"
+
+
+def ensure_json_serializable(obj: Any) -> Any:
+    """Garante que um objeto seja serializável em JSON"""
+    if obj is None:
+        return None
+    
+    # Tipos básicos que são JSON serializáveis
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+    
+    # Listas
+    if isinstance(obj, (list, tuple)):
+        return [ensure_json_serializable(item) for item in obj]
+    
+    # Dicionários
+    if isinstance(obj, dict):
+        return {safe_str(k): ensure_json_serializable(v) for k, v in obj.items()}
+    
+    # Decimais
+    if isinstance(obj, Decimal):
+        return float(obj)
+    
+    # Datas
+    if isinstance(obj, (date, datetime)):
+        return obj.isoformat()
+    
+    # Exceções e outros objetos
+    if isinstance(obj, Exception):
+        return f"{type(obj).__name__}: {str(obj)}"
+    
+    # Fallback para string
+    return safe_str(obj)
+
+
 class BulkEditService:
     """Serviço para operações de edição em massa no Channel Manager"""
     
@@ -47,16 +95,7 @@ class BulkEditService:
         request_obj: Optional[Any] = None
     ) -> BulkEditResult:
         """
-        Executa operação de bulk edit
-        
-        Args:
-            request: Dados da operação
-            tenant_id: ID do tenant
-            user: Usuário executando a operação
-            request_obj: Request HTTP para auditoria
-            
-        Returns:
-            BulkEditResult com resultados detalhados
+        Executa operação de bulk edit com tratamento robusto de erros
         """
         operation_id = f"bulk_edit_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{user.id}"
         started_at = datetime.utcnow()
@@ -66,15 +105,15 @@ class BulkEditService:
                    f"Operações: {len(request.operations)}")
         
         try:
-            # 1. Validação prévia
-            validation_result = self._validate_bulk_request(request, tenant_id)
-            if not validation_result.is_valid:
+            # ✅ 1. Validação completa da requisição (movida do schema para aqui)
+            validation_errors = self._validate_complete_request(request, tenant_id)
+            if validation_errors:
                 return self._create_error_result(
                     operation_id, tenant_id, user.id, started_at,
-                    validation_result.validation_errors, request
+                    validation_errors, request
                 )
             
-            # 2. Obter quartos no escopo
+            # ✅ 2. Obter quartos no escopo
             target_rooms = self._get_target_rooms(request, tenant_id)
             if not target_rooms:
                 return self._create_error_result(
@@ -82,10 +121,10 @@ class BulkEditService:
                     ["Nenhum quarto encontrado no escopo especificado"], request
                 )
             
-            # 3. Obter datas no período (com filtro de dias da semana)
+            # ✅ 3. Obter datas no período
             target_dates = self._get_target_dates(request)
             
-            # 4. Inicializar resultado
+            # ✅ 4. Inicializar resultado
             result = BulkEditResult(
                 operation_id=operation_id,
                 tenant_id=tenant_id,
@@ -96,13 +135,13 @@ class BulkEditService:
                 failed_operations=0,
                 skipped_operations=0,
                 started_at=started_at,
-                completed_at=started_at,  # Será atualizado
+                completed_at=started_at,
                 duration_seconds=0.0,
                 dry_run=request.dry_run,
                 request_summary=self._create_request_summary(request)
             )
             
-            # 5. Executar operações (com ou sem transação)
+            # ✅ 5. Executar operações
             if request.dry_run:
                 result = self._execute_dry_run(request, target_rooms, target_dates, result, tenant_id)
             else:
@@ -110,10 +149,13 @@ class BulkEditService:
                     request, target_rooms, target_dates, result, tenant_id, user, request_obj
                 )
             
-            # 6. Finalizar resultado
+            # ✅ 6. Finalizar resultado
             completed_at = datetime.utcnow()
             result.completed_at = completed_at
             result.duration_seconds = (completed_at - started_at).total_seconds()
+            
+            # ✅ 7. Garantir serialização segura
+            result = self._ensure_result_serializable(result)
             
             logger.info(f"Bulk edit {operation_id} concluído - "
                        f"Sucesso: {result.successful_operations}, "
@@ -123,127 +165,132 @@ class BulkEditService:
             return result
             
         except Exception as e:
-            logger.error(f"Erro em bulk edit {operation_id}: {str(e)}")
+            # ✅ Tratamento robusto de exceções
+            logger.error(f"Erro em bulk edit {operation_id}: {safe_str(e)}", exc_info=True)
             return self._create_error_result(
                 operation_id, tenant_id, user.id, started_at,
-                [f"Erro interno: {str(e)}"], request
+                [f"Erro interno: {safe_str(e)}"], request
             )
     
-    def _execute_real_operations(
-        self,
-        request: BulkEditRequest,
-        target_rooms: List[Room],
-        target_dates: List[date],
-        result: BulkEditResult,
-        tenant_id: int,
-        user: User,
-        request_obj: Optional[Any] = None
-    ) -> BulkEditResult:
-        """Executa operações reais com transação"""
+    # ============== VALIDAÇÕES COMPLETAS ==============
+    
+    def _validate_complete_request(self, request: BulkEditRequest, tenant_id: int) -> List[str]:
+        """
+        Valida completamente a requisição (movido dos schemas para aqui)
+        """
+        errors = []
         
         try:
-            with AuditContext(self.db, user, request_obj) as audit:
-                # Processar por batches para evitar problemas de memória
-                batch_size = 100
-                total_combinations = len(target_rooms) * len(target_dates) * len(request.operations)
+            # Validar room_ids únicos
+            if request.room_ids and len(request.room_ids) != len(set(request.room_ids)):
+                errors.append("IDs de quartos devem ser únicos")
+            
+            # Validar days_of_week
+            if request.days_of_week:
+                for day in request.days_of_week:
+                    if not (0 <= day <= 6):
+                        errors.append("Dias da semana devem estar entre 0 (Domingo) e 6 (Sábado)")
+                        break
+                if len(request.days_of_week) != len(set(request.days_of_week)):
+                    errors.append("Dias da semana devem ser únicos")
+            
+            # Validar período de datas
+            if request.date_to <= request.date_from:
+                errors.append("date_to deve ser posterior a date_from")
+            
+            days_diff = (request.date_to - request.date_from).days
+            if days_diff > 366:
+                errors.append("Período não pode exceder 366 dias")
+            
+            # Validar escopo
+            if request.scope == BulkEditScope.ROOM_TYPE and not request.room_type_id:
+                errors.append("room_type_id é obrigatório para escopo room_type")
+            
+            if request.scope == BulkEditScope.SPECIFIC_ROOMS and not request.room_ids:
+                errors.append("room_ids é obrigatório para escopo specific_rooms")
+            
+            # Validar operações
+            operation_errors = self._validate_operations(request.operations)
+            errors.extend(operation_errors)
+            
+            # Validar propriedade
+            property_obj = self.db.query(Property).filter(
+                Property.id == request.property_id,
+                Property.tenant_id == tenant_id,
+                Property.is_active == True
+            ).first()
+            
+            if not property_obj:
+                errors.append("Propriedade não encontrada")
+            
+            # Validar room_type se especificado
+            if request.room_type_id:
+                room_type = self.db.query(RoomType).filter(
+                    RoomType.id == request.room_type_id,
+                    RoomType.tenant_id == tenant_id,
+                    RoomType.is_active == True
+                ).first()
                 
-                processed = 0
-                
-                for room in target_rooms:
-                    for target_date in target_dates:
-                        # Obter ou criar registro de availability
-                        availability_record = self._get_or_create_availability_record(
-                            room, target_date, tenant_id, request.create_missing_records
-                        )
-                        
-                        if not availability_record and not request.create_missing_records:
-                            result.skipped_operations += len(request.operations)
-                            continue
-                        
-                        # Executar cada operação
-                        for operation in request.operations:
-                            try:
-                                item_result = self._execute_single_operation(
-                                    operation, room, target_date, availability_record, 
-                                    request, tenant_id
-                                )
-                                
-                                result.total_operations_executed += 1
-                                
-                                if item_result.success:
-                                    result.successful_operations += 1
-                                    if item_result.created_record:
-                                        result.records_created += 1
-                                    else:
-                                        result.records_updated += 1
-                                else:
-                                    result.failed_operations += 1
-                                    if item_result.error_message:
-                                        result.processing_errors.append(
-                                            f"Room {room.room_number}, {target_date}, "
-                                            f"{operation.target}: {item_result.error_message}"
-                                        )
-                                
-                                # Atualizar breakdown por target
-                                target_key = operation.target.value
-                                if target_key not in result.results_by_target:
-                                    result.results_by_target[target_key] = {
-                                        "success": 0, "failed": 0, "skipped": 0
-                                    }
-                                
-                                if item_result.success:
-                                    result.results_by_target[target_key]["success"] += 1
-                                elif item_result.skipped:
-                                    result.results_by_target[target_key]["skipped"] += 1
-                                else:
-                                    result.results_by_target[target_key]["failed"] += 1
-                                
-                                processed += 1
-                                
-                                # Commit em batches
-                                if processed % batch_size == 0:
-                                    self.db.commit()
-                                    logger.debug(f"Batch commit: {processed}/{total_combinations}")
-                                
-                            except Exception as e:
-                                logger.error(f"Erro ao processar operação {operation.target} "
-                                           f"para room {room.id}, date {target_date}: {str(e)}")
-                                result.failed_operations += 1
-                                result.processing_errors.append(
-                                    f"Room {room.room_number}, {target_date}, "
-                                    f"{operation.target}: {str(e)}"
-                                )
-                
-                # Commit final
-                self.db.commit()
-                
-                # Marcar para sincronização se solicitado
-                if request.sync_immediately and result.successful_operations > 0:
-                    self._mark_for_sync(target_rooms, target_dates, tenant_id)
-                    result.sync_triggered = True
-                
-                # Log de auditoria
-                audit.log_bulk_operation(
-                    "bulk_edit",
-                    result.operation_id,
-                    {
-                        "scope": request.scope,
-                        "operations": len(request.operations),
-                        "rooms_affected": len(target_rooms),
-                        "dates_affected": len(target_dates),
-                        "successful_operations": result.successful_operations,
-                        "failed_operations": result.failed_operations
-                    },
-                    request.reason or f"Bulk edit: {', '.join([op.target.value for op in request.operations])}"
-                )
+                if not room_type:
+                    errors.append("Tipo de quarto não encontrado")
             
         except Exception as e:
-            self.db.rollback()
-            logger.error(f"Erro na execução de operações reais: {str(e)}")
-            result.processing_errors.append(f"Erro na transação: {str(e)}")
-            result.failed_operations += (result.total_items_targeted - result.total_operations_executed)
+            logger.error(f"Erro durante validação: {safe_str(e)}")
+            errors.append(f"Erro na validação: {safe_str(e)}")
         
-        return result
+        return errors
+    
+    def _validate_operations(self, operations: List[BulkEditOperation]) -> List[str]:
+        """Valida operações"""
+        errors = []
+        
+        for i, operation in enumerate(operations):
+            try:
+                # Validar se operações que requerem valor têm valor
+                if operation.operation in [
+                    BulkEditOperationType.SET_VALUE,
+                    BulkEditOperationType.INCREASE_AMOUNT,
+                    BulkEditOperationType.DECREASE_AMOUNT,
+                    BulkEditOperationType.INCREASE_PERCENT,
+                    BulkEditOperationType.DECREASE_PERCENT
+                ]:
+                    if operation.value is None:
+                        errors.append(f"Operação {i+1}: {operation.operation} requer um valor")
+                        continue
+                
+                # Validar tipos por target
+                if operation.target == BulkEditTarget.PRICE:
+                    if operation.operation == BulkEditOperationType.SET_VALUE and operation.value is not None:
+                        try:
+                            float(operation.value)
+                        except (ValueError, TypeError):
+                            errors.append(f"Operação {i+1}: Preço deve ser numérico")
+                
+                elif operation.target in [BulkEditTarget.MIN_STAY, BulkEditTarget.MAX_STAY]:
+                    if operation.operation == BulkEditOperationType.SET_VALUE and operation.value is not None:
+                        try:
+                            val = int(operation.value)
+                            if val < 1 or val > 30:
+                                errors.append(f"Operação {i+1}: Min/Max stay deve estar entre 1 e 30")
+                        except (ValueError, TypeError):
+                            errors.append(f"Operação {i+1}: Min/Max stay deve ser um número inteiro")
+                
+                elif operation.target in [
+                    BulkEditTarget.AVAILABILITY,
+                    BulkEditTarget.BLOCKED,
+                    BulkEditTarget.CLOSED_TO_ARRIVAL,
+                    BulkEditTarget.CLOSED_TO_DEPARTURE
+                ]:
+                    if operation.operation == BulkEditOperationType.SET_VALUE and operation.value is not None:
+                        if not isinstance(operation.value, bool):
+                            errors.append(f"Operação {i+1}: {operation.target} deve ser true/false")
+                
+            except Exception as e:
+                errors.append(f"Operação {i+1}: Erro na validação - {safe_str(e)}")
+        
+        return errors
+    
+    # ============== EXECUÇÃO DRY RUN ==============
     
     def _execute_dry_run(
         self,
@@ -257,112 +304,47 @@ class BulkEditService:
         
         detailed_results = []
         
-        for room in target_rooms:
-            for target_date in target_dates:
-                # Obter registro existente (sem criar)
-                availability_record = self._get_availability_record(room, target_date, tenant_id)
-                
-                for operation in request.operations:
-                    # Simular operação
-                    item_result = self._simulate_single_operation(
-                        operation, room, target_date, availability_record, request
-                    )
+        try:
+            for room in target_rooms:
+                for target_date in target_dates:
+                    # Obter registro existente
+                    availability_record = self._get_availability_record(room, target_date, tenant_id)
                     
-                    detailed_results.append(item_result)
-                    result.total_operations_executed += 1
-                    
-                    if item_result.success:
-                        result.successful_operations += 1
-                    elif item_result.skipped:
-                        result.skipped_operations += 1
-                    else:
-                        result.failed_operations += 1
+                    for operation in request.operations:
+                        try:
+                            item_result = self._simulate_single_operation(
+                                operation, room, target_date, availability_record, request
+                            )
+                            
+                            # Garantir serialização segura do resultado
+                            item_result = self._ensure_item_result_serializable(item_result)
+                            detailed_results.append(item_result)
+                            
+                            result.total_operations_executed += 1
+                            
+                            if item_result.success:
+                                result.successful_operations += 1
+                            elif item_result.skipped:
+                                result.skipped_operations += 1
+                            else:
+                                result.failed_operations += 1
+                                
+                        except Exception as e:
+                            error_msg = safe_str(e)
+                            logger.error(f"Erro na simulação: {error_msg}")
+                            result.failed_operations += 1
+                            result.processing_errors.append(error_msg)
+            
+            result.detailed_results = detailed_results
+            
+        except Exception as e:
+            error_msg = safe_str(e)
+            logger.error(f"Erro geral no dry-run: {error_msg}")
+            result.processing_errors.append(f"Erro no dry-run: {error_msg}")
         
-        result.detailed_results = detailed_results
         return result
     
     # ============== OPERAÇÕES INDIVIDUAIS ==============
-    
-    def _execute_single_operation(
-        self,
-        operation: BulkEditOperation,
-        room: Room,
-        target_date: date,
-        availability_record: Optional[RoomAvailability],
-        request: BulkEditRequest,
-        tenant_id: int
-    ) -> BulkEditItemResult:
-        """Executa uma operação individual"""
-        
-        try:
-            if not availability_record:
-                return BulkEditItemResult(
-                    room_id=room.id,
-                    date=target_date,
-                    target=operation.target,
-                    operation=operation.operation,
-                    success=False,
-                    error_message="Registro de availability não encontrado e criação não permitida",
-                    skipped=True
-                )
-            
-            # Obter valor atual
-            old_value = self._get_current_value(availability_record, operation.target)
-            
-            # Calcular novo valor
-            new_value = self._calculate_new_value(old_value, operation)
-            
-            if new_value is None and not operation.operation == BulkEditOperationType.CLEAR:
-                return BulkEditItemResult(
-                    room_id=room.id,
-                    date=target_date,
-                    target=operation.target,
-                    operation=operation.operation,
-                    success=False,
-                    old_value=old_value,
-                    error_message="Não foi possível calcular novo valor"
-                )
-            
-            # Verificar se precisa atualizar
-            if not request.overwrite_existing and old_value == new_value:
-                return BulkEditItemResult(
-                    room_id=room.id,
-                    date=target_date,
-                    target=operation.target,
-                    operation=operation.operation,
-                    success=True,
-                    old_value=old_value,
-                    new_value=new_value,
-                    skipped=True
-                )
-            
-            # Aplicar novo valor
-            self._apply_new_value(availability_record, operation.target, new_value)
-            
-            # Marcar para sincronização
-            availability_record.sync_pending = request.sync_immediately
-            availability_record.reason = request.reason
-            
-            return BulkEditItemResult(
-                room_id=room.id,
-                date=target_date,
-                target=operation.target,
-                operation=operation.operation,
-                success=True,
-                old_value=old_value,
-                new_value=new_value,
-                created_record=availability_record.id is None
-            )
-            
-        except Exception as e:
-            return BulkEditItemResult(
-                room_id=room.id,
-                date=target_date,
-                target=operation.target,
-                operation=operation.operation,
-                success=False,
-                error_message=str(e)
-            )
     
     def _simulate_single_operation(
         self,
@@ -386,8 +368,11 @@ class BulkEditService:
                     skipped=True
                 )
             
-            # Obter valor atual (ou padrão se não existe)
-            old_value = self._get_current_value(availability_record, operation.target) if availability_record else self._get_default_value(operation.target)
+            # Obter valor atual ou padrão
+            if availability_record:
+                old_value = self._get_current_value(availability_record, operation.target)
+            else:
+                old_value = self._get_default_value(operation.target)
             
             # Calcular novo valor
             new_value = self._calculate_new_value(old_value, operation)
@@ -398,8 +383,8 @@ class BulkEditService:
                 target=operation.target,
                 operation=operation.operation,
                 success=True,
-                old_value=old_value,
-                new_value=new_value,
+                old_value=ensure_json_serializable(old_value),
+                new_value=ensure_json_serializable(new_value),
                 created_record=availability_record is None
             )
             
@@ -410,31 +395,34 @@ class BulkEditService:
                 target=operation.target,
                 operation=operation.operation,
                 success=False,
-                error_message=str(e)
+                error_message=safe_str(e)
             )
     
     # ============== VALUE OPERATIONS ==============
     
     def _get_current_value(self, record: RoomAvailability, target: BulkEditTarget) -> Any:
         """Obtém valor atual do campo"""
-        if target == BulkEditTarget.PRICE:
-            return record.rate_override
-        elif target == BulkEditTarget.AVAILABILITY:
-            return record.is_available
-        elif target == BulkEditTarget.BLOCKED:
-            return record.is_blocked
-        elif target == BulkEditTarget.MIN_STAY:
-            return record.min_stay
-        elif target == BulkEditTarget.MAX_STAY:
-            return record.max_stay
-        elif target == BulkEditTarget.CLOSED_TO_ARRIVAL:
-            return record.closed_to_arrival
-        elif target == BulkEditTarget.CLOSED_TO_DEPARTURE:
-            return record.closed_to_departure
-        elif target == BulkEditTarget.STOP_SELL:
-            # Stop sell = is_available=False AND is_blocked=True
-            return not record.is_available and record.is_blocked
-        else:
+        try:
+            if target == BulkEditTarget.PRICE:
+                return record.rate_override
+            elif target == BulkEditTarget.AVAILABILITY:
+                return record.is_available
+            elif target == BulkEditTarget.BLOCKED:
+                return record.is_blocked
+            elif target == BulkEditTarget.MIN_STAY:
+                return record.min_stay
+            elif target == BulkEditTarget.MAX_STAY:
+                return record.max_stay
+            elif target == BulkEditTarget.CLOSED_TO_ARRIVAL:
+                return record.closed_to_arrival
+            elif target == BulkEditTarget.CLOSED_TO_DEPARTURE:
+                return record.closed_to_departure
+            elif target == BulkEditTarget.STOP_SELL:
+                return not record.is_available and record.is_blocked
+            else:
+                return None
+        except Exception as e:
+            logger.warning(f"Erro ao obter valor atual para {target}: {safe_str(e)}")
             return None
     
     def _get_default_value(self, target: BulkEditTarget) -> Any:
@@ -454,29 +442,28 @@ class BulkEditService:
     def _calculate_new_value(self, current_value: Any, operation: BulkEditOperation) -> Any:
         """Calcula novo valor baseado na operação"""
         
-        if operation.operation == BulkEditOperationType.CLEAR:
-            return None
-        
-        if operation.operation == BulkEditOperationType.SET_VALUE:
-            return operation.value
-        
-        if operation.operation == BulkEditOperationType.TOGGLE:
-            if isinstance(current_value, bool):
-                return not current_value
-            else:
-                raise ValueError("Toggle só funciona com valores boolean")
-        
-        # Operações numéricas
-        if current_value is None:
-            if operation.target in [BulkEditTarget.MIN_STAY, BulkEditTarget.MAX_STAY]:
-                current_value = self._get_default_value(operation.target)
-            elif operation.target == BulkEditTarget.PRICE:
-                # Não pode fazer operações matemáticas em preço None
-                return operation.value if operation.operation == BulkEditOperationType.SET_VALUE else None
-            else:
-                current_value = 0
-        
         try:
+            if operation.operation == BulkEditOperationType.CLEAR:
+                return None
+            
+            if operation.operation == BulkEditOperationType.SET_VALUE:
+                return operation.value
+            
+            if operation.operation == BulkEditOperationType.TOGGLE:
+                if isinstance(current_value, bool):
+                    return not current_value
+                else:
+                    raise ValueError("Toggle só funciona com valores boolean")
+            
+            # Operações numéricas
+            if current_value is None:
+                if operation.target in [BulkEditTarget.MIN_STAY, BulkEditTarget.MAX_STAY]:
+                    current_value = self._get_default_value(operation.target)
+                elif operation.target == BulkEditTarget.PRICE:
+                    return operation.value if operation.operation == BulkEditOperationType.SET_VALUE else None
+                else:
+                    current_value = 0
+            
             current_num = Decimal(str(current_value))
             operation_value = Decimal(str(operation.value))
             
@@ -491,164 +478,71 @@ class BulkEditService:
             else:
                 raise ValueError(f"Operação não suportada: {operation.operation}")
             
-            # Garantir valores não negativos para certos campos
+            # Garantir valores não negativos
             if operation.target in [BulkEditTarget.PRICE, BulkEditTarget.MIN_STAY, BulkEditTarget.MAX_STAY]:
                 result = max(result, Decimal('0'))
             
-            # Arredondar preços para 2 decimais
+            # Arredondar preços
             if operation.target == BulkEditTarget.PRICE:
                 result = result.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             
-            # Converter para int se necessário
+            # Converter para tipo correto
             if operation.target in [BulkEditTarget.MIN_STAY, BulkEditTarget.MAX_STAY]:
-                result = int(result)
+                return int(result)
             else:
-                result = float(result)
-            
-            return result
-            
-        except (ValueError, TypeError, ArithmeticError) as e:
-            raise ValueError(f"Erro no cálculo: {str(e)}")
-    
-    def _apply_new_value(self, record: RoomAvailability, target: BulkEditTarget, value: Any):
-        """Aplica novo valor ao registro"""
-        if target == BulkEditTarget.PRICE:
-            record.rate_override = value
-        elif target == BulkEditTarget.AVAILABILITY:
-            record.is_available = value
-        elif target == BulkEditTarget.BLOCKED:
-            record.is_blocked = value
-        elif target == BulkEditTarget.MIN_STAY:
-            record.min_stay = value
-        elif target == BulkEditTarget.MAX_STAY:
-            record.max_stay = value
-        elif target == BulkEditTarget.CLOSED_TO_ARRIVAL:
-            record.closed_to_arrival = value
-        elif target == BulkEditTarget.CLOSED_TO_DEPARTURE:
-            record.closed_to_departure = value
-        elif target == BulkEditTarget.STOP_SELL:
-            if value:  # Ativar stop sell
-                record.is_available = False
-                record.is_blocked = True
-            else:  # Desativar stop sell
-                record.is_available = True
-                record.is_blocked = False
+                return float(result)
+                
+        except Exception as e:
+            raise ValueError(f"Erro no cálculo: {safe_str(e)}")
     
     # ============== HELPER METHODS ==============
     
-    def _validate_bulk_request(self, request: BulkEditRequest, tenant_id: int) -> BulkEditValidationResult:
-        """Valida requisição de bulk edit"""
-        errors = []
-        warnings = []
-        
-        # Validar propriedade existe
-        property_obj = self.db.query(Property).filter(
-            Property.id == request.property_id,
-            Property.tenant_id == tenant_id,
-            Property.is_active == True
-        ).first()
-        
-        if not property_obj:
-            errors.append("Propriedade não encontrada")
-        
-        # Validar room_type se especificado
-        if request.room_type_id:
-            room_type = self.db.query(RoomType).filter(
-                RoomType.id == request.room_type_id,
-                RoomType.tenant_id == tenant_id,
-                RoomType.is_active == True
-            ).first()
-            
-            if not room_type:
-                errors.append("Tipo de quarto não encontrado")
-        
-        # Validar se há quartos no escopo
-        target_rooms = self._get_target_rooms(request, tenant_id)
-        if not target_rooms:
-            errors.append("Nenhum quarto encontrado no escopo especificado")
-        
-        return BulkEditValidationResult(
-            is_valid=len(errors) == 0,
-            estimated_items_to_process=len(target_rooms) * len(self._get_target_dates(request)) * len(request.operations),
-            validation_errors=errors,
-            validation_warnings=warnings
-        )
-    
     def _get_target_rooms(self, request: BulkEditRequest, tenant_id: int) -> List[Room]:
         """Obtém quartos no escopo da operação"""
-        query = self.db.query(Room).filter(
-            Room.tenant_id == tenant_id,
-            Room.is_active == True,
-            Room.property_id == request.property_id
-        )
-        
-        if request.scope == BulkEditScope.ROOM_TYPE:
-            query = query.filter(Room.room_type_id == request.room_type_id)
-        elif request.scope == BulkEditScope.SPECIFIC_ROOMS:
-            query = query.filter(Room.id.in_(request.room_ids))
-        
-        return query.all()
+        try:
+            query = self.db.query(Room).filter(
+                Room.tenant_id == tenant_id,
+                Room.is_active == True,
+                Room.property_id == request.property_id
+            )
+            
+            if request.scope == BulkEditScope.ROOM_TYPE:
+                query = query.filter(Room.room_type_id == request.room_type_id)
+            elif request.scope == BulkEditScope.SPECIFIC_ROOMS:
+                query = query.filter(Room.id.in_(request.room_ids))
+            
+            return query.all()
+        except Exception as e:
+            logger.error(f"Erro ao buscar quartos: {safe_str(e)}")
+            return []
     
     def _get_target_dates(self, request: BulkEditRequest) -> List[date]:
-        """Obtém datas no período (com filtro de dias da semana)"""
+        """Obtém datas no período"""
         dates = []
-        current_date = request.date_from
-        
-        while current_date <= request.date_to:
-            # Filtrar por dias da semana se especificado
-            if request.days_of_week is None or current_date.weekday() in request.days_of_week:
-                dates.append(current_date)
-            current_date += timedelta(days=1)
+        try:
+            current_date = request.date_from
+            
+            while current_date <= request.date_to:
+                if request.days_of_week is None or current_date.weekday() in request.days_of_week:
+                    dates.append(current_date)
+                current_date += timedelta(days=1)
+        except Exception as e:
+            logger.error(f"Erro ao calcular datas: {safe_str(e)}")
         
         return dates
     
     def _get_availability_record(self, room: Room, target_date: date, tenant_id: int) -> Optional[RoomAvailability]:
         """Obtém registro de availability existente"""
-        return self.db.query(RoomAvailability).filter(
-            RoomAvailability.room_id == room.id,
-            RoomAvailability.date == target_date,
-            RoomAvailability.tenant_id == tenant_id,
-            RoomAvailability.is_active == True
-        ).first()
-    
-    def _get_or_create_availability_record(
-        self, room: Room, target_date: date, tenant_id: int, create_if_missing: bool
-    ) -> Optional[RoomAvailability]:
-        """Obtém ou cria registro de availability"""
-        
-        record = self._get_availability_record(room, target_date, tenant_id)
-        
-        if not record and create_if_missing:
-            record = RoomAvailability(
-                room_id=room.id,
-                date=target_date,
-                tenant_id=tenant_id,
-                is_available=True,
-                is_blocked=False,
-                is_out_of_order=False,
-                is_maintenance=False,
-                is_reserved=False,
-                min_stay=1,
-                closed_to_arrival=False,
-                closed_to_departure=False
-            )
-            self.db.add(record)
-            self.db.flush()  # Obter ID
-        
-        return record
-    
-    def _mark_for_sync(self, rooms: List[Room], dates: List[date], tenant_id: int):
-        """Marca registros para sincronização"""
-        room_ids = [room.id for room in rooms]
-        
-        self.db.query(RoomAvailability).filter(
-            RoomAvailability.room_id.in_(room_ids),
-            RoomAvailability.date.in_(dates),
-            RoomAvailability.tenant_id == tenant_id,
-            RoomAvailability.is_active == True
-        ).update({
-            RoomAvailability.sync_pending: True
-        }, synchronize_session=False)
+        try:
+            return self.db.query(RoomAvailability).filter(
+                RoomAvailability.room_id == room.id,
+                RoomAvailability.date == target_date,
+                RoomAvailability.tenant_id == tenant_id,
+                RoomAvailability.is_active == True
+            ).first()
+        except Exception as e:
+            logger.error(f"Erro ao buscar availability: {safe_str(e)}")
+            return None
     
     def _create_error_result(
         self, operation_id: str, tenant_id: int, user_id: int, 
@@ -656,6 +550,9 @@ class BulkEditService:
     ) -> BulkEditResult:
         """Cria resultado de erro"""
         completed_at = datetime.utcnow()
+        
+        # Garantir que todos os erros sejam strings seguras
+        safe_errors = [safe_str(error) for error in errors]
         
         return BulkEditResult(
             operation_id=operation_id,
@@ -666,7 +563,7 @@ class BulkEditService:
             successful_operations=0,
             failed_operations=0,
             skipped_operations=0,
-            validation_errors=errors,
+            validation_errors=safe_errors,
             started_at=started_at,
             completed_at=completed_at,
             duration_seconds=(completed_at - started_at).total_seconds(),
@@ -675,24 +572,95 @@ class BulkEditService:
         )
     
     def _create_request_summary(self, request: BulkEditRequest) -> Dict[str, Any]:
-        """Cria resumo da requisição"""
-        return {
-            "scope": request.scope.value,
-            "property_id": request.property_id,
-            "room_type_id": request.room_type_id,
-            "room_ids_count": len(request.room_ids) if request.room_ids else 0,
-            "date_from": str(request.date_from),
-            "date_to": str(request.date_to),
-            "days_of_week": request.days_of_week,
-            "operations": [
-                {
-                    "target": op.target.value,
-                    "operation": op.operation.value,
-                    "value": op.value
-                }
-                for op in request.operations
-            ],
-            "reason": request.reason,
-            "sync_immediately": request.sync_immediately,
-            "dry_run": request.dry_run
-        }
+        """Cria resumo da requisição garantindo serialização"""
+        try:
+            return {
+                "scope": safe_str(request.scope.value),
+                "property_id": request.property_id,
+                "room_type_id": request.room_type_id,
+                "room_ids_count": len(request.room_ids) if request.room_ids else 0,
+                "date_from": safe_str(request.date_from),
+                "date_to": safe_str(request.date_to),
+                "days_of_week": request.days_of_week,
+                "operations": [
+                    {
+                        "target": safe_str(op.target.value),
+                        "operation": safe_str(op.operation.value),
+                        "value": ensure_json_serializable(op.value)
+                    }
+                    for op in request.operations
+                ],
+                "reason": safe_str(request.reason) if request.reason else None,
+                "sync_immediately": bool(request.sync_immediately),
+                "dry_run": bool(request.dry_run)
+            }
+        except Exception as e:
+            logger.error(f"Erro ao criar resumo: {safe_str(e)}")
+            return {"error": f"Erro ao criar resumo: {safe_str(e)}"}
+    
+    def _ensure_result_serializable(self, result: BulkEditResult) -> BulkEditResult:
+        """Garante que o resultado seja serializável"""
+        try:
+            # Limpar processing_errors
+            if result.processing_errors:
+                result.processing_errors = [safe_str(error) for error in result.processing_errors]
+            
+            # Limpar validation_errors
+            if result.validation_errors:
+                result.validation_errors = [safe_str(error) for error in result.validation_errors]
+            
+            # Limpar detailed_results se necessário
+            if result.detailed_results:
+                result.detailed_results = [
+                    self._ensure_item_result_serializable(item) 
+                    for item in result.detailed_results
+                ]
+            
+            # Garantir que request_summary seja serializável
+            if result.request_summary:
+                result.request_summary = ensure_json_serializable(result.request_summary)
+            
+            return result
+        except Exception as e:
+            logger.error(f"Erro ao garantir serialização do resultado: {safe_str(e)}")
+            # Se tudo falhar, criar um resultado mínimo
+            return BulkEditResult(
+                operation_id=safe_str(result.operation_id),
+                tenant_id=result.tenant_id,
+                user_id=result.user_id,
+                total_items_targeted=0,
+                total_operations_executed=0,
+                successful_operations=0,
+                failed_operations=1,
+                skipped_operations=0,
+                started_at=result.started_at,
+                completed_at=datetime.utcnow(),
+                duration_seconds=0.0,
+                dry_run=result.dry_run,
+                processing_errors=[f"Erro na serialização: {safe_str(e)}"]
+            )
+    
+    def _ensure_item_result_serializable(self, item: BulkEditItemResult) -> BulkEditItemResult:
+        """Garante que um item resultado seja serializável"""
+        try:
+            if item.error_message:
+                item.error_message = safe_str(item.error_message)
+            
+            if item.old_value is not None:
+                item.old_value = ensure_json_serializable(item.old_value)
+            
+            if item.new_value is not None:
+                item.new_value = ensure_json_serializable(item.new_value)
+            
+            return item
+        except Exception as e:
+            logger.error(f"Erro ao garantir serialização do item: {safe_str(e)}")
+            # Criar um item resultado seguro
+            return BulkEditItemResult(
+                room_id=item.room_id,
+                date=item.date,
+                target=item.target,
+                operation=item.operation,
+                success=False,
+                error_message=f"Erro na serialização: {safe_str(e)}"
+            )

@@ -1,6 +1,6 @@
 # backend/app/schemas/bulk_edit.py
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Union
 from datetime import date, datetime
 from decimal import Decimal
@@ -46,48 +46,6 @@ class BulkEditOperation(BaseModel):
     target: BulkEditTarget = Field(..., description="Campo a ser editado")
     operation: BulkEditOperationType = Field(..., description="Tipo de operação")
     value: Optional[Union[str, int, float, bool]] = Field(None, description="Valor da operação")
-    
-    @model_validator(mode='after')
-    def validate_operation_value(self):
-        """Valida se o valor é compatível com a operação"""
-        if self.operation in [
-            BulkEditOperationType.SET_VALUE,
-            BulkEditOperationType.INCREASE_AMOUNT,
-            BulkEditOperationType.DECREASE_AMOUNT,
-            BulkEditOperationType.INCREASE_PERCENT,
-            BulkEditOperationType.DECREASE_PERCENT
-        ]:
-            if self.value is None:
-                raise ValueError(f"Operação {self.operation} requer um valor")
-        
-        # Validar tipos por target
-        if self.target == BulkEditTarget.PRICE:
-            if self.operation == BulkEditOperationType.SET_VALUE and self.value is not None:
-                try:
-                    float(self.value)
-                except (ValueError, TypeError):
-                    raise ValueError("Preço deve ser numérico")
-        
-        elif self.target in [BulkEditTarget.MIN_STAY, BulkEditTarget.MAX_STAY]:
-            if self.operation == BulkEditOperationType.SET_VALUE and self.value is not None:
-                try:
-                    val = int(self.value)
-                    if val < 1 or val > 30:
-                        raise ValueError("Min/Max stay deve estar entre 1 e 30")
-                except (ValueError, TypeError):
-                    raise ValueError("Min/Max stay deve ser um número inteiro")
-        
-        elif self.target in [
-            BulkEditTarget.AVAILABILITY,
-            BulkEditTarget.BLOCKED,
-            BulkEditTarget.CLOSED_TO_ARRIVAL,
-            BulkEditTarget.CLOSED_TO_DEPARTURE
-        ]:
-            if self.operation == BulkEditOperationType.SET_VALUE and self.value is not None:
-                if not isinstance(self.value, bool):
-                    raise ValueError(f"{self.target} deve ser true/false")
-        
-        return self
 
 
 class BulkEditRequest(BaseModel):
@@ -119,44 +77,8 @@ class BulkEditRequest(BaseModel):
     skip_validation_errors: bool = Field(False, description="Continuar mesmo com erros de validação")
     dry_run: bool = Field(False, description="Apenas simular, não aplicar mudanças")
     
-    @field_validator('room_ids')
-    @classmethod
-    def validate_room_ids_unique(cls, v):
-        """Garantir que room_ids são únicos"""
-        if v and len(v) != len(set(v)):
-            raise ValueError("IDs de quartos devem ser únicos")
-        return v
-    
-    @field_validator('days_of_week')
-    @classmethod
-    def validate_days_of_week(cls, v):
-        """Validar dias da semana"""
-        if v:
-            for day in v:
-                if day < 0 or day > 6:
-                    raise ValueError("Dias da semana devem estar entre 0 (Domingo) e 6 (Sábado)")
-            if len(v) != len(set(v)):
-                raise ValueError("Dias da semana devem ser únicos")
-        return v
-    
-    @model_validator(mode='after')
-    def validate_scope_requirements(self):
-        """Validar requisitos por escopo"""
-        if self.scope == BulkEditScope.ROOM_TYPE and not self.room_type_id:
-            raise ValueError("room_type_id é obrigatório para escopo room_type")
-        
-        if self.scope == BulkEditScope.SPECIFIC_ROOMS and not self.room_ids:
-            raise ValueError("room_ids é obrigatório para escopo specific_rooms")
-        
-        # Validar período
-        if self.date_to <= self.date_from:
-            raise ValueError("date_to deve ser posterior a date_from")
-        
-        days_diff = (self.date_to - self.date_from).days
-        if days_diff > 366:
-            raise ValueError("Período não pode exceder 366 dias")
-        
-        return self
+    # ✅ REMOVIDO: Todos os field_validators foram removidos
+    # As validações agora são feitas no service layer para evitar problemas de serialização
 
 
 # ============== RESPONSE SCHEMAS ==============
