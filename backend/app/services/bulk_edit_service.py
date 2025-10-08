@@ -25,6 +25,8 @@ from app.schemas.bulk_edit import (
 
 from app.services.room_availability_service import RoomAvailabilityService
 from app.services.restriction_service import RestrictionService
+# ✅ NOVO IMPORT PARA SINCRONIZAÇÃO MANUAL
+from app.services.manual_sync_service import ManualSyncService
 from app.utils.decorators import AuditContext
 
 logger = logging.getLogger(__name__)
@@ -149,18 +151,46 @@ class BulkEditService:
                     request, target_rooms, target_dates, result, tenant_id, user, request_obj
                 )
             
-            # ✅ 6. Finalizar resultado
+            # ✅ 6. Trigger de sincronização (se solicitado e operações bem-sucedidas)
+            sync_result = None
+            if self._should_trigger_sync(request) and result.successful_operations > 0:
+                try:
+                    logger.info("Disparando sincronização pós bulk edit...")
+                    sync_result = self._trigger_sync_after_bulk_edit(
+                        target_rooms, target_dates, tenant_id
+                    )
+                    logger.info(f"Sincronização trigger result: {sync_result.get('status', 'unknown')}")
+                    
+                    # Log detalhado do resultado
+                    self._log_sync_trigger_result(sync_result, operation_id)
+                    
+                    # Adicionar informações de sync ao resultado
+                    result.sync_triggered = sync_result.get("triggered", False)
+                    result.sync_result = sync_result
+                    
+                except Exception as e:
+                    logger.error(f"Erro no trigger de sincronização: {str(e)}")
+                    sync_result = {
+                        "triggered": False,
+                        "reason": "trigger_error",
+                        "message": f"Erro ao disparar: {str(e)}"
+                    }
+                    result.sync_triggered = False
+                    result.sync_result = sync_result
+            
+            # ✅ 7. Finalizar resultado
             completed_at = datetime.utcnow()
             result.completed_at = completed_at
             result.duration_seconds = (completed_at - started_at).total_seconds()
             
-            # ✅ 7. Garantir serialização segura
+            # ✅ 8. Garantir serialização segura
             result = self._ensure_result_serializable(result)
             
             logger.info(f"Bulk edit {operation_id} concluído - "
                        f"Sucesso: {result.successful_operations}, "
                        f"Falha: {result.failed_operations}, "
-                       f"Duração: {result.duration_seconds:.2f}s")
+                       f"Duração: {result.duration_seconds:.2f}s, "
+                       f"Sync: {result.sync_triggered}")
             
             return result
             
@@ -424,18 +454,6 @@ class BulkEditService:
             # Agrupar resultados por target para estatísticas
             result.results_by_target = self._group_results_by_target(detailed_results)
             
-            # Trigger sync se solicitado
-            if request.sync_immediately and result.successful_operations > 0:
-                try:
-                    sync_result = self._trigger_sync_after_bulk_edit(
-                        target_rooms, target_dates, tenant_id
-                    )
-                    result.sync_triggered = True
-                    result.sync_job_id = sync_result.get('job_id')
-                except Exception as e:
-                    logger.warning(f"Erro ao disparar sync: {safe_str(e)}")
-                    result.processing_errors.append(f"Sync falhou: {safe_str(e)}")
-            
         except Exception as e:
             self.db.rollback()
             error_msg = safe_str(e)
@@ -640,35 +658,193 @@ class BulkEditService:
         
         return grouped
 
+    # ============== NOVO: TRIGGER DE SINCRONIZAÇÃO MANUAL ==============
+    
+    def _should_trigger_sync(self, request: BulkEditRequest) -> bool:
+        """
+        Determina se deve disparar sincronização após bulk edit
+        
+        Args:
+            request: Requisição de bulk edit
+            
+        Returns:
+            True se deve disparar sincronização
+        """
+        # Não sincronizar em dry run
+        if request.dry_run:
+            return False
+        
+        # Sincronizar apenas se solicitado explicitamente
+        if not request.sync_immediately:
+            return False
+        
+        # Verificar se há operações que requerem sincronização
+        sync_operations = [
+            BulkEditOperationType.SET_VALUE,
+            BulkEditOperationType.INCREASE_AMOUNT,
+            BulkEditOperationType.DECREASE_AMOUNT,
+            BulkEditOperationType.INCREASE_PERCENT,
+            BulkEditOperationType.DECREASE_PERCENT,
+            BulkEditOperationType.TOGGLE,
+            BulkEditOperationType.CLEAR
+        ]
+        
+        sync_targets = [
+            BulkEditTarget.PRICE,
+            BulkEditTarget.AVAILABILITY,
+            BulkEditTarget.BLOCKED,
+            BulkEditTarget.MIN_STAY,
+            BulkEditTarget.MAX_STAY,
+            BulkEditTarget.CLOSED_TO_ARRIVAL,
+            BulkEditTarget.CLOSED_TO_DEPARTURE,
+            BulkEditTarget.STOP_SELL
+        ]
+        
+        has_sync_operations = any(
+            op.operation in sync_operations and op.target in sync_targets
+            for op in request.operations
+        )
+        
+        return has_sync_operations
+
     def _trigger_sync_after_bulk_edit(
         self,
         target_rooms: List[Room],
         target_dates: List[date],
         tenant_id: int
     ) -> Dict[str, Any]:
-        """Dispara sincronização após bulk edit"""
+        """
+        Dispara sincronização manual após bulk edit
+        
+        Args:
+            target_rooms: Lista de quartos afetados
+            target_dates: Lista de datas afetadas
+            tenant_id: ID do tenant
+            
+        Returns:
+            Dict com resultado da sincronização
+        """
         
         try:
-            # Aqui você pode implementar a lógica de sincronização específica
-            # Por exemplo, chamar o serviço de sincronização WuBook
+            logger.info(f"Iniciando sincronização pós bulk edit para {len(target_rooms)} quartos e {len(target_dates)} datas")
             
-            room_ids = [room.id for room in target_rooms]
-            date_from = min(target_dates)
-            date_to = max(target_dates)
+            # Criar serviço de sincronização manual
+            manual_sync_service = ManualSyncService(self.db)
             
-            # Placeholder - implementar conforme sua lógica de sync
-            logger.info(f"Sync triggered para quartos {room_ids} no período {date_from} a {date_to}")
+            # Verificar se há configuração WuBook ativa
+            sync_status = manual_sync_service.get_sync_status(tenant_id)
             
-            return {
-                "job_id": f"sync_bulk_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
-                "status": "triggered",
-                "room_count": len(room_ids),
-                "date_range": f"{date_from} to {date_to}"
-            }
+            if not sync_status.get("sync_available"):
+                logger.warning("Sincronização não disponível - nenhuma configuração WuBook ativa")
+                return {
+                    "triggered": False,
+                    "reason": "no_wubook_configuration",
+                    "message": "Nenhuma configuração WuBook ativa encontrada"
+                }
+            
+            # Verificar se há registros pendentes antes de disparar
+            pending_info = manual_sync_service.get_pending_count(tenant_id)
+            pending_count = pending_info.get("total_pending", 0)
+            
+            if pending_count == 0:
+                logger.info("Nenhum registro pendente para sincronizar")
+                return {
+                    "triggered": False,
+                    "reason": "no_pending_records",
+                    "message": "Nenhum registro pendente de sincronização"
+                }
+            
+            # Executar sincronização com configurações otimizadas para bulk edit
+            sync_result = manual_sync_service.process_manual_sync(
+                tenant_id=tenant_id,
+                property_id=None,  # Sincronizar todas as propriedades afetadas
+                force_all=False,   # Apenas registros pendentes
+                batch_size=200     # Batch maior para bulk edit
+            )
+            
+            # Analisar resultado
+            if sync_result.get("status") == "success":
+                logger.info(f"Sincronização pós bulk edit bem-sucedida: "
+                           f"{sync_result.get('successful', 0)}/{sync_result.get('processed', 0)} registros")
+                
+                return {
+                    "triggered": True,
+                    "sync_id": sync_result.get("sync_id"),
+                    "status": "success",
+                    "message": f"Sincronização concluída: {sync_result.get('successful', 0)} registros sincronizados",
+                    "successful": sync_result.get("successful", 0),
+                    "failed": sync_result.get("failed", 0),
+                    "duration": sync_result.get("duration_seconds", 0)
+                }
+            
+            elif sync_result.get("status") == "partial_success":
+                logger.warning(f"Sincronização pós bulk edit parcialmente bem-sucedida: "
+                              f"{sync_result.get('successful', 0)}/{sync_result.get('processed', 0)} registros")
+                
+                return {
+                    "triggered": True,
+                    "sync_id": sync_result.get("sync_id"),
+                    "status": "partial_success",
+                    "message": f"Sincronização parcial: {sync_result.get('successful', 0)} sucessos, {sync_result.get('failed', 0)} falhas",
+                    "successful": sync_result.get("successful", 0),
+                    "failed": sync_result.get("failed", 0),
+                    "errors": sync_result.get("errors", [])[:3],  # Primeiros 3 erros
+                    "duration": sync_result.get("duration_seconds", 0)
+                }
+            
+            else:
+                logger.error(f"Sincronização pós bulk edit falhou: {sync_result.get('message', 'Erro desconhecido')}")
+                
+                return {
+                    "triggered": True,
+                    "sync_id": sync_result.get("sync_id"),
+                    "status": "error",
+                    "message": f"Sincronização falhou: {sync_result.get('message', 'Erro desconhecido')}",
+                    "successful": 0,
+                    "failed": sync_result.get("failed", 0),
+                    "errors": sync_result.get("errors", [])[:3]
+                }
             
         except Exception as e:
-            logger.error(f"Erro ao disparar sync: {safe_str(e)}")
-            raise
+            logger.error(f"Erro ao disparar sincronização pós bulk edit: {str(e)}")
+            
+            return {
+                "triggered": False,
+                "reason": "sync_error",
+                "message": f"Erro na sincronização: {str(e)}",
+                "error": str(e)
+            }
+
+    def _log_sync_trigger_result(self, sync_result: Dict[str, Any], operation_id: str) -> None:
+        """
+        Registra resultado do trigger de sincronização nos logs
+        
+        Args:
+            sync_result: Resultado do trigger de sincronização
+            operation_id: ID da operação de bulk edit
+        """
+        if not sync_result:
+            return
+        
+        if sync_result.get("triggered"):
+            if sync_result.get("status") == "success":
+                logger.info(f"[{operation_id}] Sincronização automática bem-sucedida: "
+                           f"{sync_result.get('successful', 0)} registros sincronizados "
+                           f"em {sync_result.get('duration', 0):.1f}s")
+            
+            elif sync_result.get("status") == "partial_success":
+                logger.warning(f"[{operation_id}] Sincronização automática parcial: "
+                              f"{sync_result.get('successful', 0)} sucessos, "
+                              f"{sync_result.get('failed', 0)} falhas")
+            
+            elif sync_result.get("status") == "error":
+                logger.error(f"[{operation_id}] Sincronização automática falhou: "
+                            f"{sync_result.get('message', 'Erro desconhecido')}")
+        
+        else:
+            reason = sync_result.get("reason", "unknown")
+            message = sync_result.get("message", "Motivo não especificado")
+            logger.info(f"[{operation_id}] Sincronização não disparada: {reason} - {message}")
     
     # ============== OPERAÇÕES INDIVIDUAIS ==============
     
@@ -945,6 +1121,10 @@ class BulkEditService:
             # Garantir que request_summary seja serializável
             if result.request_summary:
                 result.request_summary = ensure_json_serializable(result.request_summary)
+            
+            # Garantir que sync_result seja serializável
+            if result.sync_result:
+                result.sync_result = ensure_json_serializable(result.sync_result)
             
             return result
         except Exception as e:

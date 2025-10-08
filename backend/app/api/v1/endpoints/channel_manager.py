@@ -53,6 +53,14 @@ from app.tasks.bulk_edit_job import (
     get_bulk_edit_progress, cancel_bulk_edit_task
 )
 
+# ✅ IMPORTS PARA SINCRONIZAÇÃO MANUAL
+from app.schemas.manual_sync import (
+    ManualSyncRequest, ManualSyncResult, SyncStatusResponse, 
+    PendingCountResponse, SyncProgressResponse
+)
+from app.services.manual_sync_service import ManualSyncService
+from app.tasks.manual_sync_task import process_manual_sync, get_pending_count, get_sync_status
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -377,14 +385,293 @@ def get_configuration(
 
 # ============== SYNCHRONIZATION ==============
 
-@router.post("/sync/manual", response_model=SyncResult)
-def manual_sync(
+@router.post("/sync/manual", response_model=ManualSyncResult)
+def execute_manual_sync(
+    sync_request: ManualSyncRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Executa sincronização manual de registros pendentes com WuBook.
+    
+    Esta função processa todos os registros marcados com sync_pending=True
+    e os sincroniza com o WuBook Channel Manager.
+    """
+    try:
+        logger.info(f"Usuário {current_user.id} iniciou sincronização manual")
+        
+        # Verificar se há configuração WuBook ativa
+        manual_sync_service = ManualSyncService(db)
+        sync_status = manual_sync_service.get_sync_status(current_user.tenant_id)
+        
+        if not sync_status.get("sync_available"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Nenhuma configuração WuBook ativa encontrada"
+            )
+        
+        # Verificar se já há sincronização em andamento
+        if sync_status.get("is_running"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Já existe uma sincronização em andamento"
+            )
+        
+        # Processar sincronização
+        if sync_request.async_processing:
+            # Processamento assíncrono via background task
+            task_result = background_tasks.add_task(
+                process_manual_sync,
+                tenant_id=current_user.tenant_id,
+                property_id=sync_request.property_id,
+                force_all=sync_request.force_all,
+                batch_size=sync_request.batch_size,
+                async_processing=True
+            )
+            
+            # Retornar resultado imediato indicando que foi iniciado
+            return ManualSyncResult(
+                sync_id=f"async_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+                status="running",
+                message="Sincronização iniciada em background",
+                total_pending=0,
+                processed=0,
+                successful=0,
+                failed=0,
+                success_rate=0.0,
+                errors=[],
+                error_count=0,
+                started_at=datetime.utcnow(),
+                completed_at=datetime.utcnow(),
+                duration_seconds=0.0,
+                configurations_processed=0,
+                force_all_used=sync_request.force_all
+            )
+        else:
+            # Processamento síncrono
+            result = process_manual_sync(
+                tenant_id=current_user.tenant_id,
+                property_id=sync_request.property_id,
+                force_all=sync_request.force_all,
+                batch_size=sync_request.batch_size,
+                async_processing=False
+            )
+            
+            logger.info(f"Sincronização manual concluída: {result.get('successful', 0)}/{result.get('processed', 0)} sucessos")
+            
+            # Converter resultado para schema
+            return ManualSyncResult(**result)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro na sincronização manual: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro interno na sincronização: {str(e)}"
+        )
+
+
+@router.get("/sync/status", response_model=SyncStatusResponse)
+def get_manual_sync_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Retorna o status atual da sincronização para o tenant.
+    
+    Inclui informações sobre:
+    - Se há sincronização em andamento
+    - Última sincronização realizada
+    - Quantidade de registros pendentes
+    - Configurações ativas
+    """
+    try:
+        result = get_sync_status(current_user.tenant_id)
+        return SyncStatusResponse(**result)
+    
+    except Exception as e:
+        logger.error(f"Erro ao obter status de sincronização: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao obter status: {str(e)}"
+        )
+
+
+@router.get("/sync/pending-count", response_model=PendingCountResponse)
+def get_pending_sync_count(
+    property_id: Optional[int] = Query(None, description="ID da propriedade específica"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Retorna contagem detalhada de registros pendentes de sincronização.
+    
+    Fornece estatísticas como:
+    - Total de registros pendentes
+    - Agrupamento por propriedade
+    - Agrupamento por período
+    - Tipos de alterações pendentes
+    """
+    try:
+        result = get_pending_count(
+            tenant_id=current_user.tenant_id,
+            property_id=property_id
+        )
+        return PendingCountResponse(**result)
+    
+    except Exception as e:
+        logger.error(f"Erro ao obter contagem de registros pendentes: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao obter contagem: {str(e)}"
+        )
+
+
+@router.post("/sync/force-all", response_model=ManualSyncResult)
+def force_sync_all_records(
+    property_id: Optional[int] = Query(None, description="ID da propriedade específica"),
+    batch_size: int = Query(100, ge=10, le=500, description="Tamanho do batch"),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Força sincronização de TODOS os registros (não apenas pendentes).
+    
+    ⚠️  ATENÇÃO: Esta operação pode demorar muito tempo e consumir muitos recursos.
+    Use apenas quando necessário para resolver inconsistências.
+    """
+    try:
+        logger.warning(f"Usuário {current_user.id} iniciou FORÇA sincronização de todos os registros")
+        
+        # Criar request de force sync
+        sync_request = ManualSyncRequest(
+            property_id=property_id,
+            force_all=True,
+            batch_size=batch_size,
+            async_processing=True  # Forçar processamento assíncrono
+        )
+        
+        # Executar sempre em background para operações de força
+        task_result = background_tasks.add_task(
+            process_manual_sync,
+            tenant_id=current_user.tenant_id,
+            property_id=property_id,
+            force_all=True,
+            batch_size=batch_size,
+            async_processing=True
+        )
+        
+        return ManualSyncResult(
+            sync_id=f"force_all_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+            status="running",
+            message="Sincronização forçada iniciada em background",
+            total_pending=0,
+            processed=0,
+            successful=0,
+            failed=0,
+            success_rate=0.0,
+            errors=[],
+            error_count=0,
+            started_at=datetime.utcnow(),
+            completed_at=datetime.utcnow(),
+            duration_seconds=0.0,
+            configurations_processed=0,
+            force_all_used=True
+        )
+    
+    except Exception as e:
+        logger.error(f"Erro na sincronização forçada: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro na sincronização forçada: {str(e)}"
+        )
+
+
+@router.get("/sync/health", response_model=Dict[str, Any])
+def get_sync_health_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Retorna status de saúde da sincronização.
+    
+    Inclui métricas como:
+    - Taxa de sucesso
+    - Tempo médio de sincronização
+    - Erros recentes
+    - Recomendações
+    """
+    try:
+        manual_sync_service = ManualSyncService(db)
+        
+        # Status básico
+        sync_status = manual_sync_service.get_sync_status(current_user.tenant_id)
+        pending_count = manual_sync_service.get_pending_count(current_user.tenant_id)
+        
+        # Calcular saúde geral
+        health_score = 100.0
+        issues = []
+        recommendations = []
+        
+        # Reduzir score baseado em problemas
+        if pending_count.get("total_pending", 0) > 100:
+            health_score -= 20
+            issues.append("Muitos registros pendentes")
+            recommendations.append("Execute sincronização manual")
+        
+        if not sync_status.get("sync_available"):
+            health_score -= 50
+            issues.append("Nenhuma configuração WuBook ativa")
+            recommendations.append("Configure conexão WuBook")
+        
+        # Determinar status geral
+        if health_score >= 80:
+            overall_status = "healthy"
+        elif health_score >= 60:
+            overall_status = "warning"
+        else:
+            overall_status = "critical"
+        
+        return {
+            "overall_status": overall_status,
+            "health_score": round(health_score, 1),
+            "sync_available": sync_status.get("sync_available", False),
+            "active_configurations": sync_status.get("active_configurations", 0),
+            "pending_count": pending_count.get("total_pending", 0),
+            "last_sync_at": sync_status.get("last_sync_at"),
+            "last_sync_status": sync_status.get("last_sync_status"),
+            "issues": issues,
+            "recommendations": recommendations,
+            "checked_at": datetime.utcnow().isoformat()
+        }
+    
+    except Exception as e:
+        logger.error(f"Erro ao obter saúde da sincronização: {str(e)}")
+        return {
+            "overall_status": "error",
+            "health_score": 0.0,
+            "sync_available": False,
+            "active_configurations": 0,
+            "pending_count": 0,
+            "last_sync_at": None,
+            "last_sync_status": "error",
+            "issues": [str(e)],
+            "recommendations": ["Verifique logs do sistema"],
+            "checked_at": datetime.utcnow().isoformat()
+        }
+
+
+@router.post("/sync/legacy", response_model=SyncResult)
+def manual_sync_legacy(
     sync_request: SyncRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Executa sincronização manual"""
+    """Executa sincronização manual (endpoint legacy)"""
     try:
         sync_id = f"manual_sync_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{current_user.id}"
         
