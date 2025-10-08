@@ -15,7 +15,7 @@ from app.models.property import Property
 from app.models.wubook_configuration import WuBookConfiguration
 from app.models.wubook_room_mapping import WuBookRoomMapping
 from app.models.wubook_sync_log import WuBookSyncLog
-from app.services.wubook_availability_sync_service import WuBookAvailabilitySyncService
+from app.integrations.wubook.sync_service import WuBookSyncService  # 🔥 MUDANÇA: usar o funcional
 from app.utils.decorators import AuditContext
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ class ManualSyncService:
     
     def __init__(self, db: Session):
         self.db = db
-        self.wubook_sync_service = WuBookAvailabilitySyncService(db)
+        self.wubook_sync_service = WuBookSyncService(db)  # 🔥 MUDANÇA: usar o funcional
     
     def get_pending_count(
         self, 
@@ -65,7 +65,7 @@ class ManualSyncService:
                     Property.id,
                     Property.name,
                     func.count(RoomAvailability.id).label('count')
-                ).join(Room).join(RoomAvailability).filter(
+                ).select_from(Property).join(Room).join(RoomAvailability).filter(
                     Property.tenant_id == tenant_id,
                     RoomAvailability.is_active == True,
                     RoomAvailability.sync_pending == True
@@ -234,6 +234,7 @@ class ManualSyncService:
             result = {
                 "sync_id": sync_id,
                 "status": "success" if total_failed == 0 else "partial_success" if total_successful > 0 else "error",
+                "message": f"Sincronização concluída: {total_successful}/{total_processed} sucessos" if total_processed > 0 else "Nenhum registro processado",
                 "total_pending": len(target_records),
                 "processed": total_processed,
                 "successful": total_successful,
@@ -300,7 +301,7 @@ class ManualSyncService:
             return {
                 "is_running": is_running,
                 "current_sync_id": current_sync_id,
-                "last_sync_at": last_sync_at.isoformat() if last_sync_at else None,
+                "last_sync_at": last_sync_at if last_sync_at else None,  # 🔥 CORREÇÃO AQUI: removido .isoformat()
                 "last_sync_status": last_sync_status,
                 "pending_count": pending_count,
                 "has_pending": pending_count > 0,
@@ -361,7 +362,7 @@ class ManualSyncService:
     ) -> List[RoomAvailability]:
         """Busca registros alvo para sincronização"""
         query = self.db.query(RoomAvailability).options(
-            joinedload(RoomAvailability.room).joinedload(Room.property)
+            joinedload(RoomAvailability.room).joinedload(Room.property_obj)
         ).join(Room).join(Property).filter(
             Property.tenant_id == tenant_id,
             RoomAvailability.is_active == True
@@ -390,7 +391,7 @@ class ManualSyncService:
     ) -> List[RoomAvailability]:
         """Filtra registros para uma configuração específica"""
         if config.property_id:
-            return [r for r in records if r.room.property_id == config.property_id]
+            return [r for r in records if r.room.property_obj.id == config.property_id]
         return records
     
     def _process_sync_batch(
@@ -415,7 +416,7 @@ class ManualSyncService:
             
             for date_str, records in date_groups.items():
                 try:
-                    # Usar o serviço de sincronização existente
+                    # Usar o serviço de sincronização funcional
                     room_ids = [r.room_id for r in records]
                     
                     result = self.wubook_sync_service.sync_availability_to_wubook(
@@ -423,8 +424,7 @@ class ManualSyncService:
                         configuration_id=config.id,
                         date_from=date.fromisoformat(date_str),
                         date_to=date.fromisoformat(date_str),
-                        room_ids=room_ids,
-                        force_sync_all=True
+                        room_ids=room_ids
                     )
                     
                     if result.get("success"):
