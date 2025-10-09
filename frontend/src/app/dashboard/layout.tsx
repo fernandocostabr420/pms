@@ -33,21 +33,22 @@ import {
   Search,
   Loader2,
   FolderOpen,
-  Car // ✅ NOVO ÍCONE - ESTACIONAMENTO
+  Car, // ✅ ÍCONE - ESTACIONAMENTO
+  Radio // ✅ NOVO ÍCONE - CHANNEL MANAGER
 } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { apiClient } from '@/lib/api';
 
-// ✅ MODIFICAÇÃO: Removido "Cadastros" do menu lateral
+// ✅ MODIFICAÇÃO: Adicionado Channel Manager e removido Calendário do menu lateral
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'Calendário', href: '/dashboard/calendar', icon: Calendar },
   { name: 'Mapa de Quartos', href: '/dashboard/room-map', icon: Map },
   { name: 'Reservas', href: '/dashboard/reservations', icon: Calendar },
   { name: 'Pagamentos', href: '/dashboard/payments', icon: DollarSign },
   { name: 'Hóspedes', href: '/dashboard/guests', icon: Users },
   { name: 'Disponibilidade', href: '/dashboard/room-availability', icon: Calendar },
+  { name: 'Channel Manager', href: '/dashboard/channel-manager', icon: Radio }, // ✅ NOVA ENTRADA
 ];
 
 // Tipo para resultados da busca
@@ -451,7 +452,7 @@ export default function DashboardLayout({
                     </Link>
                   </DropdownMenuItem>
                   
-                  {/* ✅ NOVO ITEM - ESTACIONAMENTO */}
+                  {/* ✅ ITEM - ESTACIONAMENTO */}
                   <DropdownMenuItem asChild>
                     <Link href="/dashboard/properties/parking" className="flex items-center">
                       <Car className="mr-2 h-4 w-4" />

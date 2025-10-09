@@ -1,4 +1,6 @@
-// src/lib/api.ts - REFATORADO + ESTACIONAMENTO + TODAS AS FUNCIONALIDADES MANTIDAS
+// frontend/src/lib/api.ts
+// Path: frontend/src/lib/api.ts
+// src/lib/api.ts - REFATORADO + ESTACIONAMENTO + CHANNEL MANAGER + TODAS AS FUNCIONALIDADES MANTIDAS
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import Cookies from 'js-cookie';
 
@@ -101,6 +103,17 @@ import {
   PaymentSecurityWarning
 } from '@/types/payment';
 
+// ✅ NOVOS IMPORTS - CHANNEL MANAGER
+import {
+  ChannelManagerOverview,
+  AvailabilityCalendarRequest,
+  AvailabilityCalendarResponse,
+  BulkOperationResult,
+  SyncRequest,
+  SyncResult,
+  ChannelManagerFilters
+} from '@/types/channel-manager';
+
 // ===== INTERFACE DEFINITIONS =====
 interface ReservationStatsExtended {
   total_reservations: number;
@@ -184,6 +197,7 @@ interface ReservationDetailedResponse {
  * - Tratamento robusto de erros
  * - Cache inteligente
  * - Gestão de estacionamento
+ * - Channel Manager integrado
  */
 class PMSApiClient {
   private client: AxiosInstance;
@@ -626,6 +640,220 @@ class PMSApiClient {
     } catch (error) {
       console.error('Erro ao verificar disponibilidade de estacionamento:', error);
       throw error;
+    }
+  }
+
+  // ===== CHANNEL MANAGER API =====
+  
+  /**
+   * Busca visão geral do Channel Manager com estatísticas e status
+   */
+  async getChannelManagerOverview(params?: {
+    date_from?: string;
+    date_to?: string;
+    property_id?: number;
+  }): Promise<ChannelManagerOverview> {
+    try {
+      const response = await this.client.get<ChannelManagerOverview>('/channel-manager/overview', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao buscar overview do Channel Manager:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Busca dados do calendário de disponibilidade com status de sincronização
+   */
+  async getChannelManagerCalendar(
+    request: AvailabilityCalendarRequest
+  ): Promise<AvailabilityCalendarResponse> {
+    try {
+      const response = await this.client.post<AvailabilityCalendarResponse>(
+        '/channel-manager/availability/calendar', 
+        request
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao buscar calendário do Channel Manager:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Busca calendário simplificado via GET (para compatibilidade)
+   */
+  async getChannelManagerCalendarRange(params: {
+    date_from: string;
+    date_to: string;
+    room_ids?: number[];
+    property_id?: number;
+    include_sync_status?: boolean;
+    include_restrictions?: boolean;
+  }): Promise<AvailabilityCalendarResponse> {
+    try {
+      const response = await this.client.get<AvailabilityCalendarResponse>(
+        '/channel-manager/availability/calendar', 
+        { params }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao buscar range do calendário:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Inicia sincronização manual com WuBook e outros canais
+   */
+  async syncWithWuBook(request: SyncRequest): Promise<SyncResult> {
+    try {
+      const response = await this.client.post<SyncResult>('/channel-manager/sync', request);
+      return response.data;
+    } catch (error) {
+      console.error('Erro na sincronização com WuBook:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Busca status de sincronização por task_id
+   */
+  async getChannelManagerSyncStatus(taskId: string): Promise<SyncResult> {
+    try {
+      const response = await this.client.get<SyncResult>(`/channel-manager/sync/status/${taskId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao buscar status de sincronização:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Força sincronização completa de todos os dados
+   */
+  async forceChannelManagerFullSync(params?: {
+    room_ids?: number[];
+    property_id?: number;
+  }): Promise<SyncResult> {
+    try {
+      const request: SyncRequest = {
+        sync_type: 'full',
+        force_sync: true,
+        ...params
+      };
+      return await this.syncWithWuBook(request);
+    } catch (error) {
+      console.error('Erro na sincronização completa:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Lista configurações de canal do Channel Manager
+   */
+  async getChannelManagerConfigurations(filters?: ChannelManagerFilters): Promise<{
+    items: any[];
+    total: number;
+    page: number;
+    pages: number;
+  }> {
+    try {
+      const response = await this.client.get('/channel-manager/configurations', { params: filters });
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao buscar configurações do Channel Manager:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Verifica saúde geral das sincronizações
+   */
+  async getChannelManagerHealthReport(): Promise<{
+    overall_health: 'healthy' | 'warning' | 'critical';
+    health_score: number;
+    issues: Array<{ type: string; message: string; severity: string }>;
+    recommendations: string[];
+    generated_at: string;
+    sync_status: {
+      healthy_configurations: number;
+      error_configurations: number;
+      last_global_sync?: string;
+    };
+  }> {
+    try {
+      const response = await this.client.get('/channel-manager/health');
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao buscar relatório de saúde do Channel Manager:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Atualiza uma única célula do calendário (edição inline)
+   */
+  async updateChannelManagerCell(data: {
+    room_id: number;
+    date: string;
+    field: 'rate' | 'availability' | 'min_stay' | 'closed_to_arrival' | 'closed_to_departure';
+    value: any;
+  }): Promise<{ success: boolean; message?: string }> {
+    try {
+      // Usar endpoint de bulk update com um único item para compatibilidade
+      const bulkData = {
+        room_ids: [data.room_id],
+        date_from: data.date,
+        date_to: data.date,
+        [data.field === 'rate' ? 'rate_override' : 
+         data.field === 'availability' ? 'is_available' : data.field]: data.value
+      };
+
+      await this.bulkUpdateAvailability(bulkData);
+      return { success: true, message: 'Atualizado com sucesso' };
+    } catch (error) {
+      console.error('Erro ao atualizar célula do Channel Manager:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Valida operação de bulk edit antes de executar
+   */
+  async validateChannelManagerBulkOperation(
+    data: BulkAvailabilityUpdate
+  ): Promise<{
+    is_valid: boolean;
+    total_cells: number;
+    conflicts: string[];
+    warnings: string[];
+  }> {
+    try {
+      const response = await this.client.post('/bulk-edit/validate', {
+        target: 'availability',
+        operation: 'update',
+        scope: {
+          room_ids: data.room_ids,
+          date_from: data.date_from,
+          date_to: data.date_to
+        },
+        changes: data
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Erro na validação de bulk edit:', error);
+      // Retornar validação básica em caso de erro
+      const startDate = new Date(data.date_from);
+      const endDate = new Date(data.date_to);
+      const totalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      
+      return {
+        is_valid: true,
+        total_cells: data.room_ids.length * totalDays,
+        conflicts: [],
+        warnings: []
+      };
     }
   }
 
