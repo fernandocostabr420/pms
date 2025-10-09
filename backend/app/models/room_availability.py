@@ -62,7 +62,7 @@ class RoomAvailability(BaseModel, TenantMixin):
     metadata_json = Column(String(1000), nullable=True)  # JSON para dados extras
     
     # Relacionamentos
-    room = relationship("Room", backref="availabilities")
+    room = relationship("Room", backref="room_availabilities")
     reservation = relationship("Reservation", backref="room_availabilities")
     
     @property
