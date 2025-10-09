@@ -56,6 +56,108 @@ class WuBookClient:
             logger.error(f"Erro ao buscar quartos: {str(e)}")
             raise
     
+    def create_room(
+        self,
+        name: str,
+        beds: int,
+        price: float,
+        availability: int = 1,
+        board: str = "fb",
+        room_shortname: Optional[str] = None
+    ) -> int:
+        """
+        Criar novo quarto na WuBook
+        
+        Args:
+            name: Nome do quarto
+            beds: Número de camas/ocupação
+            price: Preço base (valor alto para proteção)
+            availability: Disponibilidade (1 = disponível)
+            board: Tipo de pensão (fb = pensão completa, bb = café da manhã)
+            room_shortname: Nome curto (3 chars, opcional)
+        
+        Returns:
+            int: ID do quarto criado na WuBook
+        
+        Raises:
+            Exception: Se falhar na criação
+        """
+        try:
+            # Gerar nome curto se não fornecido
+            if not room_shortname:
+                room_shortname = name[:3].upper() if len(name) >= 3 else name.upper()
+            
+            logger.debug(f"Criando quarto na WuBook: {name} ({beds} camas, R${price:.2f})")
+            
+            # Chamar API WuBook para criar quarto
+            result = self.server.new_room(
+                self.token,      # token de autenticação
+                self.lcode,      # código da propriedade
+                0,               # woodoo_only (0 = não restrito)
+                name,            # nome do quarto
+                beds,            # número de camas
+                price,           # preço padrão
+                availability,    # disponibilidade
+                room_shortname,  # nome curto (3 chars)
+                board            # tipo de pensão
+            )
+            
+            # Verificar resposta
+            if not isinstance(result, (list, tuple)) or len(result) < 2:
+                raise Exception(f"Resposta WuBook inválida: {result}")
+            
+            if result[0] == 0:
+                room_id = result[1]
+                logger.info(f"Quarto criado na WuBook com sucesso: {name} (ID: {room_id})")
+                return int(room_id)
+            else:
+                error_msg = f"Erro WuBook (código {result[0]}): {result[1]}"
+                logger.error(error_msg)
+                raise Exception(error_msg)
+                
+        except xmlrpc.client.Fault as fault:
+            error_msg = f"Erro XML-RPC ao criar quarto: {fault.faultCode} - {fault.faultString}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
+        except Exception as e:
+            logger.error(f"Erro ao criar quarto na WuBook: {str(e)}")
+            raise Exception(f"Falha na criação: {str(e)}")
+    
+    def delete_room(self, room_id: int) -> bool:
+        """
+        Remove quarto da WuBook
+        
+        Args:
+            room_id: ID do quarto na WuBook
+            
+        Returns:
+            bool: True se removido com sucesso
+        """
+        try:
+            logger.debug(f"Removendo quarto {room_id} da WuBook")
+            
+            # Chamar API WuBook para remover quarto
+            result = self.server.del_room(self.token, self.lcode, room_id)
+            
+            if not isinstance(result, (list, tuple)) or len(result) < 1:
+                raise Exception(f"Resposta WuBook inválida: {result}")
+            
+            if result[0] == 0:
+                logger.info(f"Quarto {room_id} removido da WuBook com sucesso")
+                return True
+            else:
+                error_msg = f"Erro WuBook (código {result[0]}): {result[1] if len(result) > 1 else 'Erro desconhecido'}"
+                logger.error(error_msg)
+                raise Exception(error_msg)
+                
+        except xmlrpc.client.Fault as fault:
+            error_msg = f"Erro XML-RPC ao remover quarto: {fault.faultCode} - {fault.faultString}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
+        except Exception as e:
+            logger.error(f"Erro ao remover quarto da WuBook: {str(e)}")
+            raise Exception(f"Falha na remoção: {str(e)}")
+    
     def fetch_availability(self, dfrom: str, dto: str, rooms: List[int] = None):
         """Buscar disponibilidade - CORRIGIDO para usar formato europeu"""
         try:

@@ -1,7 +1,7 @@
 // frontend/src/components/rooms/RoomModal.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -58,6 +58,23 @@ interface RoomModalProps {
   onSuccess: () => void;
 }
 
+// Hook personalizado para debounce
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
 export default function RoomModal({ 
   isOpen, 
   onClose, 
@@ -73,6 +90,10 @@ export default function RoomModal({
   const [roomNumberAvailable, setRoomNumberAvailable] = useState<boolean | null>(null);
   const [checkingRoomNumber, setCheckingRoomNumber] = useState(false);
   const { toast } = useToast();
+
+  // Refs para controle de requisições e timeouts
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const lastCheckedRef = useRef<string>('');
 
   const isEdit = !!room;
 
@@ -102,7 +123,87 @@ export default function RoomModal({
     },
   });
 
-  const watchedValues = watch(['room_number', 'property_id']);
+  // Observar mudanças nos campos relevantes
+  const roomNumber = watch('room_number');
+  const propertyId = watch('property_id');
+
+  // Aplicar debounce no número do quarto
+  const debouncedRoomNumber = useDebounce(roomNumber, 500);
+
+  // Função para verificar disponibilidade com controle de requisições
+  const checkRoomNumberAvailability = useCallback(async (
+    roomNum: string, 
+    propId: number,
+    signal?: AbortSignal
+  ) => {
+    try {
+      setCheckingRoomNumber(true);
+      
+      const result = await apiClient.checkRoomNumberAvailability(roomNum, propId, {
+        signal // Passar o signal para cancelar a requisição se necessário
+      });
+      
+      // Verificar se a requisição não foi cancelada
+      if (!signal?.aborted) {
+        setRoomNumberAvailable(result.available);
+        lastCheckedRef.current = roomNum;
+        
+        if (!result.available) {
+          // Não é necessário setError pois o visual já mostra
+        } else {
+          clearErrors('room_number');
+        }
+      }
+    } catch (error: any) {
+      // Ignorar erros de requisições canceladas
+      if (!signal?.aborted) {
+        console.error('Erro ao verificar disponibilidade:', error);
+        setRoomNumberAvailable(null);
+        lastCheckedRef.current = '';
+      }
+    } finally {
+      if (!signal?.aborted) {
+        setCheckingRoomNumber(false);
+      }
+    }
+  }, [clearErrors]);
+
+  // Effect para verificar disponibilidade com debounce
+  useEffect(() => {
+    // Cancelar requisição pendente
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Limpar estado se não há dados suficientes ou se está editando
+    if (!debouncedRoomNumber || !propertyId || isEdit) {
+      setRoomNumberAvailable(null);
+      setCheckingRoomNumber(false);
+      return;
+    }
+
+    // Não verificar se é o mesmo número já verificado
+    if (lastCheckedRef.current === debouncedRoomNumber) {
+      return;
+    }
+
+    // Criar novo AbortController
+    abortControllerRef.current = new AbortController();
+    
+    // Verificar disponibilidade
+    checkRoomNumberAvailability(
+      debouncedRoomNumber, 
+      propertyId, 
+      abortControllerRef.current.signal
+    );
+
+    // Cleanup
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [debouncedRoomNumber, propertyId, isEdit, checkRoomNumberAvailability]);
 
   // Carregar dados iniciais
   useEffect(() => {
@@ -113,10 +214,10 @@ export default function RoomModal({
 
   // Definir property_id automaticamente quando propriedade carregar
   useEffect(() => {
-    if (tenantProperty && !watch('property_id')) {
+    if (tenantProperty && !propertyId) {
       setValue('property_id', tenantProperty.id);
     }
-  }, [tenantProperty, setValue, watch]);
+  }, [tenantProperty, setValue, propertyId]);
 
   // Preencher formulário ao editar
   useEffect(() => {
@@ -133,19 +234,27 @@ export default function RoomModal({
       setValue('notes', room.notes || '');
       setValue('is_operational', room.is_operational);
       setValue('is_out_of_order', room.is_out_of_order);
+      
+      // Resetar estado de verificação ao editar
+      setRoomNumberAvailable(null);
+      lastCheckedRef.current = room.room_number;
     }
   }, [room, isOpen, setValue]);
 
-  // Verificar disponibilidade do número do quarto
+  // Cleanup ao fechar modal
   useEffect(() => {
-    const [roomNumber, propertyId] = watchedValues;
-    
-    if (roomNumber && propertyId && !isEdit) {
-      checkRoomNumberAvailability(roomNumber, propertyId);
-    } else if (isEdit) {
-      setRoomNumberAvailable(null); // Não verifica ao editar
+    if (!isOpen) {
+      // Cancelar requisições pendentes
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      
+      // Limpar estados
+      setRoomNumberAvailable(null);
+      setCheckingRoomNumber(false);
+      lastCheckedRef.current = '';
     }
-  }, [watchedValues, isEdit]);
+  }, [isOpen]);
 
   const loadInitialData = async () => {
     try {
@@ -165,34 +274,61 @@ export default function RoomModal({
     }
   };
 
-  const checkRoomNumberAvailability = async (roomNumber: string, propertyId: number) => {
-    try {
-      setCheckingRoomNumber(true);
-      const result = await apiClient.checkRoomNumberAvailability(roomNumber, propertyId);
-      setRoomNumberAvailable(result.available);
-      
-      if (!result.available) {
-        // Não é necessário setError pois o visual já mostra
-      } else {
-        clearErrors('room_number');
-      }
-    } catch (error) {
-      console.error('Erro ao verificar disponibilidade:', error);
-      setRoomNumberAvailable(null);
-    } finally {
-      setCheckingRoomNumber(false);
-    }
-  };
-
   const onSubmit = async (data: RoomFormData) => {
-    // Verificar disponibilidade antes de submeter
-    if (!isEdit && roomNumberAvailable === false) {
-      toast({
-        title: "Erro",
-        description: "Número do quarto já está em uso nesta propriedade",
-        variant: "destructive",
-      });
-      return;
+    // Verificar disponibilidade final antes de submeter (apenas para criação)
+    if (!isEdit) {
+      // Se ainda está verificando, aguardar
+      if (checkingRoomNumber) {
+        toast({
+          title: "Aguarde",
+          description: "Verificando disponibilidade do número do quarto...",
+          variant: "default",
+        });
+        return;
+      }
+
+      // Se número não está disponível
+      if (roomNumberAvailable === false) {
+        toast({
+          title: "Erro",
+          description: "Número do quarto já está em uso nesta propriedade",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Se não foi verificado ainda, fazer verificação final
+      if (roomNumberAvailable === null && data.room_number && data.property_id) {
+        try {
+          setCheckingRoomNumber(true);
+          const result = await apiClient.checkRoomNumberAvailability(
+            data.room_number, 
+            data.property_id
+          );
+          
+          if (!result.available) {
+            setRoomNumberAvailable(false);
+            toast({
+              title: "Erro",
+              description: "Número do quarto já está em uso nesta propriedade",
+              variant: "destructive",
+            });
+            return;
+          }
+          
+          setRoomNumberAvailable(true);
+        } catch (error) {
+          console.error('Erro na verificação final:', error);
+          toast({
+            title: "Erro",
+            description: "Erro ao verificar disponibilidade. Tente novamente.",
+            variant: "destructive",
+          });
+          return;
+        } finally {
+          setCheckingRoomNumber(false);
+        }
+      }
     }
 
     try {
@@ -240,19 +376,39 @@ export default function RoomModal({
       
     } catch (error: any) {
       console.error('Erro ao salvar quarto:', error);
-      toast({
-        title: "Erro",
-        description: error.response?.data?.detail || 'Erro ao salvar quarto',
-        variant: "destructive",
-      });
+      
+      // Tratamento específico para erros de duplicação
+      if (error.response?.status === 400 && error.response?.data?.detail?.includes('número')) {
+        setRoomNumberAvailable(false);
+        toast({
+          title: "Erro",
+          description: "Número do quarto já está em uso nesta propriedade",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Erro",
+          description: error.response?.data?.detail || 'Erro ao salvar quarto',
+          variant: "destructive",
+        });
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const handleClose = () => {
+    // Cancelar requisições pendentes
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    // Resetar formulário e estados
     reset();
     setRoomNumberAvailable(null);
+    setCheckingRoomNumber(false);
+    lastCheckedRef.current = '';
+    
     onClose();
   };
 
@@ -365,6 +521,9 @@ export default function RoomModal({
                   )}
                   {!isEdit && roomNumberAvailable === false && (
                     <p className="text-sm text-red-600 mt-1">Número já está em uso nesta propriedade</p>
+                  )}
+                  {!isEdit && checkingRoomNumber && (
+                    <p className="text-sm text-gray-500 mt-1">Verificando disponibilidade...</p>
                   )}
                 </div>
               </div>
@@ -519,12 +678,22 @@ export default function RoomModal({
               </Button>
               <Button 
                 type="submit" 
-                disabled={loading || (!isEdit && roomNumberAvailable === false) || loadingProperty}
+                disabled={
+                  loading || 
+                  checkingRoomNumber || 
+                  (!isEdit && roomNumberAvailable === false) || 
+                  loadingProperty
+                }
               >
                 {loading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Salvando...
+                  </>
+                ) : checkingRoomNumber ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Verificando...
                   </>
                 ) : (
                   isEdit ? 'Atualizar' : 'Criar Quarto'
