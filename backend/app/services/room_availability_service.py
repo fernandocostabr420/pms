@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import and_, or_, func, case, text
 from datetime import datetime, date, timedelta
 from decimal import Decimal
+import logging
 
 from app.models.room_availability import RoomAvailability
 from app.models.room import Room
@@ -26,6 +27,8 @@ from app.services.restriction_validation_service import RestrictionValidationSer
 from app.schemas.reservation_restriction import (
     RestrictionValidationRequest, RestrictionValidationResponse
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RoomAvailabilityService:
@@ -564,7 +567,7 @@ class RoomAvailabilityService:
             )
         except Exception as e:
             # Em caso de erro na validação, retornar como válido para não bloquear
-            print(f"Erro na validação de restrições: {e}")
+            logger.warning(f"Erro na validação de restrições: {e}")
             return RestrictionValidationResponse(
                 is_valid=True,
                 violations=[],
@@ -757,6 +760,205 @@ class RoomAvailabilityService:
             },
             'restriction_types': restriction_types_count
         }
+
+    # ✅ NOVO: MÉTODOS DE LIMPEZA AUTOMÁTICA PARA DADOS ÓRFÃOS
+
+    def cleanup_orphaned_availabilities(
+        self, 
+        room_id: int, 
+        tenant_id: int,
+        date_from: Optional[date] = None
+    ) -> Dict[str, Any]:
+        """
+        Remove disponibilidades órfãs de um quarto específico.
+        Usado quando um quarto é excluído.
+        """
+        try:
+            # Definir data mínima (hoje se não especificado)
+            if not date_from:
+                date_from = date.today()
+            
+            # Buscar disponibilidades futuras órfãs
+            orphaned_availabilities = self.db.query(RoomAvailability).filter(
+                RoomAvailability.room_id == room_id,
+                RoomAvailability.tenant_id == tenant_id,
+                RoomAvailability.date >= date_from,
+                RoomAvailability.is_active == True
+            ).all()
+            
+            availabilities_count = len(orphaned_availabilities)
+            if availabilities_count == 0:
+                logger.debug(f"Nenhuma disponibilidade órfã encontrada para quarto {room_id}")
+                return {
+                    "success": True,
+                    "availabilities_cleaned": 0,
+                    "message": "Nenhuma disponibilidade órfã encontrada"
+                }
+            
+            # Desativar todas as disponibilidades órfãs
+            for availability in orphaned_availabilities:
+                availability.is_active = False
+                availability.sync_pending = True  # Marcar para sincronização de remoção
+                availability.updated_at = datetime.utcnow()
+                logger.debug(f"Disponibilidade {availability.id} desativada (room_id: {room_id}, date: {availability.date})")
+            
+            self.db.commit()
+            
+            logger.info(f"Removidas {availabilities_count} disponibilidades órfãs para quarto {room_id}")
+            return {
+                "success": True,
+                "availabilities_cleaned": availabilities_count,
+                "message": f"Removidas {availabilities_count} disponibilidades órfãs"
+            }
+            
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Erro ao limpar disponibilidades órfãs do quarto {room_id}: {e}")
+            return {
+                "success": False,
+                "availabilities_cleaned": 0,
+                "error": str(e),
+                "message": f"Erro ao limpar disponibilidades: {str(e)}"
+            }
+
+    def cleanup_all_orphaned_availabilities(
+        self, 
+        tenant_id: int,
+        date_from: Optional[date] = None
+    ) -> Dict[str, Any]:
+        """
+        Limpa todas as disponibilidades órfãs do tenant.
+        Usado para limpeza geral do sistema.
+        """
+        try:
+            # Definir data mínima (hoje se não especificado)
+            if not date_from:
+                date_from = date.today()
+            
+            # Buscar disponibilidades que referenciam quartos inativos
+            orphaned_availabilities = self.db.query(RoomAvailability).outerjoin(Room).filter(
+                RoomAvailability.tenant_id == tenant_id,
+                RoomAvailability.date >= date_from,
+                RoomAvailability.is_active == True,
+                # Quarto não existe ou está inativo
+                (Room.id.is_(None)) | (Room.is_active == False)
+            ).all()
+            
+            availabilities_count = len(orphaned_availabilities)
+            if availabilities_count == 0:
+                logger.debug(f"Nenhuma disponibilidade órfã encontrada para tenant {tenant_id}")
+                return {
+                    "success": True,
+                    "availabilities_cleaned": 0,
+                    "message": "Nenhuma disponibilidade órfã encontrada"
+                }
+            
+            # Desativar todas as disponibilidades órfãs
+            for availability in orphaned_availabilities:
+                availability.is_active = False
+                availability.sync_pending = True
+                availability.updated_at = datetime.utcnow()
+                logger.debug(f"Disponibilidade órfã {availability.id} desativada")
+            
+            self.db.commit()
+            
+            logger.info(f"Limpeza completa: removidas {availabilities_count} disponibilidades órfãs do tenant {tenant_id}")
+            return {
+                "success": True,
+                "availabilities_cleaned": availabilities_count,
+                "message": f"Limpeza concluída: {availabilities_count} disponibilidades órfãs removidas"
+            }
+            
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Erro na limpeza completa de disponibilidades órfãs do tenant {tenant_id}: {e}")
+            return {
+                "success": False,
+                "availabilities_cleaned": 0,
+                "error": str(e),
+                "message": f"Erro na limpeza: {str(e)}"
+            }
+
+    def get_orphaned_availabilities_report(
+        self, 
+        tenant_id: int,
+        date_from: Optional[date] = None
+    ) -> Dict[str, Any]:
+        """
+        Gera relatório de disponibilidades órfãs.
+        Útil para análise e auditoria.
+        """
+        try:
+            # Definir data mínima (hoje se não especificado)
+            if not date_from:
+                date_from = date.today()
+            
+            # Disponibilidades órfãs (quartos inexistentes ou inativos)
+            orphaned_query = self.db.query(RoomAvailability).outerjoin(Room).filter(
+                RoomAvailability.tenant_id == tenant_id,
+                RoomAvailability.date >= date_from,
+                RoomAvailability.is_active == True,
+                (Room.id.is_(None)) | (Room.is_active == False)
+            )
+            
+            orphaned_availabilities = orphaned_query.all()
+            
+            # Disponibilidades com erros de sincronização
+            error_availabilities = self.db.query(RoomAvailability).filter(
+                RoomAvailability.tenant_id == tenant_id,
+                RoomAvailability.date >= date_from,
+                RoomAvailability.is_active == True,
+                RoomAvailability.wubook_sync_error.isnot(None)
+            ).count()
+            
+            # Disponibilidades pendentes de sincronização
+            pending_sync = self.db.query(RoomAvailability).filter(
+                RoomAvailability.tenant_id == tenant_id,
+                RoomAvailability.date >= date_from,
+                RoomAvailability.is_active == True,
+                RoomAvailability.sync_pending == True
+            ).count()
+            
+            # Total de disponibilidades ativas
+            total_active = self.db.query(RoomAvailability).filter(
+                RoomAvailability.tenant_id == tenant_id,
+                RoomAvailability.date >= date_from,
+                RoomAvailability.is_active == True
+            ).count()
+            
+            return {
+                "date_from": date_from.isoformat(),
+                "total_active_availabilities": total_active,
+                "orphaned_availabilities": len(orphaned_availabilities),
+                "error_availabilities": error_availabilities,
+                "pending_sync": pending_sync,
+                "orphaned_details": [
+                    {
+                        "availability_id": a.id,
+                        "room_id": a.room_id,
+                        "date": a.date.isoformat(),
+                        "created_at": a.created_at.isoformat() if a.created_at else None,
+                        "last_sync_error": a.wubook_sync_error
+                    }
+                    for a in orphaned_availabilities[:50]  # Limitar a 50 para performance
+                ],
+                "health_score": round(
+                    (total_active - len(orphaned_availabilities) - error_availabilities) / max(total_active, 1) * 100, 2
+                )
+            }
+            
+        except Exception as e:
+            logger.error(f"Erro ao gerar relatório de disponibilidades órfãs: {e}")
+            return {
+                "error": str(e),
+                "date_from": date_from.isoformat() if date_from else None,
+                "total_active_availabilities": 0,
+                "orphaned_availabilities": 0,
+                "error_availabilities": 0,
+                "pending_sync": 0,
+                "orphaned_details": [],
+                "health_score": 0.0
+            }
 
     def _apply_filters(self, query, tenant_id: int, filters: RoomAvailabilityFilters):
         """Aplica filtros na query"""

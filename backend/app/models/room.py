@@ -10,6 +10,7 @@ class Room(BaseModel, TenantMixin):
     """
     Modelo de Quarto - quartos específicos dentro de uma propriedade.
     Vinculado a uma propriedade e tipo de quarto.
+    ✅ ATUALIZADO: Inclui relacionamentos com CASCADE DELETE para limpeza automática
     """
     __tablename__ = "rooms"
     __table_args__ = (
@@ -50,12 +51,45 @@ class Room(BaseModel, TenantMixin):
     # Configurações específicas
     settings = Column(JSON, nullable=True)
     
-    # Relacionamentos (usando nomes que não conflitam com palavras reservadas)
+    # ✅ RELACIONAMENTOS PRINCIPAIS (usando nomes que não conflitam com palavras reservadas)
     property_obj = relationship("Property", backref="rooms")
     room_type = relationship("RoomType", back_populates="rooms")
     
-    # Futuros relacionamentos (reservations, etc.)
-    # reservations = relationship("Reservation", back_populates="room")
+    # ✅ RELACIONAMENTOS COM CASCADE DELETE PARA LIMPEZA AUTOMÁTICA
+    # Quando um quarto for excluído, automaticamente remove:
+    
+    # 1. Disponibilidades relacionadas
+    availabilities = relationship(
+        "RoomAvailability", 
+        back_populates="room",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="dynamic"
+    )
+    
+    # 2. Mapeamentos WuBook relacionados
+    wubook_mappings = relationship(
+        "WuBookRoomMapping", 
+        back_populates="room_ref",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="dynamic"
+    )
+    
+    # ✅ RELACIONAMENTOS FUTUROS (quando implementados)
+    # reservations = relationship(
+    #     "Reservation", 
+    #     back_populates="room",
+    #     cascade="all, delete-orphan",
+    #     passive_deletes=True
+    # )
+    
+    # reservation_rooms = relationship(
+    #     "ReservationRoom", 
+    #     back_populates="room",
+    #     cascade="all, delete-orphan",
+    #     passive_deletes=True
+    # )
     
     def __repr__(self):
         return f"<Room(id={self.id}, number='{self.room_number}', property_id={self.property_id})>"
@@ -107,3 +141,107 @@ class Room(BaseModel, TenantMixin):
             return "Não operacional"
         else:
             return "Operacional"
+    
+    # ✅ MÉTODOS PARA LIMPEZA E GERENCIAMENTO
+    
+    def get_active_availabilities_count(self):
+        """Retorna quantidade de disponibilidades ativas"""
+        return self.availabilities.filter_by(is_active=True).count()
+    
+    def get_active_wubook_mappings_count(self):
+        """Retorna quantidade de mapeamentos WuBook ativos"""
+        return self.wubook_mappings.filter_by(is_active=True).count()
+    
+    def has_future_availabilities(self):
+        """Verifica se tem disponibilidades futuras"""
+        from datetime import date
+        return self.availabilities.filter(
+            self.availabilities.property.mapper.class_.date >= date.today(),
+            self.availabilities.property.mapper.class_.is_active == True
+        ).count() > 0
+    
+    def has_active_wubook_mappings(self):
+        """Verifica se tem mapeamentos WuBook ativos"""
+        return self.wubook_mappings.filter_by(is_active=True).count() > 0
+    
+    def deactivate_related_data(self):
+        """
+        Desativa dados relacionados ao invés de deletar.
+        Útil para soft delete manual sem CASCADE.
+        """
+        from datetime import datetime, date
+        
+        # Desativar disponibilidades futuras
+        future_availabilities = self.availabilities.filter(
+            self.availabilities.property.mapper.class_.date >= date.today(),
+            self.availabilities.property.mapper.class_.is_active == True
+        ).all()
+        
+        for availability in future_availabilities:
+            availability.is_active = False
+            availability.sync_pending = True
+            availability.updated_at = datetime.utcnow()
+        
+        # Desativar mapeamentos WuBook
+        active_mappings = self.wubook_mappings.filter_by(is_active=True).all()
+        
+        for mapping in active_mappings:
+            mapping.is_active = False
+            mapping.is_syncing = False
+            mapping.sync_pending = True
+            mapping.updated_at = datetime.utcnow()
+        
+        return {
+            "deactivated_availabilities": len(future_availabilities),
+            "deactivated_mappings": len(active_mappings)
+        }
+    
+    @classmethod
+    def cleanup_orphaned_data(cls, session, tenant_id: int):
+        """
+        Limpa dados órfãos de quartos excluídos.
+        Método utilitário para limpeza de dados inconsistentes.
+        """
+        from app.models.room_availability import RoomAvailability
+        from app.models.wubook_room_mapping import WuBookRoomMapping
+        
+        # Buscar quartos inativos
+        inactive_rooms = session.query(cls).filter(
+            cls.tenant_id == tenant_id,
+            cls.is_active == False
+        ).all()
+        
+        cleanup_stats = {
+            "inactive_rooms_found": len(inactive_rooms),
+            "availabilities_cleaned": 0,
+            "mappings_cleaned": 0
+        }
+        
+        for room in inactive_rooms:
+            # Limpar disponibilidades órfãs
+            orphaned_availabilities = session.query(RoomAvailability).filter(
+                RoomAvailability.room_id == room.id,
+                RoomAvailability.tenant_id == tenant_id,
+                RoomAvailability.is_active == True
+            ).all()
+            
+            for availability in orphaned_availabilities:
+                availability.is_active = False
+                availability.sync_pending = True
+                cleanup_stats["availabilities_cleaned"] += 1
+            
+            # Limpar mapeamentos órfãos
+            orphaned_mappings = session.query(WuBookRoomMapping).filter(
+                WuBookRoomMapping.room_id == room.id,
+                WuBookRoomMapping.tenant_id == tenant_id,
+                WuBookRoomMapping.is_active == True
+            ).all()
+            
+            for mapping in orphaned_mappings:
+                mapping.is_active = False
+                mapping.is_syncing = False
+                mapping.sync_pending = True
+                cleanup_stats["mappings_cleaned"] += 1
+        
+        session.commit()
+        return cleanup_stats

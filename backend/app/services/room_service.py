@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import and_, or_, func, Integer
 from fastapi import Request
+from datetime import datetime, date
+import logging
 
 from app.models.room import Room
 from app.models.room_type import RoomType
@@ -13,6 +15,8 @@ from app.models.user import User
 from app.schemas.room import RoomCreate, RoomUpdate, RoomFilters, RoomBulkUpdate
 from app.services.audit_service import AuditService
 from app.utils.decorators import _extract_model_data, AuditContext
+
+logger = logging.getLogger(__name__)
 
 
 class RoomService:
@@ -178,7 +182,7 @@ class RoomService:
         current_user: User,
         request: Optional[Request] = None
     ) -> Room:
-        """Cria novo quarto com auditoria automática"""
+        """Cria novo quarto com auditoria automática e mapeamento WuBook"""
         
         # Verificar se já existe quarto com mesmo número na propriedade
         existing = self.get_room_by_number(room_data.room_number, room_data.property_id, tenant_id)
@@ -222,6 +226,9 @@ class RoomService:
                     new_values,
                     f"Quarto '{room_obj.room_number}' criado na propriedade '{property_obj.name}'"
                 )
+            
+            # ✅ NOVO: Criar mapeamento WuBook automaticamente
+            self._create_auto_wubook_mapping(room_obj, tenant_id, current_user)
             
             return room_obj
             
@@ -288,36 +295,87 @@ class RoomService:
         current_user: User,
         request: Optional[Request] = None
     ) -> bool:
-        """Desativa quarto (soft delete) com auditoria"""
+        """Desativa quarto (soft delete) com auditoria e limpeza automática"""
         
         room_obj = self.get_room_by_id(room_id, tenant_id)
         if not room_obj:
             return False
 
-        # TODO: Verificar se há reservas futuras (quando implementar reservations)
-        
         # Capturar valores para auditoria
         old_values = _extract_model_data(room_obj)
 
-        # Soft delete
-        room_obj.is_active = False
-        
         try:
+            # ✅ NOVO: Desativar mapeamentos WuBook relacionados
+            from app.models.wubook_room_mapping import WuBookRoomMapping
+            
+            wubook_mappings = self.db.query(WuBookRoomMapping).filter(
+                WuBookRoomMapping.room_id == room_id,
+                WuBookRoomMapping.tenant_id == tenant_id,
+                WuBookRoomMapping.is_active == True
+            ).all()
+            
+            mappings_count = len(wubook_mappings)
+            if mappings_count > 0:
+                logger.info(f"Desativando {mappings_count} mapeamentos WuBook para quarto {room_id}")
+                
+                for mapping in wubook_mappings:
+                    mapping.is_active = False
+                    mapping.updated_at = datetime.utcnow()
+                    # Marcar para sincronização de remoção
+                    mapping.sync_pending = True
+            
+            # ✅ NOVO: Desativar disponibilidades futuras relacionadas  
+            from app.models.room_availability import RoomAvailability
+            
+            future_availabilities = self.db.query(RoomAvailability).filter(
+                RoomAvailability.room_id == room_id,
+                RoomAvailability.tenant_id == tenant_id,
+                RoomAvailability.date >= date.today(),
+                RoomAvailability.is_active == True
+            ).all()
+            
+            availabilities_count = len(future_availabilities)
+            if availabilities_count > 0:
+                logger.info(f"Desativando {availabilities_count} disponibilidades futuras para quarto {room_id}")
+                
+                for availability in future_availabilities:
+                    availability.is_active = False
+                    availability.updated_at = datetime.utcnow()
+                    # Marcar para sincronização de remoção
+                    availability.sync_pending = True
+
+            # Soft delete do quarto
+            room_obj.is_active = False
+            room_obj.updated_at = datetime.utcnow()
+            
+            # Commit todas as alterações
             self.db.commit()
             
-            # Registrar auditoria
+            # Registrar auditoria com informações adicionais
+            additional_info = []
+            if mappings_count > 0:
+                additional_info.append(f"{mappings_count} mapeamentos WuBook desativados")
+            if availabilities_count > 0:
+                additional_info.append(f"{availabilities_count} disponibilidades futuras desativadas")
+            
+            description = f"Quarto '{room_obj.room_number}' desativado"
+            if additional_info:
+                description += f" ({', '.join(additional_info)})"
+                
             with AuditContext(self.db, current_user, request) as audit:
                 audit.log_delete(
                     "rooms", 
                     room_obj.id, 
                     old_values,
-                    f"Quarto '{room_obj.room_number}' desativado"
+                    description
                 )
             
+            logger.info(f"Quarto {room_id} desativado com limpeza automática concluída")
             return True
             
-        except Exception:
+        except Exception as e:
             self.db.rollback()
+            logger.error(f"Erro ao desativar quarto {room_id}: {e}")
             return False
 
     def bulk_update_rooms(
@@ -469,3 +527,42 @@ class RoomService:
             'maintenance_rooms': maintenance_count,
             'occupancy_rate': 0.0  # TODO: calcular quando implementar reservations
         }
+
+    # ============== MÉTODOS PRIVADOS PARA WUBOOK ==============
+
+    def _create_auto_wubook_mapping(self, room: Room, tenant_id: int, current_user: User) -> None:
+        """Cria mapeamento WuBook automaticamente para o quarto"""
+        try:
+            # Importar apenas quando necessário para evitar dependências circulares
+            from app.services.wubook_configuration_service import WuBookConfigurationService
+            
+            wubook_service = WuBookConfigurationService(self.db)
+            
+            # Buscar configuração WuBook ativa para esta propriedade
+            configuration = wubook_service.get_configuration_by_property(room.property_id, tenant_id)
+            
+            if configuration and configuration.is_active and configuration.is_connected:
+                try:
+                    # Criar mapeamento automático usando o service
+                    mapping_created = wubook_service.create_auto_room_mapping(
+                        room_id=room.id,
+                        tenant_id=tenant_id,
+                        configuration_id=configuration.id
+                    )
+                    
+                    if mapping_created:
+                        logger.info(f"Mapeamento WuBook criado automaticamente para quarto {room.id}")
+                    else:
+                        logger.warning(f"Não foi possível criar mapeamento WuBook automaticamente para quarto {room.id}")
+                        
+                except Exception as mapping_error:
+                    logger.error(f"Erro ao criar mapeamento WuBook automático para quarto {room.id}: {mapping_error}")
+                    # Não propagar erro para não falhar a criação do quarto
+            else:
+                logger.debug(f"Configuração WuBook não encontrada ou inativa para propriedade {room.property_id}")
+                
+        except ImportError:
+            logger.warning("WuBookConfigurationService não disponível para mapeamento automático")
+        except Exception as e:
+            logger.error(f"Erro no mapeamento automático WuBook: {e}")
+            # Não propagar erro para não falhar a criação do quarto

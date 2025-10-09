@@ -624,7 +624,7 @@ class WuBookConfigurationService:
                 if best_match and best_score >= 0.5:  # Threshold mínimo
                     suggestions.append(WuBookRoomSuggestion(
                         room_id=best_match.id,
-                        room_number=best_match.number,
+                        room_number=best_match.room_number,
                         room_name=best_match.name,
                         room_type=best_match.room_type_ref.name if best_match.room_type_ref else "",
                         wubook_room_id=str(wb_room["id"]),
@@ -642,6 +642,153 @@ class WuBookConfigurationService:
         except Exception as e:
             logger.error(f"Erro ao gerar sugestões: {e}")
             return []
+    
+    # ============== MÉTODOS PARA MAPEAMENTO AUTOMÁTICO DE QUARTOS ==============
+    
+    def create_auto_room_mapping(
+        self,
+        room_id: int,
+        tenant_id: int,
+        configuration_id: Optional[int] = None
+    ) -> bool:
+        """
+        Cria mapeamento WuBook automaticamente para um quarto.
+        Se configuration_id não for fornecido, busca pela propriedade do quarto.
+        """
+        try:
+            # Buscar o quarto
+            room = self.db.query(Room).filter(
+                Room.id == room_id,
+                Room.tenant_id == tenant_id,
+                Room.is_active == True
+            ).first()
+            
+            if not room:
+                logger.warning(f"Quarto {room_id} não encontrado para criação de mapeamento automático")
+                return False
+            
+            # Buscar configuração WuBook
+            if configuration_id:
+                configuration = self.get_configuration(configuration_id, tenant_id)
+            else:
+                configuration = self.get_configuration_by_property(room.property_id, tenant_id)
+            
+            if not configuration or not configuration.is_active or not configuration.is_connected:
+                logger.debug(f"Configuração WuBook não encontrada ou inativa para propriedade {room.property_id}")
+                return False
+            
+            # Verificar se já existe mapeamento
+            existing_mapping = self.db.query(WuBookRoomMapping).filter(
+                WuBookRoomMapping.room_id == room_id,
+                WuBookRoomMapping.configuration_id == configuration.id,
+                WuBookRoomMapping.tenant_id == tenant_id
+            ).first()
+            
+            if existing_mapping:
+                if existing_mapping.is_active:
+                    logger.debug(f"Mapeamento já existe para quarto {room_id}")
+                    return True
+                else:
+                    # Reativar mapeamento existente
+                    existing_mapping.is_active = True
+                    existing_mapping.is_syncing = True
+                    existing_mapping.sync_pending = True
+                    existing_mapping.updated_at = datetime.utcnow()
+                    self.db.commit()
+                    logger.info(f"Mapeamento reativado para quarto {room_id}")
+                    return True
+            
+            # Tentar encontrar quarto correspondente no WuBook
+            try:
+                client = WuBookClient(configuration.wubook_token, int(configuration.wubook_lcode))
+                wubook_rooms = client.fetch_rooms()
+                
+                # Buscar quarto WuBook que melhor corresponde
+                best_match = None
+                best_score = 0.0
+                
+                for wb_room in wubook_rooms:
+                    score, _ = self._calculate_room_similarity(wb_room, room)
+                    if score > best_score:
+                        best_score = score
+                        best_match = wb_room
+                
+                # Se encontrou correspondência razoável, criar mapeamento
+                if best_match and best_score >= 0.3:  # Threshold mais baixo para criação automática
+                    new_mapping = WuBookRoomMapping(
+                        tenant_id=tenant_id,
+                        configuration_id=configuration.id,
+                        room_id=room_id,
+                        wubook_room_id=str(best_match["id"]),
+                        wubook_room_name=best_match.get("name", ""),
+                        wubook_room_type=best_match.get("rtype", ""),
+                        is_active=True,
+                        is_syncing=True,
+                        sync_availability=True,
+                        sync_rates=True,
+                        sync_restrictions=True,
+                        # Configurações padrão baseadas no tipo de quarto
+                        max_occupancy=getattr(room.room_type, "max_capacity", None) if room.room_type else None,
+                        standard_occupancy=getattr(room.room_type, "base_capacity", None) if room.room_type else None,
+                        min_occupancy=1,
+                        rate_multiplier=1.000,
+                        sync_pending=True,  # Marcar para sincronização inicial
+                        metadata_json={
+                            "auto_created": True,
+                            "created_at": datetime.utcnow().isoformat(),
+                            "match_score": best_score,
+                            "room_number": room.room_number,
+                            "room_name": room.name
+                        }
+                    )
+                    
+                    self.db.add(new_mapping)
+                    self.db.commit()
+                    
+                    logger.info(f"Mapeamento automático criado: Quarto {room_id} ({room.room_number}) -> WuBook {best_match['id']} (score: {best_score:.2f})")
+                    return True
+                else:
+                    logger.debug(f"Nenhuma correspondência adequada encontrada no WuBook para quarto {room_id} (melhor score: {best_score:.2f})")
+                    return False
+                    
+            except Exception as wubook_error:
+                logger.error(f"Erro ao conectar com WuBook para criar mapeamento automático: {wubook_error}")
+                return False
+                
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Erro ao criar mapeamento automático para quarto {room_id}: {e}")
+            return False
+    
+    def delete_room_mappings(self, room_id: int, tenant_id: int) -> bool:
+        """Remove todos os mapeamentos WuBook de um quarto"""
+        try:
+            mappings = self.db.query(WuBookRoomMapping).filter(
+                WuBookRoomMapping.room_id == room_id,
+                WuBookRoomMapping.tenant_id == tenant_id,
+                WuBookRoomMapping.is_active == True
+            ).all()
+            
+            mappings_count = len(mappings)
+            if mappings_count == 0:
+                logger.debug(f"Nenhum mapeamento ativo encontrado para quarto {room_id}")
+                return True
+            
+            # Desativar todos os mapeamentos
+            for mapping in mappings:
+                mapping.is_active = False
+                mapping.is_syncing = False
+                mapping.sync_pending = True  # Marcar para sincronização de remoção
+                mapping.updated_at = datetime.utcnow()
+            
+            self.db.commit()
+            logger.info(f"Removidos {mappings_count} mapeamentos WuBook para quarto {room_id}")
+            return True
+            
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Erro ao remover mapeamentos do quarto {room_id}: {e}")
+            return False
     
     # ============== ESTATÍSTICAS ==============
     
