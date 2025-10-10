@@ -1,6 +1,6 @@
 # backend/app/models/room.py
 
-from sqlalchemy import Column, String, Text, Integer, Boolean, JSON, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Text, Integer, Boolean, JSON, ForeignKey, Index, text
 from sqlalchemy.orm import relationship
 
 from app.models.base import BaseModel, TenantMixin
@@ -11,10 +11,18 @@ class Room(BaseModel, TenantMixin):
     Modelo de Quarto - quartos específicos dentro de uma propriedade.
     Vinculado a uma propriedade e tipo de quarto.
     ✅ ATUALIZADO: Inclui relacionamentos com CASCADE DELETE para limpeza automática
+    ✅ CORRIGIDO: Índice único parcial para permitir soft-delete e reuso de números
     """
     __tablename__ = "rooms"
     __table_args__ = (
-        UniqueConstraint('property_id', 'room_number', name='unique_room_per_property'),
+        # ✅ CORRIGIDO: Índice único parcial - só impede duplicação em quartos ATIVOS
+        # Permite reutilizar números de quartos excluídos (is_active = false)
+        Index(
+            'uq_active_room_per_property',
+            'tenant_id', 'property_id', 'room_number',
+            unique=True,
+            postgresql_where=text('is_active = true')
+        ),
     )
     
     # Identificação

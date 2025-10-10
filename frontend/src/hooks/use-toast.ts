@@ -11,10 +11,13 @@ type ToastProps = {
 
 interface Toast extends ToastProps {
   id: string
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 const TOAST_LIMIT = 3
-const TOAST_REMOVE_DELAY = 1000000
+// ✅ CORREÇÃO #1: Tempo realista de remoção (5 segundos ao invés de 16+ minutos)
+const TOAST_REMOVE_DELAY = 5000
 
 let toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>()
 
@@ -96,8 +99,8 @@ const toastReducer = (state: State, action: ActionType): State => {
   }
 }
 
+// Singleton state compartilhado entre todas as instâncias
 const listeners: Array<(state: State) => void> = []
-
 let memoryState: State = { toasts: [] }
 
 function dispatch(action: ActionType) {
@@ -146,6 +149,9 @@ function toast({ ...props }: ToastProps) {
 function useToast() {
   const [state, setState] = React.useState<State>(memoryState)
 
+  // ✅ CORREÇÃO #2: Array de dependências VAZIO
+  // Isso garante que o useEffect execute APENAS na montagem/desmontagem
+  // Evita loops infinitos de re-renders e listeners duplicados
   React.useEffect(() => {
     listeners.push(setState)
     return () => {
@@ -154,7 +160,7 @@ function useToast() {
         listeners.splice(index, 1)
       }
     }
-  }, [state])
+  }, []) // ✅ CRÍTICO: [] ao invés de [state]
 
   return {
     ...state,
