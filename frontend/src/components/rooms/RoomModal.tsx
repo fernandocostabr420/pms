@@ -274,6 +274,7 @@ export default function RoomModal({
     }
   };
 
+  // ✅ CORREÇÃO FINAL: onSubmit com sequência correta
   const onSubmit = async (data: RoomFormData) => {
     // Verificar disponibilidade final antes de submeter (apenas para criação)
     if (!isEdit) {
@@ -331,6 +332,8 @@ export default function RoomModal({
       }
     }
 
+    let success = false; // ✅ Flag para controlar sucesso
+
     try {
       setLoading(true);
       
@@ -371,8 +374,7 @@ export default function RoomModal({
         });
       }
 
-      onSuccess();
-      handleClose();
+      success = true; // ✅ Marca como sucesso
       
     } catch (error: any) {
       console.error('Erro ao salvar quarto:', error);
@@ -393,7 +395,13 @@ export default function RoomModal({
         });
       }
     } finally {
-      setLoading(false);
+      setLoading(false); // ✅ Reseta loading PRIMEIRO
+      
+      // ✅ SÓ DEPOIS fecha modal e chama callback se teve sucesso
+      if (success) {
+        handleClose();  // ✅ Fecha modal ANTES
+        onSuccess();     // ✅ Callback da página POR ÚLTIMO
+      }
     }
   };
 

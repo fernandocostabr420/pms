@@ -90,6 +90,20 @@ export function CalendarCell({
     }
   }, [editingField]);
 
+  // ============== HELPER FUNCTIONS ==============
+
+  /**
+   * Converte rate para número de forma segura
+   * Trata casos onde rate pode vir como string do backend
+   */
+  const getRateAsNumber = (rate: any): number | null => {
+    if (rate === null || rate === undefined) return null;
+    
+    const numRate = typeof rate === 'string' ? parseFloat(rate) : Number(rate);
+    
+    return !isNaN(numRate) && numRate >= 0 ? numRate : null;
+  };
+
   // ============== HANDLERS ==============
 
   const handleFieldEdit = (field: 'rate' | 'availability' | 'min_stay') => {
@@ -259,14 +273,17 @@ export function CalendarCell({
               className="text-center hover:bg-blue-100 rounded p-1 transition-colors"
               disabled={status === 'updating'}
             >
-              {availability.rate ? (
-                <div>
-                  <div className="font-medium">R$</div>
-                  <div className="text-xs">{availability.rate.toFixed(0)}</div>
-                </div>
-              ) : (
-                <div className="text-gray-400">--</div>
-              )}
+              {(() => {
+                const rateValue = getRateAsNumber(availability.rate);
+                return rateValue !== null ? (
+                  <div>
+                    <div className="font-medium">R$</div>
+                    <div className="text-xs">{rateValue.toFixed(0)}</div>
+                  </div>
+                ) : (
+                  <div className="text-gray-400">--</div>
+                );
+              })()}
             </button>
           )}
         </div>

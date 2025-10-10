@@ -1,7 +1,7 @@
 // frontend/src/app/dashboard/rooms/page.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -58,6 +58,8 @@ export default function RoomsPage() {
     filters,
     currentPage,
     perPage,
+    deleteRoom,
+    toggleOperational,
   } = useRooms();
 
   const [selectedRoom, setSelectedRoom] = useState<RoomResponse | null>(null);
@@ -67,8 +69,17 @@ export default function RoomsPage() {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [roomDetails, setRoomDetails] = useState<RoomResponse | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [needsRefresh, setNeedsRefresh] = useState(false); // ✅ NOVO: Flag para refresh
 
   const { toast } = useToast();
+
+  // ✅ NOVO: Effect para refresh após modal fechar
+  useEffect(() => {
+    if (!isModalOpen && needsRefresh) {
+      refreshData();
+      setNeedsRefresh(false);
+    }
+  }, [isModalOpen, needsRefresh, refreshData]);
 
   // Handlers para CRUD
   const handleCreateRoom = () => {
@@ -106,21 +117,9 @@ export default function RoomsPage() {
 
     try {
       setActionLoading('delete');
-      await apiClient.deleteRoom(roomToDelete.id);
-      
-      toast({
-        title: "Sucesso",
-        description: "Quarto excluído com sucesso",
-      });
-      
-      refreshData();
-    } catch (error: any) {
-      console.error('Erro ao excluir quarto:', error);
-      toast({
-        title: "Erro",
-        description: error.response?.data?.detail || 'Erro ao excluir quarto',
-        variant: "destructive",
-      });
+      await deleteRoom(roomToDelete.id);
+    } catch (error) {
+      // Erro já tratado no hook
     } finally {
       setActionLoading(null);
       setIsDeleteDialogOpen(false);
@@ -131,32 +130,23 @@ export default function RoomsPage() {
   const handleToggleOperational = async (room: RoomResponse) => {
     try {
       setActionLoading(`toggle-${room.id}`);
-      await apiClient.toggleRoomOperational(room.id);
-      
-      toast({
-        title: "Sucesso",
-        description: `Quarto ${room.is_operational ? 'desativado' : 'ativado'} com sucesso`,
-      });
-      
-      refreshData();
-    } catch (error: any) {
-      console.error('Erro ao alterar status:', error);
-      toast({
-        title: "Erro",
-        description: error.response?.data?.detail || 'Erro ao alterar status do quarto',
-        variant: "destructive",
-      });
+      await toggleOperational(room.id);
+    } catch (error) {
+      // Erro já tratado no hook
     } finally {
       setActionLoading(null);
     }
   };
 
-  const handleModalClose = (needsRefresh = false) => {
+  // ✅ CORRIGIDO: Apenas fecha modal e seta flag
+  const handleModalClose = () => {
     setIsModalOpen(false);
     setSelectedRoom(null);
-    if (needsRefresh) {
-      refreshData();
-    }
+  };
+
+  // ✅ CORRIGIDO: Marca que precisa refresh
+  const handleModalSuccess = () => {
+    setNeedsRefresh(true);
   };
 
   // Paginação
@@ -318,12 +308,12 @@ export default function RoomsPage() {
         </div>
       )}
 
-      {/* Modal de CRUD */}
+      {/* ✅ CORRIGIDO: Modal com callbacks separados */}
       <RoomModal
         isOpen={isModalOpen}
-        onClose={() => handleModalClose()}
+        onClose={handleModalClose}
         room={selectedRoom}
-        onSuccess={() => handleModalClose(true)}
+        onSuccess={handleModalSuccess}
       />
 
       {/* Modal de detalhes */}
