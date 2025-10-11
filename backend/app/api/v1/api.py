@@ -1,4 +1,4 @@
-# app/api/v1/api.py
+# backend/app/api/v1/api.py
 
 from fastapi import APIRouter
 
@@ -8,7 +8,8 @@ from app.api.v1.endpoints import (
     room_availability, map, payments,
     payment_methods, sales_channels, channel_manager,
     rate_plans,  # ✅ ADICIONADO
-    restrictions  # ✅ NOVO: Adicionado para sistema de restrições
+    restrictions,  # ✅ NOVO: Adicionado para sistema de restrições
+    sse  # ✅ SSE: Adicionado para notificações em tempo real
 )
 
 api_router = APIRouter()
@@ -134,4 +135,11 @@ api_router.include_router(
     channel_manager.router,
     prefix="/channel-manager", 
     tags=["Channel Manager"]
+)
+
+# ✅ SSE: Incluir rotas de Server-Sent Events (notificações em tempo real)
+api_router.include_router(
+    sse.router,
+    prefix="/sse", 
+    tags=["SSE - Notificações em Tempo Real"]
 )

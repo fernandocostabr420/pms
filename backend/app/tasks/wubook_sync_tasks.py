@@ -13,6 +13,9 @@ from app.models.room_availability import RoomAvailability
 from app.services.wubook_availability_sync_service import WuBookAvailabilitySyncService
 from app.integrations.wubook.sync_service import WuBookSyncService
 
+# ✅ SSE: Import do serviço de notificações
+from app.services.notification_service import notification_service
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,6 +78,14 @@ class WuBookSyncTasks:
                     if config_result["success"]:
                         results["configurations_success"] += 1
                         results["total_synced"] += config_result.get("synced_count", 0)
+                        
+                        # ✅ SSE: Notificar sincronização bem-sucedida
+                        notification_service.notify_sync_completed(
+                            tenant_id=config.tenant_id,
+                            configuration_id=config.id,
+                            synced_count=config_result.get("synced_count", 0),
+                            success=True
+                        )
                     else:
                         results["configurations_error"] += 1
                         results["errors"].append({
@@ -82,6 +93,15 @@ class WuBookSyncTasks:
                             "property_name": getattr(config, "wubook_property_name", "Unknown"),
                             "error": config_result.get("message", "Erro desconhecido")
                         })
+                        
+                        # ✅ SSE: Notificar erro na sincronização
+                        notification_service.notify_sync_completed(
+                            tenant_id=config.tenant_id,
+                            configuration_id=config.id,
+                            synced_count=0,
+                            success=False,
+                            error=config_result.get("message", "Erro desconhecido")
+                        )
                 
                 results["completed_at"] = datetime.utcnow().isoformat()
                 results["success"] = results["configurations_error"] == 0
@@ -146,6 +166,10 @@ class WuBookSyncTasks:
                     date_from=date_from,
                     date_to=date_to
                 )
+            
+            # ✅ SSE: Notificar atualização de contagem de pendentes após sync
+            if result.get("success"):
+                WuBookSyncTasks._notify_pending_count_for_tenant(db, config.tenant_id)
             
             return result
             
@@ -219,6 +243,19 @@ class WuBookSyncTasks:
                 result["task_id"] = task_id
                 result["completed_at"] = datetime.utcnow().isoformat()
                 
+                # ✅ SSE: Notificar conclusão da sincronização específica
+                notification_service.notify_sync_completed(
+                    tenant_id=tenant_id,
+                    configuration_id=configuration_id,
+                    synced_count=result.get("synced_count", 0),
+                    success=result.get("success", False),
+                    error=result.get("error") if not result.get("success") else None
+                )
+                
+                # ✅ SSE: Atualizar contagem de pendentes
+                if result.get("success"):
+                    WuBookSyncTasks._notify_pending_count_for_tenant(db, tenant_id)
+                
                 logger.info(f"Sync específica concluída: {task_id}")
                 
                 return result
@@ -229,6 +266,15 @@ class WuBookSyncTasks:
         except Exception as e:
             error_msg = f"Erro na sync específica {configuration_id}: {str(e)}"
             logger.error(f"{error_msg}\n{traceback.format_exc()}")
+            
+            # ✅ SSE: Notificar erro
+            notification_service.notify_sync_completed(
+                tenant_id=tenant_id,
+                configuration_id=configuration_id,
+                synced_count=0,
+                success=False,
+                error=error_msg
+            )
             
             return {
                 "task_id": task_id,
@@ -424,6 +470,8 @@ class WuBookSyncTasks:
                 
                 # Agrupar por configuração
                 by_config = {}
+                tenants_affected = set()
+                
                 for avail in error_availabilities:
                     # Buscar configuração via room mapping
                     mapping = db.query(WuBookRoomMapping).filter(
@@ -436,6 +484,7 @@ class WuBookSyncTasks:
                         if config_id not in by_config:
                             by_config[config_id] = []
                         by_config[config_id].append(avail)
+                        tenants_affected.add(avail.tenant_id)
                 
                 # Processar por configuração
                 sync_service = WuBookAvailabilitySyncService(db)
@@ -469,6 +518,14 @@ class WuBookSyncTasks:
                         
                         if result["success"]:
                             results["items_success"] += len(availabilities)
+                            
+                            # ✅ SSE: Notificar sucesso do retry
+                            notification_service.notify_sync_completed(
+                                tenant_id=config.tenant_id,
+                                configuration_id=config_id,
+                                synced_count=len(availabilities),
+                                success=True
+                            )
                         else:
                             results["items_failed"] += len(availabilities)
                             results["errors"].append({
@@ -485,6 +542,10 @@ class WuBookSyncTasks:
                             "configuration_id": config_id,
                             "error": str(e)
                         })
+                
+                # ✅ SSE: Notificar atualização de contagem para todos os tenants afetados
+                for tenant_id in tenants_affected:
+                    WuBookSyncTasks._notify_pending_count_for_tenant(db, tenant_id)
                 
                 results["completed_at"] = datetime.utcnow().isoformat()
                 results["success"] = results["items_failed"] == 0
@@ -507,6 +568,39 @@ class WuBookSyncTasks:
                 "error": error_msg,
                 "completed_at": datetime.utcnow().isoformat()
             }
+    
+    # ✅ SSE: Método auxiliar para notificar contagem de pendentes
+    @staticmethod
+    def _notify_pending_count_for_tenant(db: Session, tenant_id: int):
+        """Notifica atualização na contagem de itens pendentes para um tenant"""
+        try:
+            from sqlalchemy import func
+            
+            # Buscar contagem total de pendentes
+            total_pending = db.query(func.count(RoomAvailability.id)).filter(
+                RoomAvailability.tenant_id == tenant_id,
+                RoomAvailability.sync_pending == True,
+                RoomAvailability.is_active == True
+            ).scalar() or 0
+            
+            # Buscar data mais antiga pendente
+            oldest = db.query(func.min(RoomAvailability.date)).filter(
+                RoomAvailability.tenant_id == tenant_id,
+                RoomAvailability.sync_pending == True,
+                RoomAvailability.is_active == True
+            ).scalar()
+            
+            oldest_date = oldest.isoformat() if oldest else None
+            
+            # Notificar via SSE
+            notification_service.notify_sync_pending_updated(
+                tenant_id=tenant_id,
+                total=total_pending,
+                oldest_date=oldest_date
+            )
+            
+        except Exception as e:
+            logger.warning(f"Erro ao notificar contagem de pendentes para tenant {tenant_id}: {e}")
 
 
 # Funções para integração com Celery (se usado)
