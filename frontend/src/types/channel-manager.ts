@@ -162,6 +162,8 @@ export interface BulkAvailabilityUpdate {
   
   reason?: string;
   notes?: string;
+  
+  // ❌ REMOVIDO: sync_immediately não existe mais
 }
 
 export interface BulkOperationResult {
@@ -173,8 +175,11 @@ export interface BulkOperationResult {
   changes_summary: Record<string, any>;
 }
 
-// ============== SYNC ==============
+// ============== SYNC (DEPRECATED) ==============
 
+/**
+ * @deprecated Use ManualSyncRequest
+ */
 export interface SyncRequest {
   sync_type?: string;
   room_ids?: number[];
@@ -184,6 +189,9 @@ export interface SyncRequest {
   sync_direction?: SyncDirection;
 }
 
+/**
+ * @deprecated Use ManualSyncResult
+ */
 export interface SyncResult {
   task_id: string;
   status: string;
@@ -194,6 +202,53 @@ export interface SyncResult {
   changes_summary: Record<string, any>;
   started_at: string;
   completed_at?: string;
+}
+
+// ============== 🆕 SINCRONIZAÇÃO MANUAL ==============
+
+/**
+ * 🆕 Request para contagem de registros pendentes
+ */
+export interface PendingCountResponse {
+  total_pending: number;
+  by_property: Record<string, number>;
+  has_pending: boolean;
+}
+
+/**
+ * 🆕 Response com intervalo de datas pendentes (detecção automática)
+ */
+export interface PendingDateRangeResponse {
+  date_from: string | null;
+  date_to: string | null;
+  total_pending: number;
+  rooms_affected: number[];
+  has_pending: boolean;
+}
+
+/**
+ * 🆕 Request para sincronização manual
+ */
+export interface ManualSyncRequest {
+  property_id?: number;
+  force_all?: boolean;
+  async_processing?: boolean;
+  batch_size?: number;
+}
+
+/**
+ * 🆕 Resultado da sincronização manual
+ */
+export interface ManualSyncResult {
+  sync_id: string;
+  status: string;
+  message: string;
+  processed: number;
+  successful: number;
+  failed: number;
+  success_rate: number;
+  errors: string[];
+  duration_seconds: number;
 }
 
 // ============== FILTROS ==============

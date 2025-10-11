@@ -9,7 +9,11 @@ import {
   BulkOperationResult,
   SyncRequest,
   SyncResult,
-  ChannelManagerFilters
+  ChannelManagerFilters,
+  PendingCountResponse,
+  PendingDateRangeResponse,
+  ManualSyncRequest,
+  ManualSyncResult
 } from '@/types/channel-manager';
 
 export class ChannelManagerAPI {
@@ -153,22 +157,51 @@ export class ChannelManagerAPI {
     }
   }
 
-  // ============== SINCRONIZAÇÃO ==============
+  // ============== SINCRONIZAÇÃO MANUAL ==============
   
   /**
-   * Inicia sincronização manual com WuBook
+   * 🆕 Busca contagem de registros pendentes de sincronização
    */
-  async syncWithWuBook(request: SyncRequest): Promise<SyncResult> {
+  async getPendingCount(propertyId?: number): Promise<PendingCountResponse> {
     try {
-      const response = await apiClient.post('/channel-manager/sync', request);
+      const params = propertyId ? { property_id: propertyId } : {};
+      const response = await apiClient.get('/channel-manager/sync/pending-count', { params });
       return response.data;
     } catch (error) {
-      console.error('Erro na sincronização com WuBook:', error);
+      console.error('Erro ao buscar contagem de pendentes:', error);
       throw error;
     }
   }
 
   /**
+   * 🆕 Busca intervalo de datas com registros pendentes (detecção automática)
+   */
+  async getPendingDateRange(propertyId?: number): Promise<PendingDateRangeResponse> {
+    try {
+      const params = propertyId ? { property_id: propertyId } : {};
+      const response = await apiClient.get('/channel-manager/sync/pending-range', { params });
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao buscar intervalo de datas pendentes:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * ✅ ATUALIZADO: Executa sincronização manual consolidada com WuBook
+   */
+  async syncWithWuBook(data: ManualSyncRequest): Promise<ManualSyncResult> {
+    try {
+      const response = await apiClient.post('/channel-manager/sync/manual', data);
+      return response.data;
+    } catch (error) {
+      console.error('Erro na sincronização manual:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * @deprecated Use syncWithWuBook com ManualSyncRequest
    * Busca status de sincronização por task_id
    */
   async getSyncStatus(taskId: string): Promise<SyncResult> {
@@ -182,6 +215,7 @@ export class ChannelManagerAPI {
   }
 
   /**
+   * @deprecated Use syncWithWuBook com force_all: true
    * Força sincronização completa
    */
   async forceFullSync(params?: {
@@ -194,7 +228,15 @@ export class ChannelManagerAPI {
         force_sync: true,
         ...params
       };
-      return await this.syncWithWuBook(request);
+      
+      // Converter para novo formato
+      const manualRequest: ManualSyncRequest = {
+        property_id: params?.property_id,
+        force_all: true,
+        async_processing: false
+      };
+      
+      return await this.syncWithWuBook(manualRequest) as any;
     } catch (error) {
       console.error('Erro na sincronização completa:', error);
       throw error;

@@ -1,5 +1,4 @@
 // frontend/src/hooks/useChannelManagerCalendar.ts
-// Path: frontend/src/hooks/useChannelManagerCalendar.ts
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { addDays, format, startOfWeek } from 'date-fns';
@@ -9,7 +8,9 @@ import {
   ChannelManagerFilters,
   CalendarUIState,
   BulkEditState,
-  SimpleAvailabilityView
+  SimpleAvailabilityView,
+  PendingCountResponse,
+  PendingDateRangeResponse
 } from '@/types/channel-manager';
 
 interface UseChannelManagerCalendarProps {
@@ -50,8 +51,10 @@ interface UseChannelManagerCalendarReturn {
   updateBulkEditState: (updates: Partial<BulkEditState>) => void;
   executeBulkEdit: () => Promise<void>;
   
-  // Sincronização
+  // 🆕 Sincronização Manual
   syncStatus: 'idle' | 'syncing' | 'success' | 'error';
+  pendingCount: number;
+  dateRangeInfo: PendingDateRangeResponse | null;
   syncWithWuBook: () => Promise<void>;
   
   // Utilidades
@@ -113,13 +116,16 @@ export function useChannelManagerCalendar({
     actions: {}
   });
   
-  // ============== SINCRONIZAÇÃO ==============
+  // ============== 🆕 SINCRONIZAÇÃO MANUAL ==============
   
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const [pendingCount, setPendingCount] = useState<number>(0);
+  const [dateRangeInfo, setDateRangeInfo] = useState<PendingDateRangeResponse | null>(null);
   
   // ============== REFS ==============
   
   const refreshTimeoutRef = useRef<NodeJS.Timeout>();
+  const pendingCountIntervalRef = useRef<NodeJS.Timeout>();
   const lastFetchParamsRef = useRef<string>('');
   
   // ============== FETCH DATA ==============
@@ -156,6 +162,32 @@ export function useChannelManagerCalendar({
     }
   }, [dateRange.from, dateRange.to, filters, data]);
   
+  // ============== 🆕 POLLING DE PENDENTES ==============
+  
+  const fetchPendingCount = useCallback(async () => {
+    try {
+      const result = await channelManagerAPI.getPendingCount(filters.property_id);
+      setPendingCount(result.total_pending);
+    } catch (err) {
+      console.error('Erro ao buscar contagem de pendentes:', err);
+      // Não exibir erro ao usuário - apenas log
+    }
+  }, [filters.property_id]);
+  
+  const fetchDateRangeInfo = useCallback(async () => {
+    try {
+      if (pendingCount > 0) {
+        const result = await channelManagerAPI.getPendingDateRange(filters.property_id);
+        setDateRangeInfo(result);
+      } else {
+        setDateRangeInfo(null);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar intervalo de datas pendentes:', err);
+      setDateRangeInfo(null);
+    }
+  }, [pendingCount, filters.property_id]);
+  
   // ============== EFEITOS ==============
   
   // Carregar dados iniciais
@@ -163,7 +195,33 @@ export function useChannelManagerCalendar({
     fetchData();
   }, [fetchData]);
   
-  // Auto refresh
+  // 🆕 Polling de pendentes a cada 5 segundos
+  useEffect(() => {
+    // Buscar imediatamente
+    fetchPendingCount();
+    
+    // Configurar polling
+    pendingCountIntervalRef.current = setInterval(() => {
+      fetchPendingCount();
+    }, 5000); // 5 segundos
+    
+    return () => {
+      if (pendingCountIntervalRef.current) {
+        clearInterval(pendingCountIntervalRef.current);
+      }
+    };
+  }, [fetchPendingCount]);
+  
+  // 🆕 Buscar intervalo quando pendingCount mudar
+  useEffect(() => {
+    if (pendingCount > 0) {
+      fetchDateRangeInfo();
+    } else {
+      setDateRangeInfo(null);
+    }
+  }, [pendingCount, fetchDateRangeInfo]);
+  
+  // Auto refresh do calendário
   useEffect(() => {
     if (autoRefresh && refreshInterval > 0) {
       refreshTimeoutRef.current = setInterval(() => {
@@ -183,6 +241,9 @@ export function useChannelManagerCalendar({
     return () => {
       if (refreshTimeoutRef.current) {
         clearInterval(refreshTimeoutRef.current);
+      }
+      if (pendingCountIntervalRef.current) {
+        clearInterval(pendingCountIntervalRef.current);
       }
     };
   }, []);
@@ -270,6 +331,7 @@ export function useChannelManagerCalendar({
         ...(actions.restrictions?.minStay && { min_stay: actions.restrictions.minStay }),
         ...(actions.restrictions?.closedToArrival !== undefined && { closed_to_arrival: actions.restrictions.closedToArrival }),
         ...(actions.restrictions?.closedToDeparture !== undefined && { closed_to_departure: actions.restrictions.closedToDeparture })
+        // ❌ REMOVIDO: sync_immediately
       };
       
       await channelManagerAPI.bulkUpdateAvailability(bulkData);
@@ -278,29 +340,40 @@ export function useChannelManagerCalendar({
       setBulkEditState(prev => ({ ...prev, isOpen: false }));
       await fetchData();
       
+      // ✅ Após bulk edit, o sistema marca automaticamente para sync
+      // O polling atualizará o pendingCount automaticamente
+      
     } catch (error) {
       console.error('Erro na edição em massa:', error);
       throw error;
     }
   }, [bulkEditState, fetchData]);
   
-  // ============== SINCRONIZAÇÃO ==============
+  // ============== 🆕 SINCRONIZAÇÃO MANUAL ==============
   
   const syncWithWuBook = useCallback(async () => {
     try {
       setSyncStatus('syncing');
       
-      await channelManagerAPI.syncWithWuBook({
-        sync_type: 'availability',
-        room_ids: filters.room_ids,
-        date_from: format(dateRange.from, 'yyyy-MM-dd'),
-        date_to: format(dateRange.to, 'yyyy-MM-dd')
+      const result = await channelManagerAPI.syncWithWuBook({
+        property_id: filters.property_id,
+        force_all: false, // Apenas pendentes
+        async_processing: false, // Síncrono
+        batch_size: 100
       });
       
-      setSyncStatus('success');
-      
-      // Refresh após sincronização
-      setTimeout(() => fetchData(false), 2000);
+      if (result.status === 'success' || result.status === 'completed') {
+        setSyncStatus('success');
+        
+        // Zerar contador imediatamente
+        setPendingCount(0);
+        setDateRangeInfo(null);
+        
+        // Refresh do calendário após sincronização
+        setTimeout(() => fetchData(false), 2000);
+      } else {
+        setSyncStatus('error');
+      }
       
     } catch (error) {
       console.error('Erro na sincronização:', error);
@@ -309,7 +382,7 @@ export function useChannelManagerCalendar({
       // Reset status após 3 segundos
       setTimeout(() => setSyncStatus('idle'), 3000);
     }
-  }, [filters.room_ids, dateRange, fetchData]);
+  }, [filters.property_id, fetchData]);
   
   // ============== UTILIDADES ==============
   
@@ -370,8 +443,10 @@ export function useChannelManagerCalendar({
     updateBulkEditState,
     executeBulkEdit,
     
-    // Sincronização
+    // 🆕 Sincronização Manual
     syncStatus,
+    pendingCount,
+    dateRangeInfo,
     syncWithWuBook,
     
     // Utilidades

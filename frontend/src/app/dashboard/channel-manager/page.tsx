@@ -1,5 +1,4 @@
 // frontend/src/app/dashboard/channel-manager/page.tsx
-// Path: frontend/src/app/dashboard/channel-manager/page.tsx
 
 'use client';
 
@@ -18,7 +17,8 @@ import {
   Settings,
   BarChart3,
   Users,
-  Building
+  Building,
+  Loader2
 } from 'lucide-react';
 
 import { useChannelManagerCalendar } from '@/hooks/useChannelManagerCalendar';
@@ -28,9 +28,12 @@ import { CalendarHeader } from '@/components/channel-manager/CalendarHeader';
 import { ChannelManagerCalendar } from '@/components/channel-manager/ChannelManagerCalendar';
 import { BulkEditModal } from '@/components/channel-manager/BulkEditModal';
 import { CalendarLegend } from '@/components/channel-manager/CalendarLegend';
+import { useToast } from '@/hooks/use-toast';
 
 export default function ChannelManagerPage() {
   const { property, loading: propertyLoading } = useProperty();
+  const { toast } = useToast();
+  const [showTooltip, setShowTooltip] = useState(false);
   
   const {
     data,
@@ -50,17 +53,67 @@ export default function ChannelManagerPage() {
     updateBulkEditState,
     executeBulkEdit,
     syncStatus,
+    pendingCount,
+    dateRangeInfo,
     syncWithWuBook,
     refresh,
     calculateStats
   } = useChannelManagerCalendar({
     propertyId: property?.id,
     autoRefresh: true,
-    refreshInterval: 60 // Refresh a cada 60 segundos
+    refreshInterval: 60 // Refresh do calendário a cada 60 segundos
   });
 
   const [showOverview, setShowOverview] = useState(true);
+  const [dismissedAlert, setDismissedAlert] = useState(false);
   const stats = calculateStats();
+
+  // Reset dismissed alert quando pendingCount mudar
+  useEffect(() => {
+    if (pendingCount > 0) {
+      setDismissedAlert(false);
+    }
+  }, [pendingCount]);
+
+  // ============== SINCRONIZAÇÃO ==============
+
+  const handleSync = async () => {
+    if (pendingCount === 0) {
+      toast({
+        title: "Nenhuma alteração pendente",
+        description: "Não há registros para sincronizar no momento.",
+        variant: "default"
+      });
+      return;
+    }
+
+    try {
+      await syncWithWuBook();
+      
+      toast({
+        title: "✓ Sincronização concluída",
+        description: `${pendingCount} registros foram sincronizados com sucesso.`,
+        variant: "default"
+      });
+    } catch (error) {
+      toast({
+        title: "Erro na sincronização",
+        description: "Não foi possível sincronizar com o WuBook. Tente novamente.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // ============== FORMATAÇÃO ==============
+
+  const formatDateRange = () => {
+    if (!dateRangeInfo?.date_from || !dateRangeInfo?.date_to) return '';
+    
+    const from = new Date(dateRangeInfo.date_from);
+    const to = new Date(dateRangeInfo.date_to);
+    
+    return `${from.toLocaleDateString('pt-BR')} até ${to.toLocaleDateString('pt-BR')}`;
+  };
 
   // ============== LOADING STATES ==============
   
@@ -156,14 +209,71 @@ export default function ChannelManagerPage() {
             </Badge>
           )}
           
-          <Button 
-            onClick={syncWithWuBook}
-            disabled={syncStatus === 'syncing'}
-            variant="outline"
+          {/* 🆕 BOTÃO DE SINCRONIZAÇÃO MANUAL COM BADGE E TOOLTIP */}
+          <div 
+            className="relative inline-block"
+            onMouseEnter={() => setShowTooltip(true)}
+            onMouseLeave={() => setShowTooltip(false)}
           >
-            <RefreshCw className={`h-4 w-4 mr-2 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
-            Sincronizar WuBook
-          </Button>
+            <Button 
+              onClick={handleSync}
+              disabled={syncStatus === 'syncing' || pendingCount === 0}
+              variant={pendingCount > 0 ? "default" : "outline"}
+              className="relative"
+            >
+              {syncStatus === 'syncing' ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Sincronizando...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Sincronizar WuBook
+                </>
+              )}
+              
+              {/* 🆕 BADGE COM CONTADOR */}
+              {pendingCount > 0 && syncStatus !== 'syncing' && (
+                <Badge 
+                  className="absolute -top-2 -right-2 bg-orange-500 hover:bg-orange-600 text-white border-white"
+                  variant="default"
+                >
+                  {pendingCount}
+                </Badge>
+              )}
+            </Button>
+            
+            {/* 🆕 TOOLTIP CUSTOMIZADO */}
+            {showTooltip && (
+              <div className="absolute z-50 bottom-full mb-2 left-1/2 transform -translate-x-1/2 px-3 py-2 text-sm bg-gray-900 text-white rounded-md shadow-lg whitespace-nowrap animate-in fade-in-0 zoom-in-95">
+                {pendingCount > 0 ? (
+                  <div className="space-y-1">
+                    <p className="font-semibold">{pendingCount} {pendingCount === 1 ? 'registro pendente' : 'registros pendentes'}</p>
+                    {dateRangeInfo && dateRangeInfo.date_from && dateRangeInfo.date_to && (
+                      <>
+                        <p className="text-xs">
+                          <strong>Período:</strong> {formatDateRange()}
+                        </p>
+                        {dateRangeInfo.rooms_affected.length > 0 && (
+                          <p className="text-xs">
+                            <strong>Quartos:</strong> {dateRangeInfo.rooms_affected.length} {dateRangeInfo.rooms_affected.length === 1 ? 'quarto afetado' : 'quartos afetados'}
+                          </p>
+                        )}
+                      </>
+                    )}
+                    <p className="text-xs opacity-75 mt-1">
+                      Clique para sincronizar
+                    </p>
+                  </div>
+                ) : (
+                  <p>Nenhuma alteração pendente</p>
+                )}
+                {/* Seta do tooltip */}
+                <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-gray-900"></div>
+              </div>
+            )}
+          </div>
           
           <Button onClick={() => setShowOverview(!showOverview)} variant="ghost">
             <BarChart3 className="h-4 w-4 mr-2" />
@@ -171,6 +281,65 @@ export default function ChannelManagerPage() {
           </Button>
         </div>
       </div>
+
+      {/* 🆕 BANNER DE AVISO DE ALTERAÇÕES PENDENTES */}
+      {pendingCount > 0 && !dismissedAlert && (
+        <Alert className="border-orange-500 bg-orange-50 animate-in slide-in-from-top-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-start gap-3 flex-1">
+              <AlertTriangle className="h-5 w-5 text-orange-600 mt-0.5 animate-pulse" />
+              <div className="flex-1">
+                <div className="font-semibold text-orange-900 mb-1">
+                  ⚠️ Você tem {pendingCount} {pendingCount === 1 ? 'alteração pendente' : 'alterações pendentes'} de sincronização
+                </div>
+                <AlertDescription className="text-orange-800 text-sm">
+                  {dateRangeInfo && dateRangeInfo.date_from && dateRangeInfo.date_to ? (
+                    <>
+                      As alterações no período de <strong>{formatDateRange()}</strong>
+                      {dateRangeInfo.rooms_affected.length > 0 && (
+                        <> afetando <strong>{dateRangeInfo.rooms_affected.length} {dateRangeInfo.rooms_affected.length === 1 ? 'quarto' : 'quartos'}</strong></>
+                      )}
+                      {' '}precisam ser sincronizadas com o WuBook para que os canais de venda sejam atualizados.
+                    </>
+                  ) : (
+                    <>
+                      Suas alterações precisam ser sincronizadas com o WuBook para que os canais de venda sejam atualizados.
+                    </>
+                  )}
+                </AlertDescription>
+                <div className="flex items-center gap-2 mt-3">
+                  <Button 
+                    onClick={handleSync}
+                    disabled={syncStatus === 'syncing'}
+                    size="sm"
+                    className="bg-orange-600 hover:bg-orange-700 text-white"
+                  >
+                    {syncStatus === 'syncing' ? (
+                      <>
+                        <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                        Sincronizando...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-3 w-3 mr-2" />
+                        Sincronizar Agora
+                      </>
+                    )}
+                  </Button>
+                  <Button 
+                    onClick={() => setDismissedAlert(true)}
+                    variant="ghost"
+                    size="sm"
+                    className="text-orange-800 hover:text-orange-900 hover:bg-orange-100"
+                  >
+                    Dispensar
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Alert>
+      )}
 
       {/* ===== OVERVIEW CARDS ===== */}
       {showOverview && data && (
@@ -240,6 +409,12 @@ export default function ChannelManagerPage() {
               <p className="text-xs text-gray-500 mt-1">
                 {data.statistics.synced_records} de {data.statistics.total_records} registros
               </p>
+              {/* 🆕 Mostrar pendentes no card */}
+              {pendingCount > 0 && (
+                <Badge variant="outline" className="mt-2 text-orange-600 border-orange-600">
+                  {pendingCount} pendente{pendingCount !== 1 ? 's' : ''}
+                </Badge>
+              )}
             </CardContent>
           </Card>
         </div>
