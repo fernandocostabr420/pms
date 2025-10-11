@@ -63,7 +63,7 @@ def list_availabilities(
     min_rate: Optional[float] = Query(None, ge=0, description="Preço mínimo"),
     max_rate: Optional[float] = Query(None, ge=0, description="Preço máximo"),
     
-    # Filtros de sincronização WuBook (NOVOS)
+    # Filtros de sincronização WuBook
     sync_pending: Optional[bool] = Query(None, description="Pendente de sincronização"),
     wubook_synced: Optional[bool] = Query(None, description="Sincronizado com WuBook"),
     has_sync_error: Optional[bool] = Query(None, description="Com erro de sincronização"),
@@ -174,17 +174,21 @@ def create_availability(
     availability_data: RoomAvailabilityCreate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-    skip_sync: bool = Query(False, description="Pular sincronização automática")
+    current_user: User = Depends(get_current_active_user)
 ):
-    """Cria nova disponibilidade"""
+    """
+    Cria nova disponibilidade
+    
+    ⚠️ IMPORTANTE: SEMPRE marca como pendente de sincronização (sync_pending=True)
+    """
     availability_service = RoomAvailabilityService(db)
     
     try:
+        # ✅ SEMPRE marcar para sincronização (hardcoded)
         availability = availability_service.create_availability(
             availability_data, 
             current_user.tenant_id,
-            mark_for_sync=not skip_sync
+            mark_for_sync=True  # ✅ SEMPRE True
         )
         
         response_data = RoomAvailabilityResponse.model_validate(availability)
@@ -206,18 +210,22 @@ def update_availability(
     availability_data: RoomAvailabilityUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-    skip_sync: bool = Query(False, description="Pular sincronização automática")
+    current_user: User = Depends(get_current_active_user)
 ):
-    """Atualiza disponibilidade existente"""
+    """
+    Atualiza disponibilidade existente
+    
+    ⚠️ IMPORTANTE: SEMPRE marca como pendente de sincronização (sync_pending=True)
+    """
     availability_service = RoomAvailabilityService(db)
     
     try:
+        # ✅ SEMPRE marcar para sincronização (hardcoded)
         availability = availability_service.update_availability(
             availability_id, 
             availability_data, 
             current_user.tenant_id,
-            mark_for_sync=not skip_sync
+            mark_for_sync=True  # ✅ SEMPRE True
         )
         
         if not availability:
@@ -265,17 +273,22 @@ def bulk_update_availability(
     bulk_data: BulkAvailabilityUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user),
-    skip_sync: bool = Query(False, description="Pular sincronização automática")
+    current_user: User = Depends(get_current_active_user)
 ):
-    """Atualização em massa de disponibilidades"""
+    """
+    Atualização em massa de disponibilidades
+    
+    ⚠️ IMPORTANTE: SEMPRE marca como pendente de sincronização (sync_pending=True)
+    Usuário deve clicar no botão "Sincronizar WuBook" para enviar as alterações
+    """
     availability_service = RoomAvailabilityService(db)
     
     try:
+        # ✅ SEMPRE marcar para sincronização (hardcoded)
         result = availability_service.bulk_update_availability(
             bulk_data, 
             current_user.tenant_id,
-            mark_for_sync=not skip_sync
+            mark_for_sync=True  # ✅ SEMPRE True
         )
         return result
         

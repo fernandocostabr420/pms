@@ -7,7 +7,6 @@ from sqlalchemy import and_, or_, func, case
 from datetime import date, datetime, timedelta
 import logging
 import math
-import asyncio
 
 from app.core.database import get_db
 from app.api.deps import get_current_active_user
@@ -58,7 +57,6 @@ try:
     BULK_EDIT_AVAILABLE = True
 except ImportError:
     BULK_EDIT_AVAILABLE = False
-    logger.warning("Bulk edit schemas/services not available")
 
 # ✅ IMPORTS PARA SINCRONIZAÇÃO MANUAL
 try:
@@ -70,7 +68,6 @@ try:
     MANUAL_SYNC_AVAILABLE = True
 except ImportError:
     MANUAL_SYNC_AVAILABLE = False
-    logger.warning("Manual sync schemas/services not available")
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -121,7 +118,7 @@ def get_channel_manager_overview(
             "connected": connected_channels,
             "disconnected": total_configurations - connected_channels,
             "error": error_configurations,
-            "syncing": 0  # Seria calculado baseado em jobs ativos
+            "syncing": 0
         }
         
         # Última sincronização
@@ -134,19 +131,18 @@ def get_channel_manager_overview(
         
         last_sync = last_sync_query.order_by(WuBookSyncLog.created_at.desc()).first()
         
-        # Estatísticas de disponibilidade (reais baseadas no período)
+        # Estatísticas de disponibilidade
         avail_query = db.query(RoomAvailability).join(Room).filter(
             RoomAvailability.tenant_id == current_user.tenant_id,
             RoomAvailability.date >= date_from,
             RoomAvailability.date <= date_to,
             RoomAvailability.is_active == True,
-            Room.is_active == True  # ✅ FILTRO PARA QUARTOS ATIVOS
+            Room.is_active == True
         )
         
         if property_id:
             avail_query = avail_query.filter(Room.property_id == property_id)
         
-        # Contar estatísticas de disponibilidade
         avail_stats = avail_query.with_entities(
             func.count(RoomAvailability.id).label('total'),
             func.sum(case((RoomAvailability.is_available == True, 1), else_=0)).label('available'),
@@ -162,7 +158,7 @@ def get_channel_manager_overview(
             "sync_rate": round((avail_stats.synced or 0) / max(avail_stats.total or 1, 1) * 100, 2)
         }
         
-        # Estatísticas de sincronização (baseadas em logs reais)
+        # Estatísticas de sincronização
         sync_logs_today = db.query(WuBookSyncLog).join(WuBookConfiguration).filter(
             WuBookConfiguration.tenant_id == current_user.tenant_id,
             func.date(WuBookSyncLog.created_at) == date.today()
@@ -185,7 +181,7 @@ def get_channel_manager_overview(
             )
         }
         
-        # Canais por tipo (analisando nome da propriedade)
+        # Canais por tipo
         channels_by_type = {
             "booking_com": len([c for c in configurations if "booking" in (c.wubook_property_name or "").lower()]),
             "expedia": len([c for c in configurations if "expedia" in (c.wubook_property_name or "").lower()]),
@@ -198,10 +194,9 @@ def get_channel_manager_overview(
             channels_by_type["airbnb"]
         ])
         
-        # Alertas baseados em condições reais
+        # Alertas
         alerts = []
         
-        # Alertas por configurações com muitos erros
         for config in configurations:
             if config.error_count > 5:
                 alerts.append({
@@ -212,7 +207,6 @@ def get_channel_manager_overview(
                     "created_at": datetime.utcnow().isoformat()
                 })
         
-        # Alerta por sincronização antiga
         if last_sync and last_sync.completed_at:
             try:
                 last_sync_dt = datetime.fromisoformat(last_sync.completed_at)
@@ -228,7 +222,6 @@ def get_channel_manager_overview(
             except (ValueError, TypeError):
                 logger.warning("Erro ao processar data da última sincronização")
         
-        # Alerta por muitos registros pendentes
         pending_sync_count = avail_stats.pending_sync or 0
         if pending_sync_count > 100:
             alerts.append({
@@ -268,12 +261,8 @@ def get_channel_manager_overview(
 def list_channel_configurations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
-    
-    # Paginação
     page: int = Query(1, ge=1, description="Página"),
     per_page: int = Query(20, ge=1, le=100, description="Itens por página"),
-    
-    # Filtros
     channel_type: Optional[ChannelType] = Query(None, description="Tipo de canal"),
     status: Optional[ChannelSyncStatus] = Query(None, description="Status"),
     is_active: Optional[bool] = Query(None, description="Apenas ativos"),
@@ -284,15 +273,12 @@ def list_channel_configurations(
 ):
     """Lista configurações de Channel Manager com filtros avançados"""
     try:
-        logger.info(f"Listando configurações Channel Manager - User: {current_user.id}, "
-                   f"Filters: active={is_active}, sync={sync_enabled}, errors={has_errors}")
+        logger.info(f"Listando configurações Channel Manager - User: {current_user.id}")
         
-        # Query base
         query = db.query(WuBookConfiguration).filter(
             WuBookConfiguration.tenant_id == current_user.tenant_id
         )
         
-        # Aplicar filtros
         if is_active is not None:
             query = query.filter(WuBookConfiguration.is_active == is_active)
         
@@ -318,7 +304,6 @@ def list_channel_configurations(
             )
         
         if status:
-            # Filtrar por status específico
             if status == ChannelSyncStatus.CONNECTED:
                 query = query.filter(
                     WuBookConfiguration.is_active == True,
@@ -335,17 +320,12 @@ def list_channel_configurations(
                     )
                 )
         
-        # Contar total antes da paginação
         total = query.count()
-        
-        # Aplicar paginação
         skip = (page - 1) * per_page
         configurations = query.offset(skip).limit(per_page).all()
         
-        # Converter para response
         items = []
         for config in configurations:
-            # Determinar status real da configuração
             if not config.is_active:
                 config_status = ChannelSyncStatus.DISCONNECTED
             elif config.error_count > 0:
@@ -355,7 +335,6 @@ def list_channel_configurations(
             else:
                 config_status = ChannelSyncStatus.PENDING
             
-            # Buscar estatísticas de sincronização
             total_syncs = db.query(func.count(WuBookSyncLog.id)).filter(
                 WuBookSyncLog.configuration_id == config.id
             ).scalar() or 0
@@ -365,7 +344,6 @@ def list_channel_configurations(
                 WuBookSyncLog.status == "success"
             ).scalar() or 0
             
-            # Determinar tipo de canal baseado no nome
             channel_type_detected = ChannelType.OTHER
             if config.wubook_property_name:
                 prop_name = config.wubook_property_name.lower()
@@ -384,7 +362,7 @@ def list_channel_configurations(
                 channel_name=config.wubook_property_name or f"WuBook {config.wubook_lcode}",
                 sync_enabled=config.sync_enabled,
                 sync_direction=SyncDirection.BIDIRECTIONAL,
-                sync_frequency="every_15min",  # Padrão
+                sync_frequency="every_15min",
                 sync_availability=config.sync_availability,
                 sync_rates=config.sync_rates,
                 sync_restrictions=config.sync_restrictions,
@@ -408,7 +386,6 @@ def list_channel_configurations(
             
             items.append(item)
         
-        # Calcular resumo
         summary = {
             "total_configurations": total,
             "active_configurations": len([i for i in items if i.is_active]),
@@ -464,7 +441,6 @@ def get_channel_configuration(
                 detail="Configuração não encontrada"
             )
         
-        # Determinar status
         if not config.is_active:
             config_status = ChannelSyncStatus.DISCONNECTED
         elif config.error_count > 0:
@@ -474,7 +450,6 @@ def get_channel_configuration(
         else:
             config_status = ChannelSyncStatus.PENDING
         
-        # Estatísticas detalhadas
         total_syncs = db.query(func.count(WuBookSyncLog.id)).filter(
             WuBookSyncLog.configuration_id == config.id
         ).scalar() or 0
@@ -484,13 +459,11 @@ def get_channel_configuration(
             WuBookSyncLog.status == "success"
         ).scalar() or 0
         
-        # Contar mapeamentos de quartos
         room_mappings_count = db.query(func.count(WuBookRoomMapping.id)).filter(
             WuBookRoomMapping.configuration_id == config.id,
             WuBookRoomMapping.is_active == True
         ).scalar() or 0
         
-        # Determinar tipo de canal
         channel_type_detected = ChannelType.OTHER
         if config.wubook_property_name:
             prop_name = config.wubook_property_name.lower()
@@ -553,16 +526,13 @@ if MANUAL_SYNC_AVAILABLE:
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_active_user)
     ):
-        """
-        Executa sincronização manual de registros pendentes com WuBook
-        """
+        """Executa sincronização manual de registros pendentes com WuBook"""
         try:
             logger.info(f"Sincronização manual iniciada - User: {current_user.id}, "
                        f"Property: {sync_request.property_id}, Force: {sync_request.force_all}")
             
             manual_sync_service = ManualSyncService(db)
             
-            # Verificar se sincronização está disponível
             sync_status = manual_sync_service.get_sync_status(current_user.tenant_id)
             
             if not sync_status.get("sync_available"):
@@ -571,68 +541,24 @@ if MANUAL_SYNC_AVAILABLE:
                     detail="Nenhuma configuração WuBook ativa encontrada"
                 )
             
-            # Verificar conflitos de sincronização
             if sync_status.get("is_running") and not sync_request.force_all:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Já existe uma sincronização em andamento"
                 )
             
-            started_at = datetime.utcnow()
-            
-            # Decidir processamento baseado na carga
-            estimated_items = manual_sync_service.estimate_sync_load(
-                current_user.tenant_id,
-                sync_request.property_id,
-                sync_request.force_all
+            result = manual_sync_service.process_manual_sync(
+                tenant_id=current_user.tenant_id,
+                property_id=sync_request.property_id,
+                force_all=sync_request.force_all,
+                batch_size=sync_request.batch_size
             )
             
-            # Processamento assíncrono para cargas grandes ou quando solicitado
-            if sync_request.async_processing or estimated_items > 500:
-                # Iniciar em background
-                task_id = f"manual_sync_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{current_user.id}"
-                
-                background_tasks.add_task(
-                    manual_sync_service.process_manual_sync,
-                    tenant_id=current_user.tenant_id,
-                    property_id=sync_request.property_id,
-                    force_all=sync_request.force_all,
-                    batch_size=sync_request.batch_size,
-                    task_id=task_id
-                )
-                
-                return ManualSyncResult(
-                    sync_id=task_id,
-                    status="running",
-                    message="Sincronização iniciada em background",
-                    total_pending=estimated_items,
-                    processed=0,
-                    successful=0,
-                    failed=0,
-                    success_rate=0.0,
-                    errors=[],
-                    error_count=0,
-                    started_at=started_at,
-                    completed_at=None,
-                    duration_seconds=0.0,
-                    configurations_processed=sync_status.get("active_configurations", 0),
-                    force_all_used=sync_request.force_all
-                )
+            logger.info(f"Sincronização manual concluída - "
+                       f"Processed: {result.get('processed', 0)}, "
+                       f"Successful: {result.get('successful', 0)}")
             
-            else:
-                # Processamento síncrono
-                result = manual_sync_service.process_manual_sync(
-                    tenant_id=current_user.tenant_id,
-                    property_id=sync_request.property_id,
-                    force_all=sync_request.force_all,
-                    batch_size=sync_request.batch_size
-                )
-                
-                logger.info(f"Sincronização manual concluída - "
-                           f"Processed: {result.get('processed', 0)}, "
-                           f"Successful: {result.get('successful', 0)}")
-                
-                return ManualSyncResult(**result)
+            return ManualSyncResult(**result)
         
         except HTTPException:
             raise
@@ -683,8 +609,33 @@ if MANUAL_SYNC_AVAILABLE:
                 detail=f"Erro ao obter contagem: {str(e)}"
             )
 
+    @router.get("/sync/pending-range")
+    def get_pending_date_range(
+        property_id: Optional[int] = Query(None, description="ID da propriedade específica"),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_active_user)
+    ):
+        """
+        🆕 Retorna intervalo de datas detectado automaticamente para registros pendentes
+        
+        Detecta MIN e MAX das datas com sync_pending=True
+        """
+        try:
+            manual_sync_service = ManualSyncService(db)
+            result = manual_sync_service.get_pending_date_range(
+                tenant_id=current_user.tenant_id,
+                property_id=property_id
+            )
+            return result
+        
+        except Exception as e:
+            logger.error(f"Erro ao obter intervalo de datas pendentes: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao obter intervalo: {str(e)}"
+            )
+
 else:
-    # Fallback quando manual sync não está disponível
     @router.post("/sync/manual")
     def execute_manual_sync_fallback():
         raise HTTPException(
@@ -704,13 +655,11 @@ def manual_sync_legacy(
 ):
     """Executa sincronização manual (endpoint legacy para compatibilidade)"""
     try:
-        logger.info(f"Sincronização legacy iniciada - User: {current_user.id}, "
-                   f"Config: {sync_request.configuration_id}, Force: {sync_request.force_full_sync}")
+        logger.info(f"Sincronização legacy iniciada - User: {current_user.id}")
         
         sync_id = f"legacy_sync_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{current_user.id}"
         started_at = datetime.utcnow()
         
-        # Validar configuração se especificada
         if sync_request.configuration_id:
             config = db.query(WuBookConfiguration).filter(
                 WuBookConfiguration.id == sync_request.configuration_id,
@@ -725,11 +674,9 @@ def manual_sync_legacy(
                 )
         
         try:
-            # Usar serviço de sincronização diretamente
             sync_service = WuBookAvailabilitySyncService(db)
             
             if sync_request.force_full_sync:
-                # Sincronização completa
                 result = sync_service.sync_availability_to_wubook(
                     tenant_id=current_user.tenant_id,
                     configuration_id=sync_request.configuration_id,
@@ -739,7 +686,6 @@ def manual_sync_legacy(
                     force_sync_all=True
                 )
             else:
-                # Sincronização incremental (apenas pendentes)
                 result = sync_service.sync_availability_to_wubook(
                     tenant_id=current_user.tenant_id,
                     configuration_id=sync_request.configuration_id,
@@ -750,7 +696,6 @@ def manual_sync_legacy(
             completed_at = datetime.utcnow()
             duration = (completed_at - started_at).total_seconds()
             
-            # Converter resultado para SyncResult
             success = result.get("success", False)
             synced_count = result.get("synced_count", 0)
             error_count = result.get("error_count", 0)
@@ -810,11 +755,8 @@ def get_availability_calendar(
 ):
     """Busca calendário de disponibilidade com status de sincronização"""
     try:
-        logger.info(f"Buscando calendário - User: {current_user.id}, "
-                   f"Period: {calendar_request.date_from} to {calendar_request.date_to}, "
-                   f"Rooms: {calendar_request.room_ids}, Property: {calendar_request.property_id}")
+        logger.info(f"Buscando calendário - User: {current_user.id}")
         
-        # Validar período
         days_diff = (calendar_request.date_to - calendar_request.date_from).days
         if days_diff > 365:
             raise HTTPException(
@@ -822,13 +764,12 @@ def get_availability_calendar(
                 detail="Período não pode exceder 365 dias"
             )
         
-        # ✅ BUSCAR DISPONIBILIDADES (COM FILTRO DE QUARTOS ATIVOS)
         availability_query = db.query(RoomAvailability).join(Room).filter(
             RoomAvailability.tenant_id == current_user.tenant_id,
             RoomAvailability.date >= calendar_request.date_from,
             RoomAvailability.date <= calendar_request.date_to,
             RoomAvailability.is_active == True,
-            Room.is_active == True  # ✅ FILTRO CRUCIAL PARA QUARTOS ATIVOS
+            Room.is_active == True
         )
         
         if calendar_request.room_ids:
@@ -843,10 +784,9 @@ def get_availability_calendar(
         
         availabilities = availability_query.all()
         
-        # ✅ BUSCAR INFORMAÇÕES DE QUARTOS (APENAS ATIVOS)
         rooms_query = db.query(Room).filter(
             Room.tenant_id == current_user.tenant_id,
-            Room.is_active == True  # ✅ FILTRO CRUCIAL PARA QUARTOS ATIVOS
+            Room.is_active == True
         )
         
         if calendar_request.room_ids:
@@ -857,7 +797,6 @@ def get_availability_calendar(
         
         rooms = {room.id: room for room in rooms_query.all()}
         
-        # Buscar mapeamentos WuBook ativos
         room_ids = list(rooms.keys())
         mappings = []
         if room_ids:
@@ -868,7 +807,6 @@ def get_availability_calendar(
         
         mapping_dict = {m.room_id: m for m in mappings}
         
-        # Organizar dados por data
         calendar_data = {}
         
         for avail in availabilities:
@@ -879,12 +817,10 @@ def get_availability_calendar(
             room = rooms.get(avail.room_id)
             mapping = mapping_dict.get(avail.room_id)
             
-            # Pular se o quarto não foi encontrado (não deveria acontecer com o JOIN)
             if not room:
-                logger.warning(f"Quarto {avail.room_id} não encontrado para disponibilidade {avail.id}")
+                logger.warning(f"Quarto {avail.room_id} não encontrado")
                 continue
             
-            # Criar view simplificada
             avail_view = SimpleAvailabilityView(
                 date=avail.date,
                 room_id=avail.room_id,
@@ -907,7 +843,6 @@ def get_availability_calendar(
             
             calendar_data[date_str].append(avail_view.model_dump())
         
-        # Converter para lista ordenada por data
         sorted_calendar = []
         current_date = calendar_request.date_from
         
@@ -928,12 +863,9 @@ def get_availability_calendar(
             sorted_calendar.append(day_data)
             current_date += timedelta(days=1)
         
-        # Resumo por quarto
         rooms_summary = []
         for room_id, room in rooms.items():
             mapping = mapping_dict.get(room_id)
-            
-            # Contar disponibilidades para este quarto
             room_availabilities = [a for a in availabilities if a.room_id == room_id]
             
             rooms_summary.append({
@@ -948,7 +880,6 @@ def get_availability_calendar(
                 "pending_days": len([a for a in room_availabilities if a.sync_pending])
             })
         
-        # Resumo por canal
         configs = db.query(WuBookConfiguration).filter(
             WuBookConfiguration.tenant_id == current_user.tenant_id,
             WuBookConfiguration.is_active == True
@@ -968,7 +899,6 @@ def get_availability_calendar(
                 "error_count": config.error_count
             })
         
-        # Estatísticas gerais
         total_days = (calendar_request.date_to - calendar_request.date_from).days + 1
         total_records = len(availabilities)
         synced_records = len([a for a in availabilities if a.wubook_synced])
@@ -984,7 +914,6 @@ def get_availability_calendar(
             "mapped_rooms": len([r for r in rooms.values() if r.id in mapping_dict])
         }
         
-        # Status de sincronização
         sync_status = {
             "healthy_configurations": len([c for c in configs if c.error_count == 0]),
             "error_configurations": len([c for c in configs if c.error_count > 0]),
@@ -1027,11 +956,8 @@ def bulk_update_availability(
     started_at = datetime.utcnow()
     
     try:
-        logger.info(f"Bulk update iniciado - {operation_id}, "
-                   f"Rooms: {len(bulk_request.room_ids)}, "
-                   f"Period: {bulk_request.date_from} to {bulk_request.date_to}")
+        logger.info(f"Bulk update iniciado - {operation_id}")
         
-        # Validar período
         days_diff = (bulk_request.date_to - bulk_request.date_from).days
         if days_diff > 366:
             raise HTTPException(
@@ -1039,11 +965,10 @@ def bulk_update_availability(
                 detail="Período não pode exceder 366 dias"
             )
         
-        # ✅ VERIFICAR SE QUARTOS EXISTEM E ESTÃO ATIVOS
         valid_rooms = db.query(Room.id).filter(
             Room.id.in_(bulk_request.room_ids),
             Room.tenant_id == current_user.tenant_id,
-            Room.is_active == True  # ✅ APENAS QUARTOS ATIVOS
+            Room.is_active == True
         ).all()
         
         valid_room_ids = [room.id for room in valid_rooms]
@@ -1053,12 +978,10 @@ def bulk_update_availability(
                 detail="Nenhum quarto válido encontrado"
             )
         
-        # Aviso se alguns quartos foram filtrados
         invalid_count = len(bulk_request.room_ids) - len(valid_room_ids)
         if invalid_count > 0:
-            logger.warning(f"Bulk update: {invalid_count} quartos inválidos ou inativos filtrados")
+            logger.warning(f"Bulk update: {invalid_count} quartos inválidos filtrados")
         
-        # Buscar registros existentes no período
         existing_query = db.query(RoomAvailability).filter(
             RoomAvailability.tenant_id == current_user.tenant_id,
             RoomAvailability.room_id.in_(valid_room_ids),
@@ -1067,7 +990,6 @@ def bulk_update_availability(
             RoomAvailability.is_active == True
         )
         
-        # Preparar updates
         updates = {}
         
         if bulk_request.is_available is not None:
@@ -1094,25 +1016,19 @@ def bulk_update_availability(
         if bulk_request.reason:
             updates[RoomAvailability.reason] = bulk_request.reason
         
-        # Sempre marcar timestamp de atualização
         updates[RoomAvailability.updated_at] = datetime.utcnow()
         
-        # Marcar para sincronização se solicitado
         if bulk_request.sync_immediately:
             updates[RoomAvailability.sync_pending] = True
         
-        # Executar update
         updated_count = existing_query.update(updates, synchronize_session=False)
         db.commit()
         
         completed_at = datetime.utcnow()
         duration = (completed_at - started_at).total_seconds()
         
-        # Log resultado
-        logger.info(f"Bulk update concluído - {operation_id}, "
-                   f"Updated: {updated_count}, Duration: {duration:.2f}s")
+        logger.info(f"Bulk update concluído - {operation_id}, Updated: {updated_count}")
         
-        # Se sync foi solicitado, iniciar em background
         sync_result = None
         if bulk_request.sync_immediately and updated_count > 0:
             try:
@@ -1124,9 +1040,9 @@ def bulk_update_availability(
                     date_to=bulk_request.date_to,
                     force_sync_all=False
                 )
-                logger.info(f"Sync após bulk update: {sync_result.get('synced_count', 0)} registros")
+                logger.info(f"Sync após bulk: {sync_result.get('synced_count', 0)} registros")
             except Exception as sync_error:
-                logger.error(f"Erro na sincronização após bulk update: {sync_error}")
+                logger.error(f"Erro na sincronização: {sync_error}")
                 sync_result = {"error": str(sync_error)}
         
         return BulkOperationResult(
@@ -1137,7 +1053,7 @@ def bulk_update_availability(
             created_count=0,
             updated_count=updated_count,
             skipped_count=invalid_count,
-            errors=[] if invalid_count == 0 else [f"{invalid_count} quartos inválidos/inativos ignorados"],
+            errors=[] if invalid_count == 0 else [f"{invalid_count} quartos ignorados"],
             sync_triggered=bulk_request.sync_immediately,
             sync_result=sync_result,
             started_at=started_at,
@@ -1184,10 +1100,8 @@ if BULK_EDIT_AVAILABLE:
     ):
         """Executa operação avançada de bulk edit no Channel Manager"""
         try:
-            logger.info(f"Bulk edit avançado - User: {current_user.id}, "
-                       f"Scope: {bulk_request.scope}, Operations: {len(bulk_request.operations)}")
+            logger.info(f"Bulk edit avançado - User: {current_user.id}")
             
-            # Validação básica
             days_diff = (bulk_request.date_to - bulk_request.date_from).days
             if days_diff > 366:
                 raise HTTPException(
@@ -1196,55 +1110,14 @@ if BULK_EDIT_AVAILABLE:
                 )
             
             service = BulkEditService(db)
+            result = service.execute_bulk_edit(
+                bulk_request, 
+                current_user.tenant_id, 
+                current_user
+            )
             
-            # Estimativa de carga
-            estimated_items = service.estimate_bulk_edit_load(bulk_request, current_user.tenant_id)
-            
-            # Processamento assíncrono para operações grandes
-            if async_processing or estimated_items > 1000 or len(bulk_request.operations) > 5:
-                # Executar em background usando Celery ou similar
-                task_id = f"bulk_edit_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{current_user.id}"
-                
-                # Simular execução assíncrona (implementar com Celery na produção)
-                background_tasks.add_task(
-                    service.execute_bulk_edit_async,
-                    bulk_request,
-                    current_user.tenant_id,
-                    current_user.id,
-                    task_id
-                )
-                
-                return BulkEditResult(
-                    operation_id=task_id,
-                    tenant_id=current_user.tenant_id,
-                    user_id=current_user.id,
-                    total_items_targeted=estimated_items,
-                    total_operations_executed=0,
-                    successful_operations=0,
-                    failed_operations=0,
-                    skipped_operations=0,
-                    started_at=datetime.utcnow(),
-                    completed_at=None,
-                    duration_seconds=0.0,
-                    dry_run=bulk_request.dry_run,
-                    processing_errors=[],
-                    request_summary={
-                        "async_task_id": task_id,
-                        "estimated_items": estimated_items,
-                        "status": "running"
-                    }
-                )
-            
-            else:
-                # Processamento síncrono
-                result = service.execute_bulk_edit(
-                    bulk_request, 
-                    current_user.tenant_id, 
-                    current_user
-                )
-                
-                logger.info(f"Bulk edit concluído - {result.operation_id}")
-                return result
+            logger.info(f"Bulk edit concluído - {result.operation_id}")
+            return result
             
         except HTTPException:
             raise
@@ -1264,25 +1137,19 @@ if BULK_EDIT_AVAILABLE:
         """Valida operação de bulk edit antes da execução"""
         try:
             service = BulkEditService(db)
-            
-            # Forçar dry_run na validação
             bulk_request = validation_request.bulk_edit_request
             bulk_request.dry_run = True
-            
-            # Executar validação
             result = service.validate_bulk_edit(bulk_request, current_user.tenant_id)
-            
             return BulkEditValidationResult(**result)
             
         except Exception as e:
-            logger.error(f"Erro na validação de bulk edit: {str(e)}", exc_info=True)
+            logger.error(f"Erro na validação: {str(e)}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Erro na validação: {str(e)}"
             )
 
 else:
-    # Fallback quando bulk edit não está disponível
     @router.post("/bulk-edit")
     def execute_bulk_edit_fallback():
         raise HTTPException(
@@ -1302,10 +1169,8 @@ def get_sync_health(
 ):
     """Relatório de saúde do Channel Manager"""
     try:
-        logger.info(f"Gerando relatório de saúde - User: {current_user.id}, "
-                   f"Days: {days_back}, Property: {property_id}")
+        logger.info(f"Gerando relatório de saúde - User: {current_user.id}")
         
-        # Buscar configurações
         config_query = db.query(WuBookConfiguration).filter(
             WuBookConfiguration.tenant_id == current_user.tenant_id
         )
@@ -1315,7 +1180,6 @@ def get_sync_health(
         
         configurations = config_query.all()
         
-        # Categorizar configurações por saúde
         healthy_configs = [
             c for c in configurations 
             if c.is_active and c.is_connected and c.error_count == 0
@@ -1331,7 +1195,6 @@ def get_sync_health(
             if not c.is_active or not c.is_connected or c.error_count > 5
         ]
         
-        # Calcular score de saúde
         total_configs = len(configurations)
         if total_configs == 0:
             health_score = 0.0
@@ -1350,7 +1213,6 @@ def get_sync_health(
             else:
                 overall_health = "critical"
         
-        # Atividade recente de sincronização
         cutoff_date = datetime.utcnow() - timedelta(days=days_back)
         
         recent_logs_query = db.query(WuBookSyncLog).join(WuBookConfiguration).filter(
@@ -1365,7 +1227,6 @@ def get_sync_health(
         
         recent_logs = recent_logs_query.all()
         
-        # Calcular métricas de atividade
         total_syncs = len(recent_logs)
         successful_syncs = len([log for log in recent_logs if log.status == "success"])
         failed_syncs = len([log for log in recent_logs if log.status == "error"])
@@ -1373,11 +1234,9 @@ def get_sync_health(
         sync_rate = (successful_syncs / total_syncs * 100) if total_syncs > 0 else 0
         error_rate = (failed_syncs / total_syncs * 100) if total_syncs > 0 else 0
         
-        # Duração média
         durations = [log.duration_seconds for log in recent_logs if log.duration_seconds]
         avg_duration = sum(durations) / len(durations) if durations else 0
         
-        # Atividade nas últimas 24h
         last_24h = datetime.utcnow() - timedelta(hours=24)
         recent_24h = [log for log in recent_logs if log.created_at >= last_24h]
         
@@ -1388,7 +1247,6 @@ def get_sync_health(
             "average_duration": avg_duration
         }
         
-        # Identificar problemas específicos
         issues = []
         
         for config in critical_configs:
@@ -1417,7 +1275,6 @@ def get_sync_health(
                 "error_count": config.error_count
             })
         
-        # Gerar recomendações
         recommendations = []
         
         if len(critical_configs) > 0:
@@ -1427,15 +1284,14 @@ def get_sync_health(
             recommendations.append("Monitorar configurações com avisos")
         
         if error_rate > 10:
-            recommendations.append("Taxa de erro alta - verificar conectividade e configurações")
+            recommendations.append("Taxa de erro alta - verificar conectividade")
         
         if avg_duration > 60:
-            recommendations.append("Sincronizações muito lentas - otimizar processo")
+            recommendations.append("Sincronizações lentas - otimizar processo")
         
         if total_syncs == 0:
             recommendations.append("Nenhuma sincronização recente - verificar funcionamento")
         
-        # Calcular taxa de registros pendentes
         pending_count = db.query(func.count(RoomAvailability.id)).join(Room).filter(
             RoomAvailability.tenant_id == current_user.tenant_id,
             RoomAvailability.sync_pending == True,
@@ -1480,7 +1336,7 @@ def get_sync_health(
         )
         
     except Exception as e:
-        logger.error(f"Erro ao gerar relatório de saúde: {str(e)}", exc_info=True)
+        logger.error(f"Erro ao gerar relatório: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro interno: {str(e)}"
@@ -1499,18 +1355,15 @@ def reset_sync_errors(
 ):
     """Reset erros de sincronização em registros de disponibilidade"""
     try:
-        logger.info(f"Reset de erros - User: {current_user.id}, "
-                   f"Config: {configuration_id}, Rooms: {room_ids}, Property: {property_id}")
+        logger.info(f"Reset de erros - User: {current_user.id}")
         
-        # Query base para availabilities com erro
         query = db.query(RoomAvailability).join(Room).filter(
             RoomAvailability.tenant_id == current_user.tenant_id,
             RoomAvailability.wubook_sync_error.isnot(None),
             RoomAvailability.is_active == True,
-            Room.is_active == True  # ✅ APENAS QUARTOS ATIVOS
+            Room.is_active == True
         )
         
-        # Aplicar filtros
         if room_ids:
             query = query.filter(RoomAvailability.room_id.in_(room_ids))
         
@@ -1518,7 +1371,6 @@ def reset_sync_errors(
             query = query.filter(Room.property_id == property_id)
         
         if configuration_id:
-            # Filtrar por configuração via mapeamentos
             query = query.join(
                 WuBookRoomMapping,
                 and_(
@@ -1528,7 +1380,6 @@ def reset_sync_errors(
                 )
             )
         
-        # Executar reset
         count = query.update({
             RoomAvailability.wubook_sync_error: None,
             RoomAvailability.sync_pending: True,
@@ -1537,7 +1388,7 @@ def reset_sync_errors(
         
         db.commit()
         
-        logger.info(f"Reset de erros concluído - {count} registros resetados")
+        logger.info(f"Reset concluído - {count} registros")
         
         return MessageResponse(
             message=f"Reset realizado em {count} registros de disponibilidade",
@@ -1546,7 +1397,7 @@ def reset_sync_errors(
         
     except Exception as e:
         db.rollback()
-        logger.error(f"Erro ao resetar erros: {str(e)}", exc_info=True)
+        logger.error(f"Erro ao resetar: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro interno: {str(e)}"
@@ -1564,32 +1415,27 @@ def force_mark_pending(
 ):
     """Força marcação de registros como pendentes para nova sincronização"""
     try:
-        logger.info(f"Forçando marcação pendente - User: {current_user.id}, "
-                   f"Rooms: {room_ids}, Property: {property_id}")
+        logger.info(f"Forçando marcação pendente - User: {current_user.id}")
         
-        # Definir período padrão
         if not date_from:
             date_from = date.today()
         if not date_to:
             date_to = date_from + timedelta(days=30)
         
-        # Query base
         query = db.query(RoomAvailability).join(Room).filter(
             RoomAvailability.tenant_id == current_user.tenant_id,
             RoomAvailability.date >= date_from,
             RoomAvailability.date <= date_to,
             RoomAvailability.is_active == True,
-            Room.is_active == True  # ✅ APENAS QUARTOS ATIVOS
+            Room.is_active == True
         )
         
-        # Aplicar filtros
         if room_ids:
             query = query.filter(RoomAvailability.room_id.in_(room_ids))
         
         if property_id:
             query = query.filter(Room.property_id == property_id)
         
-        # Marcar como pendente
         count = query.update({
             RoomAvailability.sync_pending: True,
             RoomAvailability.wubook_synced: False,
@@ -1598,7 +1444,7 @@ def force_mark_pending(
         
         db.commit()
         
-        logger.info(f"Marcação pendente concluída - {count} registros marcados")
+        logger.info(f"Marcação concluída - {count} registros")
         
         return MessageResponse(
             message=f"{count} registros marcados como pendentes para sincronização",
@@ -1607,7 +1453,7 @@ def force_mark_pending(
         
     except Exception as e:
         db.rollback()
-        logger.error(f"Erro ao marcar como pendente: {str(e)}", exc_info=True)
+        logger.error(f"Erro ao marcar: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro interno: {str(e)}"
@@ -1625,18 +1471,16 @@ def get_channel_manager_stats(
     try:
         cutoff_date = date.today() - timedelta(days=days_back)
         
-        # Base query com filtro de quartos ativos
         base_query = db.query(RoomAvailability).join(Room).filter(
             RoomAvailability.tenant_id == current_user.tenant_id,
             RoomAvailability.date >= cutoff_date,
             RoomAvailability.is_active == True,
-            Room.is_active == True  # ✅ APENAS QUARTOS ATIVOS
+            Room.is_active == True
         )
         
         if property_id:
             base_query = base_query.filter(Room.property_id == property_id)
         
-        # Estatísticas de disponibilidade
         availability_stats = base_query.with_entities(
             func.count(RoomAvailability.id).label('total'),
             func.sum(case((RoomAvailability.is_available == True, 1), else_=0)).label('available'),
@@ -1645,7 +1489,6 @@ def get_channel_manager_stats(
             func.sum(case((RoomAvailability.sync_pending == True, 1), else_=0)).label('pending')
         ).first()
         
-        # Estatísticas de configurações
         config_query = db.query(WuBookConfiguration).filter(
             WuBookConfiguration.tenant_id == current_user.tenant_id
         )
@@ -1660,11 +1503,10 @@ def get_channel_manager_stats(
             func.sum(case((WuBookConfiguration.error_count > 0, 1), else_=0)).label('with_errors')
         ).first()
         
-        # Estatísticas de mapeamentos
         mapping_stats = db.query(WuBookRoomMapping).join(Room).filter(
             WuBookRoomMapping.tenant_id == current_user.tenant_id,
             WuBookRoomMapping.is_active == True,
-            Room.is_active == True  # ✅ APENAS QUARTOS ATIVOS
+            Room.is_active == True
         )
         
         if property_id:
@@ -1718,24 +1560,20 @@ def debug_room_filter(
 ):
     """Endpoint de debug para testar filtros de quartos ativos"""
     try:
-        # Contar todos os quartos
         all_rooms = db.query(func.count(Room.id)).filter(
             Room.tenant_id == current_user.tenant_id
         ).scalar() or 0
         
-        # Contar quartos ativos
         active_rooms = db.query(func.count(Room.id)).filter(
             Room.tenant_id == current_user.tenant_id,
             Room.is_active == True
         ).scalar() or 0
         
-        # Contar quartos inativos
         inactive_rooms = db.query(func.count(Room.id)).filter(
             Room.tenant_id == current_user.tenant_id,
             Room.is_active == False
         ).scalar() or 0
         
-        # Contar disponibilidades com quartos ativos vs todos
         avail_all = db.query(func.count(RoomAvailability.id)).filter(
             RoomAvailability.tenant_id == current_user.tenant_id,
             RoomAvailability.is_active == True

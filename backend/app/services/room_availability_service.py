@@ -124,7 +124,7 @@ class RoomAvailabilityService:
         
         # Marcar para sincronização com channel manager
         if mark_for_sync:
-            db_availability.mark_sync_pending()
+            db_availability.mark_for_sync()
         
         try:
             self.db.add(db_availability)
@@ -158,7 +158,7 @@ class RoomAvailabilityService:
         
         # Marcar para sincronização
         if mark_for_sync:
-            availability.mark_sync_pending()
+            availability.mark_for_sync()
         
         try:
             self.db.commit()
@@ -177,7 +177,7 @@ class RoomAvailabilityService:
         
         availability.is_active = False
         availability.updated_at = datetime.utcnow()
-        availability.mark_sync_pending()  # Sincronizar remoção
+        availability.mark_for_sync()  # Sincronizar remoção
         
         self.db.commit()
         return True
@@ -227,7 +227,7 @@ class RoomAvailabilityService:
                         existing.updated_at = datetime.utcnow()
                         
                         if mark_for_sync:
-                            existing.mark_sync_pending()
+                            existing.mark_for_sync()
                         
                         updated_count += 1
                     else:
@@ -240,7 +240,7 @@ class RoomAvailabilityService:
                         )
                         
                         if mark_for_sync:
-                            new_availability.mark_sync_pending()
+                            new_availability.mark_for_sync()
                         
                         self.db.add(new_availability)
                         created_count += 1

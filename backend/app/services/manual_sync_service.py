@@ -15,7 +15,7 @@ from app.models.property import Property
 from app.models.wubook_configuration import WuBookConfiguration
 from app.models.wubook_room_mapping import WuBookRoomMapping
 from app.models.wubook_sync_log import WuBookSyncLog
-from app.integrations.wubook.sync_service import WuBookSyncService  # 🔥 MUDANÇA: usar o funcional
+from app.integrations.wubook.sync_service import WuBookSyncService
 from app.utils.decorators import AuditContext
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ class ManualSyncService:
     
     def __init__(self, db: Session):
         self.db = db
-        self.wubook_sync_service = WuBookSyncService(db)  # 🔥 MUDANÇA: usar o funcional
+        self.wubook_sync_service = WuBookSyncService(db)
     
     def get_pending_count(
         self, 
@@ -142,6 +142,83 @@ class ManualSyncService:
                 "has_pending": False,
                 "error": str(e),
                 "last_check": datetime.utcnow().isoformat()
+            }
+    
+    def get_pending_date_range(
+        self, 
+        tenant_id: int, 
+        property_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Detecta automaticamente intervalo de datas com sync_pending=True
+        
+        Args:
+            tenant_id: ID do tenant
+            property_id: ID da propriedade (opcional)
+            
+        Returns:
+            Dict com:
+                - date_from: primeira data pendente (formato ISO)
+                - date_to: última data pendente (formato ISO)
+                - total_pending: quantidade de registros pendentes
+                - rooms_affected: lista de IDs de quartos afetados
+                - has_pending: boolean indicando se há pendências
+        """
+        try:
+            # Query base para registros pendentes
+            base_query = self.db.query(RoomAvailability).join(Room).join(Property).filter(
+                Property.tenant_id == tenant_id,
+                RoomAvailability.is_active == True,
+                RoomAvailability.sync_pending == True
+            )
+            
+            # Filtrar por propriedade se especificado
+            if property_id:
+                base_query = base_query.filter(Property.id == property_id)
+            
+            # Buscar MIN e MAX das datas pendentes
+            date_range = base_query.with_entities(
+                func.min(RoomAvailability.date).label('date_from'),
+                func.max(RoomAvailability.date).label('date_to'),
+                func.count(RoomAvailability.id).label('total_pending')
+            ).first()
+            
+            # Se não há registros pendentes
+            if not date_range or not date_range.date_from:
+                return {
+                    "date_from": None,
+                    "date_to": None,
+                    "total_pending": 0,
+                    "rooms_affected": [],
+                    "has_pending": False
+                }
+            
+            # Buscar quartos únicos afetados
+            rooms_affected = base_query.with_entities(
+                RoomAvailability.room_id
+            ).distinct().all()
+            
+            room_ids = [room.room_id for room in rooms_affected]
+            
+            return {
+                "date_from": date_range.date_from.isoformat(),
+                "date_to": date_range.date_to.isoformat(),
+                "total_pending": date_range.total_pending,
+                "rooms_affected": room_ids,
+                "has_pending": True
+            }
+            
+        except Exception as e:
+            logger.error(f"Erro ao detectar intervalo de datas pendentes: {str(e)}")
+            logger.error(traceback.format_exc())
+            
+            return {
+                "date_from": None,
+                "date_to": None,
+                "total_pending": 0,
+                "rooms_affected": [],
+                "has_pending": False,
+                "error": str(e)
             }
     
     def process_manual_sync(
@@ -272,7 +349,6 @@ class ManualSyncService:
         """
         try:
             # Verificar se há alguma sincronização em andamento
-            # (Isso seria mais complexo com Celery tasks, por enquanto assumimos que não há)
             is_running = False
             current_sync_id = None
             
@@ -301,7 +377,7 @@ class ManualSyncService:
             return {
                 "is_running": is_running,
                 "current_sync_id": current_sync_id,
-                "last_sync_at": last_sync_at if last_sync_at else None,  # 🔥 CORREÇÃO AQUI: removido .isoformat()
+                "last_sync_at": last_sync_at,
                 "last_sync_status": last_sync_status,
                 "pending_count": pending_count,
                 "has_pending": pending_count > 0,
