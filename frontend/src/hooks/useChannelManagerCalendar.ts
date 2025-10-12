@@ -153,8 +153,6 @@ export function useChannelManagerCalendar({
    *                Use force=true quando souber que os dados mudaram no backend
    *                mas os parâmetros de busca são os mesmos (ex: após bulk edit)
    */
-  // ✅ CORRIGIDO: Removido 'data' das dependências para evitar loop infinito
-  // ✅ CORRIGIDO: Adicionado parâmetro 'force' para forçar refresh mesmo com params iguais
   const fetchData = useCallback(async (showLoading = true, force = false) => {
     try {
       if (showLoading) setLoading(true);
@@ -169,7 +167,7 @@ export function useChannelManagerCalendar({
         include_restrictions: true
       };
       
-      // ✅ CORRIGIDO: Evitar chamadas duplicadas (exceto quando force=true)
+      // ✅ Evitar chamadas duplicadas (exceto quando force=true)
       const paramsString = JSON.stringify(params);
       if (!force && paramsString === lastFetchParamsRef.current) {
         if (showLoading) setLoading(false);
@@ -269,10 +267,10 @@ export function useChannelManagerCalendar({
         // Bulk edit concluído - refresh calendário
         console.log('📦 Bulk update concluído via SSE');
         
-        // ✅ NOVO: Atualizar pendingCount localmente
+        // ✅ Atualizar pendingCount localmente
         fetchPendingCount();
         
-        // ✅ CRÍTICO: Refresh forçado (force=true) porque dados mudaram
+        // ✅ Refresh forçado (force=true) porque dados mudaram
         console.log('🔄 Forçando refresh após bulk update via SSE...');
         setTimeout(() => fetchData(false, true), 1000);
         break;
@@ -281,7 +279,7 @@ export function useChannelManagerCalendar({
         // Atualização pontual - pode fazer refresh silencioso
         console.log('🔄 Disponibilidade atualizada via SSE');
         
-        // ✅ NOVO: Atualizar pendingCount localmente
+        // ✅ Atualizar pendingCount localmente
         fetchPendingCount();
         
         // ✅ Refresh forçado (force=true) porque dados mudaram
@@ -369,11 +367,11 @@ export function useChannelManagerCalendar({
         return updatedData;
       });
       
-      // ✅ CORRIGIDO: Buscar contagem real do backend (não incrementar localmente)
+      // ✅ Buscar contagem real do backend
       console.log('📊 Atualizando contagem de pendentes após updateCell...');
-      fetchPendingCount(); // Não precisa await aqui pois é rápido
+      fetchPendingCount();
       
-      // ✅ CORRIGIDO: Refresh forçado (force=true) após um tempo (SSE também notificará)
+      // ✅ Refresh forçado após um tempo (SSE também notificará)
       console.log('🔄 Agendando refresh forçado após updateCell...');
       setTimeout(() => fetchData(false, true), 1000);
       
@@ -399,7 +397,6 @@ export function useChannelManagerCalendar({
     setBulkEditState(prev => ({ ...prev, ...updates }));
   }, []);
   
-  // ✅ CORRIGIDO: executeBulkEdit com tratamento de erros e atualização de estado
   const executeBulkEdit = useCallback(async () => {
     try {
       const { scope, actions } = bulkEditState;
@@ -408,7 +405,7 @@ export function useChannelManagerCalendar({
         room_ids: scope.roomIds,
         date_from: scope.dateRange.from,
         date_to: scope.dateRange.to,
-        sync_immediately: true, // ✅ NOVO: Marcar para sincronização
+        sync_immediately: true,
         ...(actions.priceAction === 'set' && { rate_override: actions.priceValue }),
         ...(actions.availabilityAction === 'open' && { is_available: true }),
         ...(actions.availabilityAction === 'close' && { is_available: false }),
@@ -423,14 +420,13 @@ export function useChannelManagerCalendar({
       
       console.log('✅ Bulk edit concluído:', result);
       
-      // ✅ CRÍTICO: Buscar contagem REAL do backend (não somar localmente)
+      // ✅ Buscar contagem REAL do backend
       console.log('📊 Buscando contagem real de pendentes após bulk edit...');
       console.log('📊 Pendentes antes:', pendingCount);
       await fetchPendingCount();
       console.log('📊 Contagem de pendentes atualizada');
       
-      // ✅ CRÍTICO: Aguardar um pouco para dateRangeInfo atualizar via useEffect
-      // O useEffect [pendingCount] precisa disparar e completar fetchDateRangeInfo()
+      // ✅ Aguardar dateRangeInfo atualizar
       console.log('⏳ Aguardando dateRangeInfo atualizar...');
       await new Promise(resolve => setTimeout(resolve, 300));
       console.log('✅ DateRangeInfo atualizado:', dateRangeInfo);
@@ -439,20 +435,16 @@ export function useChannelManagerCalendar({
       setBulkEditState(prev => ({ ...prev, isOpen: false }));
       console.log('✅ Modal fechado');
       
-      // ✅ CRÍTICO: Refresh IMEDIATO do calendário (force=true para ignorar cache)
+      // ✅ Refresh IMEDIATO do calendário (force=true)
       console.log('🔄 Forçando refresh imediato do calendário após bulk edit...');
       await fetchData(false, true);
       console.log('✅ Calendário atualizado após bulk edit');
-      
-      // ✅ SSE também notificará com 'bulk_update_completed' como backup
-      // O useEffect acima fará outro refresh se necessário
       
       return result;
       
     } catch (error: any) {
       console.error('❌ Erro na edição em massa:', error);
       
-      // Manter modal aberto em caso de erro
       throw new Error(
         error.response?.data?.detail || 
         error.message || 
@@ -461,9 +453,24 @@ export function useChannelManagerCalendar({
     }
   }, [bulkEditState, fetchData, fetchPendingCount, pendingCount, dateRangeInfo]);
   
-  // ============== 🆕 SINCRONIZAÇÃO MANUAL ==============
+  // ============== 🆕 SINCRONIZAÇÃO MANUAL (✅ SOLUÇÃO 1 APLICADA) ==============
   
-  // ✅ CORRIGIDO: syncWithWuBook implementado corretamente
+  /**
+   * ✅ CORRIGIDO: Sincronização manual com processamento ASSÍNCRONO
+   * 
+   * ANTES (❌ Problema):
+   * - async_processing: false (síncrono)
+   * - Backend processa todos os registros antes de responder
+   * - Timeout HTTP após ~60 segundos
+   * - Frontend mostra erro mesmo com backend concluindo
+   * 
+   * DEPOIS (✅ Solução):
+   * - async_processing: true (assíncrono)
+   * - Backend retorna imediatamente com task iniciada
+   * - Processamento continua em background
+   * - SSE notifica quando completa (sync_completed)
+   * - Melhor UX, sem timeout, funciona para qualquer volume
+   */
   const syncWithWuBook = useCallback(async () => {
     if (pendingCount === 0) {
       console.warn('⚠️ Nenhum registro pendente para sincronizar');
@@ -472,40 +479,33 @@ export function useChannelManagerCalendar({
     
     try {
       setSyncStatus('syncing');
-      console.log(`🔄 Iniciando sincronização de ${pendingCount} registros...`);
+      console.log(`🔄 Iniciando sincronização ASSÍNCRONA de ${pendingCount} registros...`);
       
+      // ✅ SOLUÇÃO 1: async_processing: true (ASSÍNCRONO)
       const result = await channelManagerAPI.syncWithWuBook({
         property_id: filters.property_id,
         force_all: false, // Apenas pendentes
-        async_processing: false, // Síncrono
+        async_processing: true, // ✅ CORRIGIDO: Assíncrono = sem timeout
         batch_size: 100
       });
       
-      console.log('✅ Resultado da sincronização:', result);
+      console.log('✅ Task de sincronização iniciada:', result);
       
-      if (result.status === 'success' || result.status === 'completed') {
-        // ✅ SSE notificará com 'sync_completed'
-        // O useEffect acima atualizará o estado automaticamente
-        console.log('🎉 Sincronização concluída - aguardando notificação SSE');
-      } else if (result.status === 'partial_success') {
-        console.warn('⚠️ Sincronização parcial:', result);
-        setSyncStatus('success');
-        
-        // Atualizar contagem de pendentes
-        fetchPendingCount();
-        
-        // Reset status após 3 segundos
-        setTimeout(() => setSyncStatus('idle'), 3000);
-      } else {
-        console.error('❌ Sincronização falhou:', result);
-        setSyncStatus('error');
-        
-        // Reset status após 3 segundos em caso de erro
-        setTimeout(() => setSyncStatus('idle'), 3000);
-      }
+      // ✅ Com async_processing=true, o backend retorna imediatamente
+      // O processamento continua em background
+      // O SSE notificará quando completar (evento 'sync_completed')
+      // O useEffect que escuta SSE atualizará o estado automaticamente
+      
+      console.log('🎯 Sincronização em andamento. Aguardando notificação SSE...');
+      console.log('💡 A contagem de pendentes será atualizada via SSE em tempo real');
+      console.log('💡 O calendário será atualizado automaticamente quando concluir');
+      
+      // Não precisamos fazer nada aqui - o SSE cuidará de tudo:
+      // 1. sync_pending_updated → atualiza pendingCount em tempo real
+      // 2. sync_completed → zera pendingCount, atualiza status, refresh calendário
       
     } catch (error: any) {
-      console.error('❌ Erro na sincronização:', error);
+      console.error('❌ Erro ao iniciar sincronização:', error);
       setSyncStatus('error');
       
       // Reset status após 3 segundos em caso de erro
@@ -514,14 +514,13 @@ export function useChannelManagerCalendar({
       throw new Error(
         error.response?.data?.detail || 
         error.message || 
-        'Erro desconhecido na sincronização'
+        'Não foi possível iniciar a sincronização'
       );
     }
-  }, [filters.property_id, pendingCount, fetchPendingCount]);
+  }, [filters.property_id, pendingCount]);
   
   // ============== UTILIDADES ==============
   
-  // ✅ CORRIGIDO: refresh agora força a busca (force=true)
   const refresh = useCallback(() => {
     console.log('🔄 Refresh manual solicitado (force=true)');
     fetchData(true, true); // showLoading=true, force=true
