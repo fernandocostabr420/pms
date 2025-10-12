@@ -3,13 +3,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { addDays, format, startOfWeek } from 'date-fns';
 import { channelManagerAPI } from '@/services/channelManagerApi';
+import { useServerSentEvents } from '@/hooks/useServerSentEvents';
 import {
   AvailabilityCalendarResponse,
   ChannelManagerFilters,
   CalendarUIState,
   BulkEditState,
   SimpleAvailabilityView,
-  PendingCountResponse,
   PendingDateRangeResponse
 } from '@/types/channel-manager';
 
@@ -51,11 +51,14 @@ interface UseChannelManagerCalendarReturn {
   updateBulkEditState: (updates: Partial<BulkEditState>) => void;
   executeBulkEdit: () => Promise<void>;
   
-  // 🆕 Sincronização Manual
+  // 🆕 Sincronização Manual (com SSE)
   syncStatus: 'idle' | 'syncing' | 'success' | 'error';
   pendingCount: number;
   dateRangeInfo: PendingDateRangeResponse | null;
   syncWithWuBook: () => Promise<void>;
+  
+  // 🆕 Status da conexão SSE
+  sseConnected: boolean;
   
   // Utilidades
   refresh: () => Promise<void>;
@@ -122,10 +125,20 @@ export function useChannelManagerCalendar({
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [dateRangeInfo, setDateRangeInfo] = useState<PendingDateRangeResponse | null>(null);
   
+  // ============== 🆕 SSE (SUBSTITUINDO POLLING) ==============
+  
+  const { connectionState, lastEvent, isConnected } = useServerSentEvents({
+    onError: (error) => {
+      console.error('SSE error:', error);
+    },
+    onConnected: () => {
+      console.log('SSE conectado - monitorando pendentes de sincronização');
+    },
+  });
+  
   // ============== REFS ==============
   
   const refreshTimeoutRef = useRef<NodeJS.Timeout>();
-  const pendingCountIntervalRef = useRef<NodeJS.Timeout>();
   const lastFetchParamsRef = useRef<string>('');
   
   // ============== FETCH DATA ==============
@@ -162,17 +175,7 @@ export function useChannelManagerCalendar({
     }
   }, [dateRange.from, dateRange.to, filters, data]);
   
-  // ============== 🆕 POLLING DE PENDENTES ==============
-  
-  const fetchPendingCount = useCallback(async () => {
-    try {
-      const result = await channelManagerAPI.getPendingCount(filters.property_id);
-      setPendingCount(result.total_pending);
-    } catch (err) {
-      console.error('Erro ao buscar contagem de pendentes:', err);
-      // Não exibir erro ao usuário - apenas log
-    }
-  }, [filters.property_id]);
+  // ============== 🆕 BUSCAR INTERVALO DE DATAS PENDENTES ==============
   
   const fetchDateRangeInfo = useCallback(async () => {
     try {
@@ -195,22 +198,48 @@ export function useChannelManagerCalendar({
     fetchData();
   }, [fetchData]);
   
-  // 🆕 Polling de pendentes a cada 5 segundos
+  // 🆕 Escutar eventos SSE (SUBSTITUI O POLLING)
   useEffect(() => {
-    // Buscar imediatamente
-    fetchPendingCount();
+    if (!lastEvent) return;
     
-    // Configurar polling
-    pendingCountIntervalRef.current = setInterval(() => {
-      fetchPendingCount();
-    }, 5000); // 5 segundos
-    
-    return () => {
-      if (pendingCountIntervalRef.current) {
-        clearInterval(pendingCountIntervalRef.current);
-      }
-    };
-  }, [fetchPendingCount]);
+    switch (lastEvent.type) {
+      case 'sync_pending_updated':
+        // Atualizar contagem de pendentes em tempo real
+        const propertyCount = filters.property_id 
+          ? lastEvent.data.by_property?.[filters.property_id] || 0
+          : lastEvent.data.total;
+        
+        setPendingCount(propertyCount);
+        console.log(`📊 Pendentes atualizados via SSE: ${propertyCount}`);
+        break;
+        
+      case 'sync_completed':
+        // Sincronização concluída - zerar pendentes e refresh
+        console.log('✅ Sincronização concluída via SSE');
+        setPendingCount(0);
+        setDateRangeInfo(null);
+        setSyncStatus('success');
+        
+        // Refresh silencioso do calendário
+        setTimeout(() => fetchData(false), 1000);
+        
+        // Reset status após 3 segundos
+        setTimeout(() => setSyncStatus('idle'), 3000);
+        break;
+        
+      case 'bulk_update_completed':
+        // Bulk edit concluído - refresh calendário
+        console.log('📦 Bulk update concluído via SSE');
+        setTimeout(() => fetchData(false), 1000);
+        break;
+        
+      case 'availability_updated':
+        // Atualização pontual - pode fazer refresh silencioso
+        console.log('🔄 Disponibilidade atualizada via SSE');
+        setTimeout(() => fetchData(false), 2000);
+        break;
+    }
+  }, [lastEvent, filters.property_id, fetchData]);
   
   // 🆕 Buscar intervalo quando pendingCount mudar
   useEffect(() => {
@@ -241,9 +270,6 @@ export function useChannelManagerCalendar({
     return () => {
       if (refreshTimeoutRef.current) {
         clearInterval(refreshTimeoutRef.current);
-      }
-      if (pendingCountIntervalRef.current) {
-        clearInterval(pendingCountIntervalRef.current);
       }
     };
   }, []);
@@ -292,7 +318,7 @@ export function useChannelManagerCalendar({
         }
       }
       
-      // Refresh completo após um tempo
+      // Refresh completo após um tempo (SSE também notificará)
       setTimeout(() => fetchData(false), 1000);
       
     } catch (error) {
@@ -331,23 +357,21 @@ export function useChannelManagerCalendar({
         ...(actions.restrictions?.minStay && { min_stay: actions.restrictions.minStay }),
         ...(actions.restrictions?.closedToArrival !== undefined && { closed_to_arrival: actions.restrictions.closedToArrival }),
         ...(actions.restrictions?.closedToDeparture !== undefined && { closed_to_departure: actions.restrictions.closedToDeparture })
-        // ❌ REMOVIDO: sync_immediately
       };
       
       await channelManagerAPI.bulkUpdateAvailability(bulkData);
       
-      // Fechar modal e atualizar dados
+      // Fechar modal
       setBulkEditState(prev => ({ ...prev, isOpen: false }));
-      await fetchData();
       
-      // ✅ Após bulk edit, o sistema marca automaticamente para sync
-      // O polling atualizará o pendingCount automaticamente
+      // ✅ SSE notificará automaticamente com 'bulk_update_completed'
+      // O useEffect acima fará o refresh do calendário
       
     } catch (error) {
       console.error('Erro na edição em massa:', error);
       throw error;
     }
-  }, [bulkEditState, fetchData]);
+  }, [bulkEditState]);
   
   // ============== 🆕 SINCRONIZAÇÃO MANUAL ==============
   
@@ -363,14 +387,9 @@ export function useChannelManagerCalendar({
       });
       
       if (result.status === 'success' || result.status === 'completed') {
-        setSyncStatus('success');
-        
-        // Zerar contador imediatamente
-        setPendingCount(0);
-        setDateRangeInfo(null);
-        
-        // Refresh do calendário após sincronização
-        setTimeout(() => fetchData(false), 2000);
+        // ✅ SSE notificará com 'sync_completed'
+        // O useEffect acima atualizará o estado automaticamente
+        console.log('🎉 Sincronização iniciada - aguardando notificação SSE');
       } else {
         setSyncStatus('error');
       }
@@ -378,11 +397,11 @@ export function useChannelManagerCalendar({
     } catch (error) {
       console.error('Erro na sincronização:', error);
       setSyncStatus('error');
-    } finally {
-      // Reset status após 3 segundos
+      
+      // Reset status após 3 segundos em caso de erro
       setTimeout(() => setSyncStatus('idle'), 3000);
     }
-  }, [filters.property_id, fetchData]);
+  }, [filters.property_id]);
   
   // ============== UTILIDADES ==============
   
@@ -407,12 +426,6 @@ export function useChannelManagerCalendar({
     
     return { totalCells, availableRooms, blockedRooms, syncRate };
   }, [data]);
-  
-  // ============== UPDATE UI STATE ==============
-  
-  const updateUIState = useCallback((updates: Partial<CalendarUIState>) => {
-    setUIState(prev => ({ ...prev, ...updates }));
-  }, []);
   
   // ============== RETURN ==============
   
@@ -443,11 +456,14 @@ export function useChannelManagerCalendar({
     updateBulkEditState,
     executeBulkEdit,
     
-    // 🆕 Sincronização Manual
+    // 🆕 Sincronização Manual (com SSE)
     syncStatus,
     pendingCount,
     dateRangeInfo,
     syncWithWuBook,
+    
+    // 🆕 Status da conexão SSE
+    sseConnected: isConnected,
     
     // Utilidades
     refresh,

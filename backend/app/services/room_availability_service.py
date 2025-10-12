@@ -143,6 +143,10 @@ class RoomAvailabilityService:
                 updated_count=1
             )
             
+            # ✅ CORRIGIDO: Notificar contagem de pendentes se marcou para sync
+            if mark_for_sync:
+                self._notify_pending_count_updated(tenant_id)
+            
             return db_availability
         except IntegrityError as e:
             self.db.rollback()
@@ -186,6 +190,10 @@ class RoomAvailabilityService:
                 updated_count=1
             )
             
+            # ✅ CORRIGIDO: Notificar contagem de pendentes se marcou para sync
+            if mark_for_sync:
+                self._notify_pending_count_updated(tenant_id)
+            
             return availability
         except IntegrityError as e:
             self.db.rollback()
@@ -212,6 +220,9 @@ class RoomAvailabilityService:
             date_to=availability.date.isoformat(),
             updated_count=1
         )
+        
+        # ✅ CORRIGIDO: Notificar contagem de pendentes (sempre marca para sync)
+        self._notify_pending_count_updated(tenant_id)
         
         return True
 
@@ -775,6 +786,8 @@ class RoomAvailabilityService:
                 total=total_pending,
                 oldest_date=oldest_date
             )
+            
+            logger.debug(f"SSE: Notificado sync_pending_updated - tenant={tenant_id}, total={total_pending}")
             
         except Exception as e:
             logger.warning(f"Erro ao notificar contagem de pendentes: {e}")

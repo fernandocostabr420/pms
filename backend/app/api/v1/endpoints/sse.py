@@ -104,6 +104,7 @@ class SSEConnection:
                         if data.get('tenant_id') == self.tenant_id:
                             event_type = data.get('event', 'update')
                             yield self._format_sse_message(event_type, data)
+                            logger.debug(f"SSE: Evento enviado - type={event_type}, tenant={self.tenant_id}")
                 
                 except asyncio.TimeoutError:
                     # Timeout normal, continuar loop
