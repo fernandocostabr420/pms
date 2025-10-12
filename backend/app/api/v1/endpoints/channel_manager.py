@@ -47,7 +47,8 @@ from app.models.room_type import RoomType
 from app.services.wubook_availability_sync_service import WuBookAvailabilitySyncService
 from app.services.room_availability_service import RoomAvailabilityService
 from app.services.wubook_configuration_service import WuBookConfigurationService
-
+# ✅ NOVO: Import do serviço de notificações SSE
+from app.services.notification_service import notification_service
 # ✅ IMPORTS PARA BULK EDIT
 try:
     from app.schemas.bulk_edit import (
@@ -1023,6 +1024,62 @@ def bulk_update_availability(
         
         updated_count = existing_query.update(updates, synchronize_session=False)
         db.commit()
+        
+        # ✅ CRÍTICO: NOTIFICAÇÕES SSE APÓS O COMMIT
+        if updated_count > 0:
+            logger.info(f"📤 Enviando notificações SSE para {updated_count} registros...")
+            
+            # 1. Notificar bulk update concluído
+            try:
+                notification_service.notify_bulk_update_completed(
+                    tenant_id=current_user.tenant_id,
+                    affected_records=updated_count,
+                    success=True
+                )
+                logger.info(f"✅ SSE: bulk_update_completed enviado - {updated_count} registros")
+            except Exception as notif_error:
+                logger.error(f"❌ Erro ao enviar bulk_update_completed: {notif_error}")
+            
+            # 2. Notificar atualização de disponibilidade
+            try:
+                notification_service.notify_availability_updated(
+                    tenant_id=current_user.tenant_id,
+                    room_ids=valid_room_ids,
+                    date_from=bulk_request.date_from.isoformat(),
+                    date_to=bulk_request.date_to.isoformat(),
+                    updated_count=updated_count
+                )
+                logger.info(f"✅ SSE: availability_updated enviado - rooms={len(valid_room_ids)}")
+            except Exception as notif_error:
+                logger.error(f"❌ Erro ao enviar availability_updated: {notif_error}")
+            
+            # 3. Notificar atualização de contagem de pendentes (se marcou para sync)
+            if bulk_request.sync_immediately:
+                try:
+                    # Buscar contagem atualizada de pendentes
+                    total_pending = db.query(func.count(RoomAvailability.id)).filter(
+                        RoomAvailability.tenant_id == current_user.tenant_id,
+                        RoomAvailability.sync_pending == True,
+                        RoomAvailability.is_active == True
+                    ).scalar() or 0
+                    
+                    # Buscar data mais antiga pendente
+                    oldest = db.query(func.min(RoomAvailability.date)).filter(
+                        RoomAvailability.tenant_id == current_user.tenant_id,
+                        RoomAvailability.sync_pending == True,
+                        RoomAvailability.is_active == True
+                    ).scalar()
+                    
+                    oldest_date = oldest.isoformat() if oldest else None
+                    
+                    notification_service.notify_sync_pending_updated(
+                        tenant_id=current_user.tenant_id,
+                        total=total_pending,
+                        oldest_date=oldest_date
+                    )
+                    logger.info(f"✅ SSE: sync_pending_updated enviado - total={total_pending}")
+                except Exception as notif_error:
+                    logger.error(f"❌ Erro ao enviar sync_pending_updated: {notif_error}")
         
         completed_at = datetime.utcnow()
         duration = (completed_at - started_at).total_seconds()

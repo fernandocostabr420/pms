@@ -10,6 +10,11 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+class RedisConnectionError(Exception):
+    """Exceção customizada para erros de conexão Redis"""
+    pass
+
+
 class NotificationService:
     """
     Serviço para publicar notificações em tempo real via Redis Pub/Sub.
@@ -23,57 +28,129 @@ class NotificationService:
     
     def __init__(self):
         """Inicializa conexão com Redis"""
+        self.redis_client = None
+        self._connection_attempts = 0
+        self._max_connection_attempts = 3
+        self._connect_to_redis()
+    
+    def _connect_to_redis(self):
+        """Tenta conectar ao Redis"""
         try:
             self.redis_client = redis.from_url(
                 settings.REDIS_URL,
                 decode_responses=True,
-                socket_connect_timeout=5
+                socket_connect_timeout=5,
+                socket_keepalive=True,
+                health_check_interval=30
             )
             # Testar conexão
             self.redis_client.ping()
-            logger.info("NotificationService: Conectado ao Redis com sucesso")
+            logger.info("✅ NotificationService: Conectado ao Redis com sucesso")
+            self._connection_attempts = 0
         except Exception as e:
-            logger.error(f"NotificationService: Erro ao conectar ao Redis: {e}")
+            self._connection_attempts += 1
+            logger.error(
+                f"❌ NotificationService: Erro ao conectar ao Redis (tentativa {self._connection_attempts}): {e}"
+            )
             self.redis_client = None
+            
+            # Se falhar após máximo de tentativas, logar aviso crítico
+            if self._connection_attempts >= self._max_connection_attempts:
+                logger.critical(
+                    f"🔴 CRÍTICO: NotificationService não conseguiu conectar ao Redis após "
+                    f"{self._max_connection_attempts} tentativas. SSE não funcionará!"
+                )
     
     def _is_available(self) -> bool:
-        """Verifica se o Redis está disponível"""
+        """
+        Verifica se o Redis está disponível.
+        Tenta reconectar se desconectado.
+        """
         if not self.redis_client:
-            return False
+            # Tentar reconectar se ainda não atingiu o máximo de tentativas
+            if self._connection_attempts < self._max_connection_attempts:
+                logger.info("🔄 Tentando reconectar ao Redis...")
+                self._connect_to_redis()
+            return self.redis_client is not None
+        
         try:
             self.redis_client.ping()
             return True
-        except:
-            return False
+        except Exception as e:
+            logger.warning(f"⚠️ Redis ping falhou: {e}. Tentando reconectar...")
+            self.redis_client = None
+            
+            # Tentar reconectar
+            if self._connection_attempts < self._max_connection_attempts:
+                self._connect_to_redis()
+            
+            return self.redis_client is not None
     
-    def _publish(self, channel: str, data: Dict[str, Any]) -> bool:
+    def _publish(self, channel: str, data: Dict[str, Any], critical: bool = False) -> bool:
         """
         Publica mensagem em um canal Redis.
         
         Args:
             channel: Nome do canal
             data: Dados a publicar
+            critical: Se True, lança exceção quando Redis não disponível
             
         Returns:
             True se publicado com sucesso, False caso contrário
+            
+        Raises:
+            RedisConnectionError: Se critical=True e Redis não disponível
         """
         if not self._is_available():
-            logger.warning(f"Redis não disponível. Notificação não enviada: {channel}")
-            return False
+            error_msg = f"Redis não disponível. Notificação não enviada: {channel}"
+            
+            if critical:
+                logger.error(f"🔴 CRÍTICO: {error_msg}")
+                raise RedisConnectionError(error_msg)
+            else:
+                logger.warning(f"⚠️ {error_msg}")
+                return False
         
         try:
-            # Adicionar timestamp
+            # Adicionar timestamp e metadados
             data["timestamp"] = datetime.utcnow().isoformat()
+            data["service"] = "notification_service"
+            data["channel"] = channel
             
             # Publicar no Redis
             message = json.dumps(data)
-            self.redis_client.publish(channel, message)
+            subscribers = self.redis_client.publish(channel, message)
             
-            logger.debug(f"Notificação publicada no canal '{channel}': {data}")
+            logger.debug(
+                f"📤 Notificação publicada no canal '{channel}' "
+                f"(subscribers: {subscribers}): {data.get('event', 'unknown')}"
+            )
+            
+            # Alertar se não há subscribers
+            if subscribers == 0:
+                logger.warning(
+                    f"⚠️ Nenhum subscriber conectado no canal '{channel}'. "
+                    f"Evento: {data.get('event', 'unknown')}"
+                )
+            
             return True
             
+        except redis.RedisError as e:
+            logger.error(f"❌ Erro Redis ao publicar notificação no canal '{channel}': {e}")
+            self.redis_client = None  # Marcar para reconexão
+            
+            if critical:
+                raise RedisConnectionError(f"Erro ao publicar notificação: {e}")
+            return False
+            
         except Exception as e:
-            logger.error(f"Erro ao publicar notificação no canal '{channel}': {e}")
+            logger.error(
+                f"❌ Erro inesperado ao publicar notificação no canal '{channel}': {e}",
+                exc_info=True
+            )
+            
+            if critical:
+                raise RedisConnectionError(f"Erro ao publicar notificação: {e}")
             return False
     
     # ============== NOTIFICAÇÕES DE SINCRONIZAÇÃO ==============
@@ -101,7 +178,16 @@ class NotificationService:
             "by_property": by_property or {},
             "oldest_date": oldest_date
         }
-        return self._publish(self.CHANNEL_SYNC_UPDATE, data)
+        
+        # ✅ CRÍTICO: Este evento é importante para UX
+        success = self._publish(self.CHANNEL_SYNC_UPDATE, data, critical=False)
+        
+        if success:
+            logger.info(f"✅ sync_pending_updated enviado - tenant={tenant_id}, total={total}")
+        else:
+            logger.error(f"❌ FALHA ao enviar sync_pending_updated - tenant={tenant_id}, total={total}")
+        
+        return success
     
     def notify_sync_completed(
         self,
@@ -129,7 +215,22 @@ class NotificationService:
             "success": success,
             "error": error
         }
-        return self._publish(self.CHANNEL_SYNC_UPDATE, data)
+        
+        # ✅ CRÍTICO: Este evento é importante para UX
+        result = self._publish(self.CHANNEL_SYNC_UPDATE, data, critical=False)
+        
+        if result:
+            logger.info(
+                f"✅ sync_completed enviado - tenant={tenant_id}, "
+                f"synced={synced_count}, success={success}"
+            )
+        else:
+            logger.error(
+                f"❌ FALHA ao enviar sync_completed - tenant={tenant_id}, "
+                f"synced={synced_count}"
+            )
+        
+        return result
     
     # ============== NOTIFICAÇÕES DE DISPONIBILIDADE ==============
     
@@ -159,7 +260,16 @@ class NotificationService:
             "date_to": date_to,
             "updated_count": updated_count
         }
-        return self._publish(self.CHANNEL_AVAILABILITY_UPDATE, data)
+        
+        result = self._publish(self.CHANNEL_AVAILABILITY_UPDATE, data, critical=False)
+        
+        if result:
+            logger.debug(
+                f"✅ availability_updated enviado - tenant={tenant_id}, "
+                f"rooms={len(room_ids)}, count={updated_count}"
+            )
+        
+        return result
     
     def notify_bulk_update_completed(
         self,
@@ -181,7 +291,22 @@ class NotificationService:
             "affected_records": affected_records,
             "success": success
         }
-        return self._publish(self.CHANNEL_AVAILABILITY_UPDATE, data)
+        
+        # ✅ CRÍTICO: Este evento é importante para UX
+        result = self._publish(self.CHANNEL_AVAILABILITY_UPDATE, data, critical=False)
+        
+        if result:
+            logger.info(
+                f"✅ bulk_update_completed enviado - tenant={tenant_id}, "
+                f"records={affected_records}, success={success}"
+            )
+        else:
+            logger.error(
+                f"❌ FALHA ao enviar bulk_update_completed - tenant={tenant_id}, "
+                f"records={affected_records}"
+            )
+        
+        return result
     
     # ============== NOTIFICAÇÕES DE RESERVAS ==============
     
@@ -205,7 +330,16 @@ class NotificationService:
             "reservation_id": reservation_id,
             "room_ids": room_ids
         }
-        return self._publish(self.CHANNEL_RESERVATION_UPDATE, data)
+        
+        result = self._publish(self.CHANNEL_RESERVATION_UPDATE, data, critical=False)
+        
+        if result:
+            logger.info(
+                f"✅ reservation_created enviado - tenant={tenant_id}, "
+                f"reservation={reservation_id}"
+            )
+        
+        return result
     
     def notify_reservation_updated(
         self,
@@ -227,7 +361,16 @@ class NotificationService:
             "reservation_id": reservation_id,
             "status": status
         }
-        return self._publish(self.CHANNEL_RESERVATION_UPDATE, data)
+        
+        result = self._publish(self.CHANNEL_RESERVATION_UPDATE, data, critical=False)
+        
+        if result:
+            logger.debug(
+                f"✅ reservation_updated enviado - tenant={tenant_id}, "
+                f"reservation={reservation_id}, status={status}"
+            )
+        
+        return result
     
     # ============== MÉTODO AUXILIAR PARA TESTES ==============
     
@@ -239,10 +382,67 @@ class NotificationService:
         data = {
             "event": "test",
             "tenant_id": tenant_id,
-            "message": "Notificação de teste enviada com sucesso"
+            "message": "Notificação de teste enviada com sucesso",
+            "test_timestamp": datetime.utcnow().isoformat()
         }
-        return self._publish("test:notifications", data)
+        
+        result = self._publish("test:notifications", data, critical=False)
+        
+        if result:
+            logger.info(f"✅ Notificação de teste enviada com sucesso - tenant={tenant_id}")
+        else:
+            logger.error(f"❌ Falha ao enviar notificação de teste - tenant={tenant_id}")
+        
+        return result
+    
+    # ============== MÉTODOS DE DIAGNÓSTICO ==============
+    
+    def get_connection_status(self) -> Dict[str, Any]:
+        """
+        Retorna status da conexão Redis.
+        Útil para diagnóstico e monitoramento.
+        """
+        return {
+            "is_connected": self._is_available(),
+            "redis_url": settings.REDIS_URL.split('@')[-1] if hasattr(settings, 'REDIS_URL') else "unknown",
+            "connection_attempts": self._connection_attempts,
+            "max_connection_attempts": self._max_connection_attempts,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    def force_reconnect(self) -> bool:
+        """
+        Força reconexão ao Redis.
+        Útil para recuperação de falhas.
+        """
+        logger.info("🔄 Forçando reconexão ao Redis...")
+        self.redis_client = None
+        self._connection_attempts = 0
+        self._connect_to_redis()
+        return self._is_available()
 
 
-# Instância global do serviço
+# ✅ Instância global do serviço
 notification_service = NotificationService()
+
+
+# ✅ Função auxiliar para verificar se Redis está disponível
+def is_redis_available() -> bool:
+    """
+    Verifica se o serviço de notificações está disponível.
+    
+    Returns:
+        True se Redis está conectado e funcionando
+    """
+    return notification_service._is_available()
+
+
+# ✅ Função auxiliar para obter status da conexão
+def get_notification_status() -> Dict[str, Any]:
+    """
+    Retorna status do serviço de notificações.
+    
+    Returns:
+        Dicionário com informações de status
+    """
+    return notification_service.get_connection_status()

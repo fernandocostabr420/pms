@@ -134,7 +134,7 @@ class RoomAvailabilityService:
             self.db.commit()
             self.db.refresh(db_availability)
             
-            # ✅ SSE: Notificar criação de disponibilidade
+            # ✅ CORRIGIDO: Notificações SSE APÓS o commit
             notification_service.notify_availability_updated(
                 tenant_id=tenant_id,
                 room_ids=[availability_data.room_id],
@@ -143,7 +143,6 @@ class RoomAvailabilityService:
                 updated_count=1
             )
             
-            # ✅ CORRIGIDO: Notificar contagem de pendentes se marcou para sync
             if mark_for_sync:
                 self._notify_pending_count_updated(tenant_id)
             
@@ -181,7 +180,7 @@ class RoomAvailabilityService:
             self.db.commit()
             self.db.refresh(availability)
             
-            # ✅ SSE: Notificar atualização de disponibilidade
+            # ✅ CORRIGIDO: Notificações SSE APÓS o commit
             notification_service.notify_availability_updated(
                 tenant_id=tenant_id,
                 room_ids=[availability.room_id],
@@ -190,7 +189,6 @@ class RoomAvailabilityService:
                 updated_count=1
             )
             
-            # ✅ CORRIGIDO: Notificar contagem de pendentes se marcou para sync
             if mark_for_sync:
                 self._notify_pending_count_updated(tenant_id)
             
@@ -212,7 +210,7 @@ class RoomAvailabilityService:
         
         self.db.commit()
         
-        # ✅ SSE: Notificar remoção de disponibilidade
+        # ✅ CORRIGIDO: Notificações SSE APÓS o commit
         notification_service.notify_availability_updated(
             tenant_id=tenant_id,
             room_ids=[availability.room_id],
@@ -221,7 +219,6 @@ class RoomAvailabilityService:
             updated_count=1
         )
         
-        # ✅ CORRIGIDO: Notificar contagem de pendentes (sempre marca para sync)
         self._notify_pending_count_updated(tenant_id)
         
         return True
@@ -293,17 +290,22 @@ class RoomAvailabilityService:
                     errors.append(f"Erro no quarto {room_id}, data {target_date}: {str(e)}")
         
         try:
+            # ✅ CRÍTICO: Commit ANTES das notificações
             self.db.commit()
             
-            # ✅ SSE: Notificar bulk update concluído
             total_affected = created_count + updated_count
+            
+            # ✅ CORRIGIDO: Todas as notificações SSE APÓS o commit bem-sucedido
+            logger.info(f"Bulk update committed: {total_affected} records. Sending SSE notifications...")
+            
+            # Notificar bulk update concluído
             notification_service.notify_bulk_update_completed(
                 tenant_id=tenant_id,
                 affected_records=total_affected,
                 success=len(errors) == 0
             )
             
-            # ✅ SSE: Notificar atualização de disponibilidade
+            # Notificar atualização de disponibilidade
             notification_service.notify_availability_updated(
                 tenant_id=tenant_id,
                 room_ids=valid_room_ids,
@@ -312,12 +314,15 @@ class RoomAvailabilityService:
                 updated_count=total_affected
             )
             
-            # ✅ SSE: Atualizar contagem de pendentes se marcou para sync
-            if mark_for_sync:
+            # Atualizar contagem de pendentes se marcou para sync
+            if mark_for_sync and total_affected > 0:
                 self._notify_pending_count_updated(tenant_id)
+            
+            logger.info(f"SSE notifications sent for bulk update: {total_affected} records")
             
         except Exception as e:
             self.db.rollback()
+            logger.error(f"Erro ao salvar atualizações em massa: {str(e)}")
             raise ValueError(f"Erro ao salvar atualizações em massa: {str(e)}")
         
         return {
@@ -686,7 +691,7 @@ class RoomAvailabilityService:
         
         self.db.commit()
         
-        # ✅ SSE: Notificar atualização de contagem de pendentes
+        # ✅ SSE: Notificar atualização de contagem de pendentes APÓS commit
         if count > 0:
             self._notify_pending_count_updated(tenant_id)
         
@@ -709,7 +714,7 @@ class RoomAvailabilityService:
         
         self.db.commit()
         
-        # ✅ SSE: Notificar atualização de contagem de pendentes
+        # ✅ SSE: Notificar atualização de contagem de pendentes APÓS commit
         if count > 0:
             self._notify_pending_count_updated(tenant_id)
         
@@ -781,16 +786,19 @@ class RoomAvailabilityService:
             oldest_date = oldest.isoformat() if oldest else None
             
             # Notificar via SSE
-            notification_service.notify_sync_pending_updated(
+            success = notification_service.notify_sync_pending_updated(
                 tenant_id=tenant_id,
                 total=total_pending,
                 oldest_date=oldest_date
             )
             
-            logger.debug(f"SSE: Notificado sync_pending_updated - tenant={tenant_id}, total={total_pending}")
+            if success:
+                logger.debug(f"SSE: Notificado sync_pending_updated - tenant={tenant_id}, total={total_pending}")
+            else:
+                logger.warning(f"SSE: Falha ao notificar sync_pending_updated - tenant={tenant_id}")
             
         except Exception as e:
-            logger.warning(f"Erro ao notificar contagem de pendentes: {e}")
+            logger.error(f"Erro ao notificar contagem de pendentes: {e}", exc_info=True)
 
     # ✅ NOVO: Método para análise de restrições no período
     def get_restrictions_impact_overview(
@@ -912,7 +920,7 @@ class RoomAvailabilityService:
             
             self.db.commit()
             
-            # ✅ SSE: Notificar limpeza
+            # ✅ SSE: Notificar limpeza APÓS commit
             self._notify_pending_count_updated(tenant_id)
             
             logger.info(f"Removidas {availabilities_count} disponibilidades órfãs para quarto {room_id}")
@@ -973,7 +981,7 @@ class RoomAvailabilityService:
             
             self.db.commit()
             
-            # ✅ SSE: Notificar limpeza
+            # ✅ SSE: Notificar limpeza APÓS commit
             self._notify_pending_count_updated(tenant_id)
             
             logger.info(f"Limpeza completa: removidas {availabilities_count} disponibilidades órfãs do tenant {tenant_id}")

@@ -133,6 +133,8 @@ export function useChannelManagerCalendar({
     },
     onConnected: () => {
       console.log('SSE conectado - monitorando pendentes de sincronização');
+      // ✅ NOVO: Buscar contagem inicial quando conectar
+      fetchPendingCount();
     },
   });
   
@@ -143,7 +145,17 @@ export function useChannelManagerCalendar({
   
   // ============== FETCH DATA ==============
   
-  const fetchData = useCallback(async (showLoading = true) => {
+  /**
+   * Busca dados do calendário de disponibilidade
+   * 
+   * @param showLoading - Se deve mostrar indicador de loading (padrão: true)
+   * @param force - Se deve forçar busca mesmo com parâmetros idênticos (padrão: false)
+   *                Use force=true quando souber que os dados mudaram no backend
+   *                mas os parâmetros de busca são os mesmos (ex: após bulk edit)
+   */
+  // ✅ CORRIGIDO: Removido 'data' das dependências para evitar loop infinito
+  // ✅ CORRIGIDO: Adicionado parâmetro 'force' para forçar refresh mesmo com params iguais
+  const fetchData = useCallback(async (showLoading = true, force = false) => {
     try {
       if (showLoading) setLoading(true);
       setError(null);
@@ -157,15 +169,19 @@ export function useChannelManagerCalendar({
         include_restrictions: true
       };
       
-      // Evitar chamadas duplicadas
+      // ✅ CORRIGIDO: Evitar chamadas duplicadas (exceto quando force=true)
       const paramsString = JSON.stringify(params);
-      if (paramsString === lastFetchParamsRef.current && data) {
+      if (!force && paramsString === lastFetchParamsRef.current) {
+        if (showLoading) setLoading(false);
+        console.log('⏭️ FetchData: Parâmetros idênticos, pulando busca (use force=true para forçar)');
         return;
       }
       lastFetchParamsRef.current = paramsString;
       
+      console.log(`🔄 FetchData: Buscando dados do calendário (force=${force})...`);
       const response = await channelManagerAPI.getAvailabilityCalendar(params);
       setData(response);
+      console.log(`✅ FetchData: ${response.calendar_data.length} dias carregados`);
       
     } catch (err: any) {
       console.error('Erro ao carregar dados do calendário:', err);
@@ -173,7 +189,23 @@ export function useChannelManagerCalendar({
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [dateRange.from, dateRange.to, filters, data]);
+  }, [dateRange.from, dateRange.to, filters.property_id, filters.room_ids]);
+  
+  // ============== 🆕 BUSCAR CONTAGEM DE PENDENTES ==============
+  
+  const fetchPendingCount = useCallback(async () => {
+    try {
+      const result = await channelManagerAPI.getPendingCount(filters.property_id);
+      const count = filters.property_id 
+        ? result.by_property?.[filters.property_id] || 0
+        : result.total_pending;
+      setPendingCount(count);
+      console.log(`📊 Contagem inicial de pendentes: ${count}`);
+    } catch (err) {
+      console.error('Erro ao buscar contagem de pendentes:', err);
+      setPendingCount(0);
+    }
+  }, [filters.property_id]);
   
   // ============== 🆕 BUSCAR INTERVALO DE DATAS PENDENTES ==============
   
@@ -198,6 +230,11 @@ export function useChannelManagerCalendar({
     fetchData();
   }, [fetchData]);
   
+  // ✅ NOVO: Buscar contagem inicial de pendentes ao montar
+  useEffect(() => {
+    fetchPendingCount();
+  }, [fetchPendingCount]);
+  
   // 🆕 Escutar eventos SSE (SUBSTITUI O POLLING)
   useEffect(() => {
     if (!lastEvent) return;
@@ -220,8 +257,9 @@ export function useChannelManagerCalendar({
         setDateRangeInfo(null);
         setSyncStatus('success');
         
-        // Refresh silencioso do calendário
-        setTimeout(() => fetchData(false), 1000);
+        // ✅ Refresh forçado do calendário (dados mudaram)
+        console.log('🔄 Forçando refresh após sincronização...');
+        setTimeout(() => fetchData(false, true), 1000);
         
         // Reset status após 3 segundos
         setTimeout(() => setSyncStatus('idle'), 3000);
@@ -230,16 +268,27 @@ export function useChannelManagerCalendar({
       case 'bulk_update_completed':
         // Bulk edit concluído - refresh calendário
         console.log('📦 Bulk update concluído via SSE');
-        setTimeout(() => fetchData(false), 1000);
+        
+        // ✅ NOVO: Atualizar pendingCount localmente
+        fetchPendingCount();
+        
+        // ✅ CRÍTICO: Refresh forçado (force=true) porque dados mudaram
+        console.log('🔄 Forçando refresh após bulk update via SSE...');
+        setTimeout(() => fetchData(false, true), 1000);
         break;
         
       case 'availability_updated':
         // Atualização pontual - pode fazer refresh silencioso
         console.log('🔄 Disponibilidade atualizada via SSE');
-        setTimeout(() => fetchData(false), 2000);
+        
+        // ✅ NOVO: Atualizar pendingCount localmente
+        fetchPendingCount();
+        
+        // ✅ Refresh forçado (force=true) porque dados mudaram
+        setTimeout(() => fetchData(false, true), 2000);
         break;
     }
-  }, [lastEvent, filters.property_id, fetchData]);
+  }, [lastEvent, filters.property_id, fetchData, fetchPendingCount]);
   
   // 🆕 Buscar intervalo quando pendingCount mudar
   useEffect(() => {
@@ -306,26 +355,33 @@ export function useChannelManagerCalendar({
       await channelManagerAPI.updateAvailabilityCell({ room_id: roomId, date, field, value });
       
       // Atualizar dados localmente (optimistic update)
-      if (data) {
-        const updatedData = { ...data };
+      setData(prevData => {
+        if (!prevData) return prevData;
+        
+        const updatedData = { ...prevData };
         const dayData = updatedData.calendar_data.find(d => d.date === date);
         if (dayData) {
           const availability = dayData.availabilities.find(a => a.room_id === roomId);
           if (availability) {
             (availability as any)[field] = value;
-            setData(updatedData);
           }
         }
-      }
+        return updatedData;
+      });
       
-      // Refresh completo após um tempo (SSE também notificará)
-      setTimeout(() => fetchData(false), 1000);
+      // ✅ CORRIGIDO: Buscar contagem real do backend (não incrementar localmente)
+      console.log('📊 Atualizando contagem de pendentes após updateCell...');
+      fetchPendingCount(); // Não precisa await aqui pois é rápido
+      
+      // ✅ CORRIGIDO: Refresh forçado (force=true) após um tempo (SSE também notificará)
+      console.log('🔄 Agendando refresh forçado após updateCell...');
+      setTimeout(() => fetchData(false, true), 1000);
       
     } catch (error) {
       console.error('Erro ao atualizar célula:', error);
       throw error;
     }
-  }, [data, fetchData]);
+  }, [fetchData, fetchPendingCount]);
   
   const startBulkEdit = useCallback(() => {
     setBulkEditState(prev => ({
@@ -343,6 +399,7 @@ export function useChannelManagerCalendar({
     setBulkEditState(prev => ({ ...prev, ...updates }));
   }, []);
   
+  // ✅ CORRIGIDO: executeBulkEdit com tratamento de erros e atualização de estado
   const executeBulkEdit = useCallback(async () => {
     try {
       const { scope, actions } = bulkEditState;
@@ -351,6 +408,7 @@ export function useChannelManagerCalendar({
         room_ids: scope.roomIds,
         date_from: scope.dateRange.from,
         date_to: scope.dateRange.to,
+        sync_immediately: true, // ✅ NOVO: Marcar para sincronização
         ...(actions.priceAction === 'set' && { rate_override: actions.priceValue }),
         ...(actions.availabilityAction === 'open' && { is_available: true }),
         ...(actions.availabilityAction === 'close' && { is_available: false }),
@@ -359,25 +417,62 @@ export function useChannelManagerCalendar({
         ...(actions.restrictions?.closedToDeparture !== undefined && { closed_to_departure: actions.restrictions.closedToDeparture })
       };
       
-      await channelManagerAPI.bulkUpdateAvailability(bulkData);
+      console.log('🚀 Executando bulk edit:', bulkData);
       
-      // Fechar modal
+      const result = await channelManagerAPI.bulkUpdateAvailability(bulkData);
+      
+      console.log('✅ Bulk edit concluído:', result);
+      
+      // ✅ CRÍTICO: Buscar contagem REAL do backend (não somar localmente)
+      console.log('📊 Buscando contagem real de pendentes após bulk edit...');
+      console.log('📊 Pendentes antes:', pendingCount);
+      await fetchPendingCount();
+      console.log('📊 Contagem de pendentes atualizada');
+      
+      // ✅ CRÍTICO: Aguardar um pouco para dateRangeInfo atualizar via useEffect
+      // O useEffect [pendingCount] precisa disparar e completar fetchDateRangeInfo()
+      console.log('⏳ Aguardando dateRangeInfo atualizar...');
+      await new Promise(resolve => setTimeout(resolve, 300));
+      console.log('✅ DateRangeInfo atualizado:', dateRangeInfo);
+      
+      // ✅ Fechar modal DEPOIS de atualizar contagens
       setBulkEditState(prev => ({ ...prev, isOpen: false }));
+      console.log('✅ Modal fechado');
       
-      // ✅ SSE notificará automaticamente com 'bulk_update_completed'
-      // O useEffect acima fará o refresh do calendário
+      // ✅ CRÍTICO: Refresh IMEDIATO do calendário (force=true para ignorar cache)
+      console.log('🔄 Forçando refresh imediato do calendário após bulk edit...');
+      await fetchData(false, true);
+      console.log('✅ Calendário atualizado após bulk edit');
       
-    } catch (error) {
-      console.error('Erro na edição em massa:', error);
-      throw error;
+      // ✅ SSE também notificará com 'bulk_update_completed' como backup
+      // O useEffect acima fará outro refresh se necessário
+      
+      return result;
+      
+    } catch (error: any) {
+      console.error('❌ Erro na edição em massa:', error);
+      
+      // Manter modal aberto em caso de erro
+      throw new Error(
+        error.response?.data?.detail || 
+        error.message || 
+        'Erro desconhecido ao executar bulk edit'
+      );
     }
-  }, [bulkEditState]);
+  }, [bulkEditState, fetchData, fetchPendingCount, pendingCount, dateRangeInfo]);
   
   // ============== 🆕 SINCRONIZAÇÃO MANUAL ==============
   
+  // ✅ CORRIGIDO: syncWithWuBook implementado corretamente
   const syncWithWuBook = useCallback(async () => {
+    if (pendingCount === 0) {
+      console.warn('⚠️ Nenhum registro pendente para sincronizar');
+      return;
+    }
+    
     try {
       setSyncStatus('syncing');
+      console.log(`🔄 Iniciando sincronização de ${pendingCount} registros...`);
       
       const result = await channelManagerAPI.syncWithWuBook({
         property_id: filters.property_id,
@@ -386,26 +481,52 @@ export function useChannelManagerCalendar({
         batch_size: 100
       });
       
+      console.log('✅ Resultado da sincronização:', result);
+      
       if (result.status === 'success' || result.status === 'completed') {
         // ✅ SSE notificará com 'sync_completed'
         // O useEffect acima atualizará o estado automaticamente
-        console.log('🎉 Sincronização iniciada - aguardando notificação SSE');
+        console.log('🎉 Sincronização concluída - aguardando notificação SSE');
+      } else if (result.status === 'partial_success') {
+        console.warn('⚠️ Sincronização parcial:', result);
+        setSyncStatus('success');
+        
+        // Atualizar contagem de pendentes
+        fetchPendingCount();
+        
+        // Reset status após 3 segundos
+        setTimeout(() => setSyncStatus('idle'), 3000);
       } else {
+        console.error('❌ Sincronização falhou:', result);
         setSyncStatus('error');
+        
+        // Reset status após 3 segundos em caso de erro
+        setTimeout(() => setSyncStatus('idle'), 3000);
       }
       
-    } catch (error) {
-      console.error('Erro na sincronização:', error);
+    } catch (error: any) {
+      console.error('❌ Erro na sincronização:', error);
       setSyncStatus('error');
       
       // Reset status após 3 segundos em caso de erro
       setTimeout(() => setSyncStatus('idle'), 3000);
+      
+      throw new Error(
+        error.response?.data?.detail || 
+        error.message || 
+        'Erro desconhecido na sincronização'
+      );
     }
-  }, [filters.property_id]);
+  }, [filters.property_id, pendingCount, fetchPendingCount]);
   
   // ============== UTILIDADES ==============
   
-  const refresh = useCallback(() => fetchData(), [fetchData]);
+  // ✅ CORRIGIDO: refresh agora força a busca (force=true)
+  const refresh = useCallback(() => {
+    console.log('🔄 Refresh manual solicitado (force=true)');
+    fetchData(true, true); // showLoading=true, force=true
+    fetchPendingCount();
+  }, [fetchData, fetchPendingCount]);
   
   const getAvailabilityByRoomDate = useCallback((roomId: number, date: string): SimpleAvailabilityView | null => {
     if (!data) return null;
