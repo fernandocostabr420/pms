@@ -220,7 +220,7 @@ class PMSApiClient {
     
     this.client = axios.create({
       baseURL: `${this.baseURL}/api/v1`,
-      timeout: 10000,
+      timeout: 1000000,
       headers: {
         'Content-Type': 'application/json',
       },
