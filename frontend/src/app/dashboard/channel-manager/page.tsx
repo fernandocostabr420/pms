@@ -87,20 +87,44 @@ export default function ChannelManagerPage() {
       return;
     }
 
+    const recordsToSync = pendingCount; // Guardar o valor antes da sincronização
+
     try {
-      await syncWithWuBook();
+      // ✅ Chamar a sincronização
+      const result = await syncWithWuBook();
       
+      // ✅ Aguardar um momento para o backend processar e enviar SSE
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // ✅ Forçar refresh dos dados para garantir atualização
+      await refresh();
+      
+      // ✅ Toast de sucesso
       toast({
         title: "✓ Sincronização concluída",
-        description: `${pendingCount} registros foram sincronizados com sucesso.`,
+        description: `${recordsToSync} ${recordsToSync === 1 ? 'registro foi sincronizado' : 'registros foram sincronizados'} com sucesso.`,
         variant: "default"
       });
-    } catch (error) {
+      
+      // ✅ Dispensar o alerta automaticamente após sucesso
+      setDismissedAlert(true);
+      
+    } catch (error: any) {
+      console.error('Erro na sincronização:', error);
+      
+      // ✅ Toast de erro detalhado
       toast({
         title: "Erro na sincronização",
-        description: "Não foi possível sincronizar com o WuBook. Tente novamente.",
+        description: error?.message || "Não foi possível sincronizar com o WuBook. Tente novamente.",
         variant: "destructive"
       });
+      
+      // ✅ Tentar refresh mesmo com erro para atualizar o estado
+      try {
+        await refresh();
+      } catch (refreshError) {
+        console.error('Erro ao fazer refresh após falha:', refreshError);
+      }
     }
   };
 

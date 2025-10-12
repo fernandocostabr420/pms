@@ -17,6 +17,7 @@ from app.models.wubook_room_mapping import WuBookRoomMapping
 from app.models.wubook_sync_log import WuBookSyncLog
 from app.integrations.wubook.sync_service import WuBookSyncService
 from app.utils.decorators import AuditContext
+from app.services.notification_service import notification_service  # ✅ NOVO
 
 logger = logging.getLogger(__name__)
 
@@ -254,12 +255,25 @@ class ManualSyncService:
                     "Nenhuma configuração WuBook ativa encontrada"
                 )
             
-            # Buscar registros para sincronizar
+            # ✅ CORREÇÃO: Buscar registros para sincronizar (sem passar batch_size como limit)
             target_records = self._get_sync_target_records(
-                tenant_id, property_id, force_all, batch_size
+                tenant_id, property_id, force_all
             )
             
             if not target_records:
+                # ✅ NOVO: Emitir SSE mesmo quando não há pendentes
+                try:
+                    notification_service.notify_sync_completed(
+                        tenant_id=tenant_id,
+                        configuration_id=wubook_config.id,
+                        synced_count=0,
+                        success=True,
+                        error=None
+                    )
+                    logger.info(f"✅ SSE sync_completed enviado (0 registros) - tenant={tenant_id}")
+                except Exception as sse_error:
+                    logger.warning(f"⚠️ Falha ao enviar SSE: {sse_error}")
+                
                 return self._create_success_result(
                     sync_id, started_at,
                     "Nenhum registro pendente de sincronização",
@@ -326,6 +340,19 @@ class ManualSyncService:
                 "force_all_used": force_all
             }
             
+            # ✅ NOVO: Notificar via SSE que sincronização foi concluída
+            try:
+                notification_service.notify_sync_completed(
+                    tenant_id=tenant_id,
+                    configuration_id=wubook_config.id,
+                    synced_count=total_successful,
+                    success=(result["status"] == "success"),
+                    error=result["message"] if result["status"] == "error" else None
+                )
+                logger.info(f"✅ SSE sync_completed enviado - tenant={tenant_id}, synced={total_successful}")
+            except Exception as sse_error:
+                logger.warning(f"⚠️ Falha ao enviar SSE sync_completed: {sse_error}")
+            
             logger.info(f"Sincronização manual {sync_id} concluída: "
                        f"{total_successful}/{total_processed} sucessos")
             
@@ -334,6 +361,19 @@ class ManualSyncService:
         except Exception as e:
             logger.error(f"Erro crítico na sincronização manual {sync_id}: {str(e)}")
             logger.error(traceback.format_exc())
+            
+            # ✅ NOVO: Notificar erro via SSE
+            try:
+                notification_service.notify_sync_completed(
+                    tenant_id=tenant_id,
+                    configuration_id=wubook_config.id if 'wubook_config' in locals() else 0,
+                    synced_count=0,
+                    success=False,
+                    error=str(e)
+                )
+                logger.info(f"✅ SSE sync_completed (erro) enviado - tenant={tenant_id}")
+            except Exception as sse_error:
+                logger.warning(f"⚠️ Falha ao enviar SSE de erro: {sse_error}")
             
             return self._create_error_result(sync_id, started_at, str(e))
     
@@ -433,10 +473,19 @@ class ManualSyncService:
         self, 
         tenant_id: int, 
         property_id: Optional[int], 
-        force_all: bool, 
-        limit: int
+        force_all: bool
     ) -> List[RoomAvailability]:
-        """Busca registros alvo para sincronização"""
+        """
+        Busca TODOS os registros alvo para sincronização.
+        
+        Args:
+            tenant_id: ID do tenant
+            property_id: ID da propriedade específica (opcional)
+            force_all: Se True, busca todos os registros. Se False, apenas pendentes.
+            
+        Returns:
+            Lista com TODOS os registros encontrados (sem limite)
+        """
         query = self.db.query(RoomAvailability).options(
             joinedload(RoomAvailability.room).joinedload(Room.property_obj)
         ).join(Room).join(Property).filter(
@@ -458,7 +507,8 @@ class ManualSyncService:
             RoomAvailability.created_at
         )
         
-        return query.limit(limit).all()
+        # ✅ CORREÇÃO: Buscar TODOS os registros (sem limit)
+        return query.all()
     
     def _filter_records_for_config(
         self, 
