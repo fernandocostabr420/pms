@@ -1,10 +1,8 @@
 // frontend/src/components/channel-manager/BulkEditModal.tsx
-// Path: frontend/src/components/channel-manager/BulkEditModal.tsx
-
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
-import { format, addDays } from 'date-fns';
+import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
   Dialog,
@@ -27,12 +25,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Calendar } from '@/components/ui/calendar';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   Calendar as CalendarIcon,
@@ -47,8 +39,8 @@ import {
   Info
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
 import { BulkEditState, RoomSummary } from '@/types/channel-manager';
+import { ChannelManagerDateRangePicker } from '@/components/channel-manager/DateRangePicker';
 
 interface BulkEditModalProps {
   isOpen: boolean;
@@ -160,8 +152,8 @@ export function BulkEditModal({
     }
   };
 
-  const handleDateRangeChange = (range: { from?: Date; to?: Date }) => {
-    if (range.from && range.to) {
+  const handleDateRangeChange = (range: { from: Date; to: Date } | null) => {
+    if (range) {
       onUpdateState({
         scope: {
           ...state.scope,
@@ -220,38 +212,17 @@ export function BulkEditModal({
         </p>
       </div>
 
-      {/* Date Range */}
+      {/* Date Range - NOVO COMPONENTE */}
       <div className="space-y-3">
         <Label className="text-sm font-medium">Período</Label>
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              className="w-full justify-start text-left font-normal"
-            >
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {dateRange.from && dateRange.to ? (
-                <>
-                  {format(dateRange.from, "dd/MM/yyyy", { locale: ptBR })} -{" "}
-                  {format(dateRange.to, "dd/MM/yyyy", { locale: ptBR })}
-                </>
-              ) : (
-                <span>Selecione o período</span>
-              )}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <Calendar
-              initialFocus
-              mode="range"
-              defaultMonth={dateRange.from}
-              selected={{ from: dateRange.from, to: dateRange.to }}
-              onSelect={handleDateRangeChange}
-              numberOfMonths={2}
-              locale={ptBR}
-            />
-          </PopoverContent>
-        </Popover>
+        <ChannelManagerDateRangePicker
+          value={dateRange}
+          onChange={handleDateRangeChange}
+          numberOfMonths={2}
+          showPresets={true}
+          maxDays={366}
+          minDays={1}
+        />
         <div className="text-xs text-gray-500">
           {totalDays} dias selecionados
         </div>

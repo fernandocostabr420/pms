@@ -1,10 +1,8 @@
 // frontend/src/components/channel-manager/CalendarToolbar.tsx
-// Path: frontend/src/components/channel-manager/CalendarToolbar.tsx
-
 'use client';
 
 import { useState } from 'react';
-import { format, addDays } from 'date-fns';
+import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,12 +15,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
-import { Calendar } from '@/components/ui/calendar';
 import {
   ChevronLeft,
   ChevronRight,
@@ -41,6 +33,7 @@ import {
   ChannelManagerFilters, 
   AvailabilityCalendarResponse
 } from '@/types/channel-manager';
+import { ChannelManagerDateRangePicker } from '@/components/channel-manager/DateRangePicker';
 
 interface CalendarToolbarProps {
   dateRange: { from: Date; to: Date };
@@ -70,28 +63,6 @@ export function CalendarToolbar({
   loading
 }: CalendarToolbarProps) {
   const [showFilters, setShowFilters] = useState(false);
-  const [calendarOpen, setCalendarOpen] = useState(false);
-
-  // ============== PERIOD PRESETS ==============
-  
-  const periodPresets = [
-    { 
-      label: 'Próximos 7 dias', 
-      getValue: () => ({ from: new Date(), to: addDays(new Date(), 6) })
-    },
-    { 
-      label: 'Próximos 14 dias', 
-      getValue: () => ({ from: new Date(), to: addDays(new Date(), 13) })
-    },
-    { 
-      label: 'Próximo mês', 
-      getValue: () => ({ from: new Date(), to: addDays(new Date(), 30) })
-    },
-    { 
-      label: 'Próximos 60 dias', 
-      getValue: () => ({ from: new Date(), to: addDays(new Date(), 59) })
-    }
-  ];
 
   // ============== ROOM FILTER OPTIONS ==============
   
@@ -101,17 +72,6 @@ export function CalendarToolbar({
   })) || [];
 
   // ============== HANDLERS ==============
-  
-  const handleDateRangeSelect = (range: { from?: Date; to?: Date }) => {
-    if (range.from && range.to) {
-      setDateRange({ from: range.from, to: range.to });
-      setCalendarOpen(false);
-    }
-  };
-
-  const handlePeriodPreset = (preset: typeof periodPresets[0]) => {
-    setDateRange(preset.getValue());
-  };
 
   const handleRoomFilter = (roomIds: string[]) => {
     setFilters({
@@ -173,58 +133,14 @@ export function CalendarToolbar({
             </Button>
           </div>
 
-          {/* Date Range Picker */}
-          <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                className={cn(
-                  "w-auto justify-start text-left font-normal",
-                  !dateRange && "text-muted-foreground"
-                )}
-              >
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {dateRange?.from && dateRange?.to ? (
-                  <>
-                    {format(dateRange.from, "dd/MM", { locale: ptBR })} -{" "}
-                    {format(dateRange.to, "dd/MM/yyyy", { locale: ptBR })}
-                  </>
-                ) : (
-                  <span>Selecione o período</span>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <div className="flex">
-                {/* Presets */}
-                <div className="border-r p-3 space-y-1">
-                  <div className="text-sm font-medium mb-2">Períodos</div>
-                  {periodPresets.map((preset, index) => (
-                    <Button
-                      key={index}
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-start text-xs"
-                      onClick={() => handlePeriodPreset(preset)}
-                    >
-                      {preset.label}
-                    </Button>
-                  ))}
-                </div>
-                
-                {/* Calendar */}
-                <Calendar
-                  initialFocus
-                  mode="range"
-                  defaultMonth={dateRange?.from}
-                  selected={{ from: dateRange.from, to: dateRange.to }}
-                  onSelect={handleDateRangeSelect}
-                  numberOfMonths={2}
-                  locale={ptBR}
-                />
-              </div>
-            </PopoverContent>
-          </Popover>
+          {/* Date Range Picker - NOVO COMPONENTE */}
+          <ChannelManagerDateRangePicker
+            value={dateRange}
+            onChange={(range) => range && setDateRange(range)}
+            numberOfMonths={2}
+            showPresets={true}
+            maxDays={366}
+          />
 
         </div>
 
