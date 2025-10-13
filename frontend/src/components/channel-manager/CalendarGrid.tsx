@@ -184,7 +184,8 @@ export function CalendarGrid({
 
       {/* ===== MAIN GRID WITH HORIZONTAL SCROLL ===== */}
       <div className="w-full overflow-x-auto border rounded-lg">
-        <div className="inline-flex flex-col min-w-full">{rooms.map((room, roomIndex) => {
+        <div className="inline-flex flex-col min-w-full">
+          {rooms.map((room, roomIndex) => {
             const isSelected = selectedRooms.has(room.room_id);
             const stats = getRoomStats(roomIndex);
             
@@ -245,13 +246,19 @@ export function CalendarGrid({
                   </div>
                 </div>
 
-                {/* ===== DATE COLUMNS (cada coluna tem 5 células verticais) ===== */}
+                {/* ===== DATE COLUMNS (cada coluna tem 1 header + 5 células verticais) ===== */}
                 <div className="flex overflow-x-auto">
                   {dates.map((date, dateIndex) => {
                     const availability = calendarMatrix[roomIndex][dateIndex];
                     
                     return (
                       <div key={`${room.room_id}-${date}`} className="w-24 flex-shrink-0 border-r">
+                        
+                        {/* 🆕 HEADER VAZIO - Alinha com o header da sidebar */}
+                        <div className="h-[52px] border-b bg-white flex items-center justify-center">
+                          {/* Espaço vazio para alinhar com o header do quarto na sidebar */}
+                        </div>
+
                         {/* Stack vertical das 5 células */}
                         
                         {/* Linha 1: Preço */}
