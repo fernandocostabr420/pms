@@ -1,4 +1,4 @@
-/* src/app/globals.css */
+/* frontend/src/app/globals.css */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -217,7 +217,224 @@ html, body {
   background: #f9fafb;
 }
 
-/* ===== CALENDAR STYLES ===== */
+/* ===== 🆕 CHANNEL MANAGER - LAYOUT DE 5 LINHAS ===== */
+
+/* Container principal do calendário */
+.channel-manager-calendar {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+/* Sidebar fixa com nomes dos quartos */
+.channel-manager-sidebar {
+  position: sticky;
+  left: 0;
+  z-index: 15;
+  background: #f9fafb;
+  border-right: 2px solid #d1d5db;
+  min-width: 192px;
+  max-width: 192px;
+}
+
+/* Células editáveis do calendário */
+.channel-manager-cell {
+  min-width: 96px;
+  height: 32px;
+  border-right: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
+}
+
+.channel-manager-cell:hover {
+  background-color: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.channel-manager-cell:focus-within {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+  z-index: 5;
+}
+
+/* Estados específicos das células */
+.channel-manager-cell.synced {
+  background-color: #f0fdf4;
+  border-color: #86efac;
+}
+
+.channel-manager-cell.pending {
+  background-color: #fef9c3;
+  border-color: #fde047;
+}
+
+.channel-manager-cell.error {
+  background-color: #fee2e2;
+  border-color: #fca5a5;
+}
+
+.channel-manager-cell.blocked {
+  background-color: #f3f4f6;
+  color: #9ca3af;
+}
+
+.channel-manager-cell.selected {
+  background-color: #dbeafe;
+  border-color: #60a5fa;
+}
+
+.channel-manager-cell.updating {
+  background-color: #bfdbfe;
+  border-color: #3b82f6;
+  pointer-events: none;
+}
+
+/* Linha 1: Preço */
+.channel-manager-row-price {
+  font-weight: 500;
+  color: #059669;
+}
+
+.channel-manager-row-price input {
+  font-weight: 500;
+  text-align: left;
+}
+
+/* Linha 2: Disponibilidade */
+.channel-manager-row-availability {
+  font-weight: 600;
+  text-align: center;
+}
+
+.channel-manager-row-availability.available {
+  color: #10b981;
+}
+
+.channel-manager-row-availability.blocked {
+  color: #ef4444;
+}
+
+/* Linha 3: Estadia Mínima */
+.channel-manager-row-min-stay {
+  font-size: 0.875rem;
+  text-align: center;
+  color: #6b7280;
+}
+
+/* Linhas 4 e 5: Checkboxes CTA/CTD */
+.channel-manager-row-restriction {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.channel-manager-row-restriction input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #ef4444;
+}
+
+/* Inputs inline editáveis */
+.channel-manager-cell input {
+  width: 100%;
+  height: 100%;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  font-size: 0.75rem;
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.channel-manager-cell input:focus {
+  background-color: white;
+  box-shadow: inset 0 0 0 2px #3b82f6;
+}
+
+/* Indicador de sincronização (aparece na linha 1) */
+.channel-manager-sync-indicator {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.channel-manager-sync-indicator.synced {
+  color: #10b981;
+}
+
+.channel-manager-sync-indicator.pending {
+  color: #f59e0b;
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.channel-manager-sync-indicator.error {
+  color: #ef4444;
+}
+
+/* Tooltip de informações ao hover */
+.channel-manager-cell-tooltip {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.9);
+  color: white;
+  font-size: 0.625rem;
+  padding: 4px 6px;
+  border-radius: 0 0 4px 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 20;
+}
+
+.channel-manager-cell:hover .channel-manager-cell-tooltip {
+  opacity: 1;
+}
+
+/* Separadores visuais entre quartos */
+.channel-manager-room-separator {
+  height: 2px;
+  background: #d1d5db;
+  margin: 0;
+}
+
+/* Header do room (nome + info) com altura total das 5 linhas */
+.channel-manager-room-header {
+  min-height: 160px; /* 32px × 5 linhas */
+  display: flex;
+  align-items: flex-start;
+  padding: 12px;
+  border-bottom: 2px solid #d1d5db;
+}
+
+/* Labels dos campos na sidebar */
+.channel-manager-field-label {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #4b5563;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+/* ===== CALENDAR STYLES (GERAL) ===== */
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -382,6 +599,24 @@ html, body {
   animation: skeleton 1.5s infinite linear;
 }
 
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* ===== MODAIS E OVERLAYS ===== */
 .modal-overlay {
   background: rgba(0, 0, 0, 0.5);
@@ -461,8 +696,13 @@ html, body {
   }
   
   .calendar-day:hover,
-  .reservation-card-compact:hover {
+  .reservation-card-compact:hover,
+  .channel-manager-cell:hover {
     transform: none;
     box-shadow: none;
+  }
+  
+  .channel-manager-sync-indicator {
+    display: none;
   }
 }

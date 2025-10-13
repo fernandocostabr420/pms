@@ -55,27 +55,38 @@ export interface ChannelManagerOverview {
   estimated_monthly_revenue?: number;
 }
 
+/**
+ * ✅ Interface atualizada com todos os campos necessários para o layout de 5 linhas
+ */
 export interface SimpleAvailabilityView {
   date: string;
   room_id: number;
   room_number: string;
   room_name?: string;
   
-  // Status PMS
+  // LINHA 1: Preço
+  rate?: number;
+  
+  // LINHA 2: Disponibilidade (unidades)
   is_available: boolean;
   is_bookable: boolean;
-  rate?: number;
+  
+  // LINHA 3: Estadia mínima
   min_stay: number;
+  
+  // LINHA 4: Fechado para chegada
   closed_to_arrival: boolean;
+  
+  // LINHA 5: Fechado para saída
   closed_to_departure: boolean;
   
-  // Informações de sincronização
+  // Informações de sincronização (exibidas na linha 1)
   sync_status: string;
   last_sync?: string;
   sync_pending: boolean;
   sync_error?: string;
   
-  // Canais
+  // Canais mapeados
   mapped_channels: string[];
   sync_enabled_channels: string[];
 }
@@ -142,28 +153,36 @@ export interface SyncStatusInfo {
 
 // ============== BULK EDIT ==============
 
+/**
+ * ✅ Interface atualizada com suporte completo para os 5 campos
+ */
 export interface BulkAvailabilityUpdate {
   room_ids: number[];
   date_from: string;
   date_to: string;
   
-  // Campos para atualizar
+  // LINHA 1: Preço
+  rate_override?: number;
+  
+  // LINHA 2: Disponibilidade
   is_available?: boolean;
   is_blocked?: boolean;
   is_out_of_order?: boolean;
   is_maintenance?: boolean;
   
-  rate_override?: number;
+  // LINHA 3: Estadia mínima
   min_stay?: number;
   max_stay?: number;
   
+  // LINHA 4: Fechado para chegada
   closed_to_arrival?: boolean;
+  
+  // LINHA 5: Fechado para saída
   closed_to_departure?: boolean;
   
+  // Informações adicionais
   reason?: string;
   notes?: string;
-  
-  // ❌ REMOVIDO: sync_immediately não existe mais
 }
 
 export interface BulkOperationResult {
@@ -266,6 +285,9 @@ export interface ChannelManagerFilters {
 
 // ============== UI STATE ==============
 
+/**
+ * ✅ Estado da UI atualizado para o layout de 5 linhas
+ */
 export interface CalendarUIState {
   selectedDate?: string;
   selectedRooms: number[];
@@ -275,10 +297,13 @@ export interface CalendarUIState {
   editingCell?: {
     roomId: number;
     date: string;
-    field: 'rate' | 'availability' | 'restrictions';
+    field: 'rate' | 'availability' | 'min_stay' | 'closed_to_arrival' | 'closed_to_departure';
   };
 }
 
+/**
+ * ✅ Estado do Bulk Edit com suporte completo para os 5 campos
+ */
 export interface BulkEditState {
   isOpen: boolean;
   step: 1 | 2 | 3; // Escopo -> Ação -> Confirmar
@@ -288,10 +313,15 @@ export interface BulkEditState {
     daysOfWeek?: number[];
   };
   actions: {
+    // LINHA 1: Preço
     priceAction?: 'set' | 'increase' | 'decrease';
     priceValue?: number;
+    
+    // LINHA 2: Disponibilidade
     availabilityAction?: 'open' | 'close' | 'set';
     availabilityValue?: number;
+    
+    // LINHAS 3, 4, 5: Restrições
     restrictions?: {
       minStay?: number;
       closedToArrival?: boolean;
@@ -303,4 +333,30 @@ export interface BulkEditState {
     conflicts: string[];
     estimatedChanges: Record<string, number>;
   };
+}
+
+// ============== TIPOS AUXILIARES ==============
+
+/**
+ * Tipo para os campos editáveis no calendário (5 linhas)
+ */
+export type EditableField = 
+  | 'rate'                  // Linha 1
+  | 'availability'          // Linha 2
+  | 'min_stay'              // Linha 3
+  | 'closed_to_arrival'     // Linha 4
+  | 'closed_to_departure';  // Linha 5
+
+/**
+ * Tipo para o status de uma célula individual
+ */
+export type CellStatus = 'idle' | 'updating' | 'error';
+
+/**
+ * Tipo para identificação única de uma célula (room + date + field)
+ */
+export interface CellIdentifier {
+  roomId: number;
+  date: string;
+  field: EditableField;
 }

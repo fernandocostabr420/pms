@@ -22,7 +22,9 @@ import {
   WifiOff,
   DollarSign,
   Building,
-  Calendar
+  Calendar,
+  Hash,
+  Ban
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -101,7 +103,7 @@ export function CalendarLegend() {
     {
       color: "bg-blue-50 border-blue-200",
       label: "Selecionado",
-      description: "Célula selecionada para edição em massa",
+      description: "Quarto selecionado para edição em massa",
       example: "Marcado para bulk edit"
     },
     {
@@ -153,39 +155,60 @@ export function CalendarLegend() {
     }
   ];
 
-  const fieldExplanations = [
+  // ✅ NOVO: Explicação do layout de 5 linhas
+  const fieldRows = [
     {
       icon: <DollarSign className="h-4 w-4" />,
-      label: "Preço (R$)",
-      description: "Tarifa da diária. Clique para editar inline",
+      label: "Linha 1: Preço (R$)",
+      description: "Tarifa da diária. Clique para editar o valor",
+      example: "Ex: R$ 150.00",
       color: "text-green-600"
     },
     {
-      icon: <Building className="h-4 w-4" />,
-      label: "Disponibilidade (#)",
-      description: "Número de unidades disponíveis. ✓ = disponível, ✗ = bloqueado",
+      icon: <Hash className="h-4 w-4" />,
+      label: "Linha 2: Unidades",
+      description: "Quantidade de quartos disponíveis (1 = disponível, 0 = bloqueado)",
+      example: "Ex: 1 ou 0",
       color: "text-blue-600"
     },
     {
       icon: <Calendar className="h-4 w-4" />,
-      label: "Restrições",
-      description: "MinStay (noites mínimas) e checkboxes CTA/CTD",
+      label: "Linha 3: Estadia Mínima",
+      description: "Número mínimo de noites para reserva",
+      example: "Ex: 2 (= 2 noites mínimas)",
+      color: "text-purple-600"
+    },
+    {
+      icon: <Ban className="h-4 w-4" />,
+      label: "Linha 4: Fechado p/ Chegada",
+      description: "Checkbox para impedir check-in nesta data",
+      example: "☑ = não permite chegada",
       color: "text-orange-600"
+    },
+    {
+      icon: <Ban className="h-4 w-4" />,
+      label: "Linha 5: Fechado p/ Saída",
+      description: "Checkbox para impedir check-out nesta data",
+      example: "☑ = não permite saída",
+      color: "text-red-600"
     }
   ];
 
   const restrictions = [
     {
-      label: "MinStay (2n)",
-      description: "Estadia mínima de 2 noites"
+      label: "Estadia Mínima",
+      description: "Define o número mínimo de noites que o hóspede deve reservar",
+      example: "Valor: 2 = mínimo 2 noites"
     },
     {
-      label: "CTA ☐",
-      description: "Closed to Arrival - Fechado para chegada"
+      label: "Fechado p/ Chegada (CTA)",
+      description: "Impede que hóspedes façam check-in nesta data específica",
+      example: "Útil para forçar estadias mais longas"
     },
     {
-      label: "CTD ☐", 
-      description: "Closed to Departure - Fechado para saída"
+      label: "Fechado p/ Saída (CTD)",
+      description: "Impede que hóspedes façam check-out nesta data específica",
+      example: "Útil para manter ocupação em períodos estratégicos"
     }
   ];
 
@@ -229,16 +252,51 @@ export function CalendarLegend() {
             Legenda
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-96 p-0" align="end">
+        <PopoverContent className="w-[420px] max-h-[600px] overflow-y-auto p-0" align="end">
           <Card className="border-0 shadow-none">
-            <CardHeader className="pb-3">
+            <CardHeader className="pb-3 sticky top-0 bg-white z-10 border-b">
               <CardTitle className="text-base flex items-center gap-2">
                 <Info className="h-4 w-4" />
                 Legenda do Calendário
               </CardTitle>
+              <p className="text-xs text-gray-500 mt-1">
+                Cada quarto possui 5 linhas editáveis separadas
+              </p>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-6 pt-4">
               
+              {/* ✅ NOVO: Estrutura de 5 Linhas */}
+              <div>
+                <h4 className="font-medium text-sm mb-3 text-gray-900 flex items-center gap-2">
+                  <Building className="h-4 w-4" />
+                  Estrutura do Calendário
+                </h4>
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
+                  <p className="text-xs text-blue-900 font-medium mb-1">Layout de Linhas Separadas</p>
+                  <p className="text-xs text-blue-700">
+                    Cada quarto agora exibe 5 linhas independentes para melhor visualização e edição dos dados.
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  {fieldRows.map((item, index) => (
+                    <div key={index} className="flex items-start gap-3 p-2 hover:bg-gray-50 rounded border border-gray-100">
+                      <div className={`mt-0.5 ${item.color}`}>
+                        {item.icon}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-xs text-gray-900">{item.label}</div>
+                        <div className="text-xs text-gray-600 mt-0.5">{item.description}</div>
+                        {item.example && (
+                          <div className="text-xs text-gray-500 mt-1 font-mono bg-gray-50 px-2 py-0.5 rounded inline-block">
+                            {item.example}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               {/* Status das Células */}
               <div>
                 <h4 className="font-medium text-sm mb-3 text-gray-900">Status das Células</h4>
@@ -259,27 +317,20 @@ export function CalendarLegend() {
                 </div>
               </div>
 
-              {/* Campos da Célula */}
+              {/* Restrições Detalhadas */}
               <div>
-                <h4 className="font-medium text-sm mb-3 text-gray-900">Campos Editáveis</h4>
-                <div className="space-y-1">
-                  {fieldExplanations.map((item, index) => (
-                    <StatusIndicator key={index} {...item} />
-                  ))}
-                </div>
-              </div>
-
-              {/* Restrições */}
-              <div>
-                <h4 className="font-medium text-sm mb-3 text-gray-900">Restrições</h4>
+                <h4 className="font-medium text-sm mb-3 text-gray-900">Restrições (Linhas 3, 4 e 5)</h4>
                 <div className="space-y-2">
                   {restrictions.map((item, index) => (
-                    <div key={index} className="flex items-start gap-3 p-2 hover:bg-gray-50 rounded">
-                      <div className="font-mono text-xs bg-gray-100 px-2 py-1 rounded mt-0.5">
+                    <div key={index} className="p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
+                      <div className="font-medium text-xs text-gray-900 mb-1">
                         {item.label}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs text-gray-600">{item.description}</div>
+                      <div className="text-xs text-gray-600 mb-1">
+                        {item.description}
+                      </div>
+                      <div className="text-xs text-gray-500 italic bg-gray-50 px-2 py-1 rounded">
+                        💡 {item.example}
                       </div>
                     </div>
                   ))}
@@ -290,11 +341,30 @@ export function CalendarLegend() {
               <div className="border-t pt-4">
                 <h4 className="font-medium text-sm mb-3 text-gray-900">Dicas de Uso</h4>
                 <div className="space-y-2 text-xs text-gray-600">
-                  <div>• <strong>Clique</strong> nos valores para editar inline</div>
-                  <div>• <strong>Enter</strong> para salvar, <strong>Escape</strong> para cancelar</div>
-                  <div>• Use <strong>Edição em Massa</strong> para múltiplas células</div>
-                  <div>• <strong>Checkboxes</strong> nas restrições togglem CTA/CTD</div>
-                  <div>• <strong>Hover</strong> nas células mostra detalhes de sync</div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-blue-600 font-bold">•</span>
+                    <span><strong>Clique</strong> nos valores de Preço, Unidades ou Estadia Mínima para editar inline</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-blue-600 font-bold">•</span>
+                    <span><strong>Enter</strong> para salvar alterações, <strong>Escape</strong> para cancelar</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-blue-600 font-bold">•</span>
+                    <span><strong>Checkboxes</strong> nas linhas 4 e 5 togglem restrições CTA/CTD</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-blue-600 font-bold">•</span>
+                    <span>Use <strong>Edição em Massa</strong> para atualizar múltiplas datas de uma vez</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-blue-600 font-bold">•</span>
+                    <span><strong>Hover</strong> nas células mostra detalhes do status de sincronização</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-blue-600 font-bold">•</span>
+                    <span>Ícone de <strong>sincronização</strong> aparece na primeira linha (Preço)</span>
+                  </div>
                 </div>
               </div>
 
@@ -314,6 +384,25 @@ export function CalendarLegend() {
                     <AlertTriangle className="h-3 w-3 mr-1" />
                     2 erros
                   </Badge>
+                </div>
+              </div>
+
+              {/* Layout Visual Example */}
+              <div className="border-t pt-4">
+                <h4 className="font-medium text-sm mb-3 text-gray-900">Exemplo Visual</h4>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-1 font-mono text-xs">
+                  <div className="flex items-center gap-2 border-b border-gray-300 pb-1">
+                    <span className="text-gray-600 w-32">Quarto 101</span>
+                    <span className="text-gray-400">→</span>
+                    <span className="text-gray-600">5 linhas de dados</span>
+                  </div>
+                  <div className="pl-4 space-y-0.5 text-gray-700">
+                    <div>L1: R$ 150.00 <span className="text-green-600">✓</span></div>
+                    <div>L2: 1 (disponível)</div>
+                    <div>L3: 2 noites mínimas</div>
+                    <div>L4: ☐ Fechado p/ Chegada</div>
+                    <div>L5: ☐ Fechado p/ Saída</div>
+                  </div>
                 </div>
               </div>
             </CardContent>

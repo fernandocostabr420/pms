@@ -17,6 +17,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 
+import { CalendarCell } from './CalendarCell';
 import { 
   SimpleAvailabilityView, 
   RoomSummary 
@@ -29,8 +30,25 @@ interface CalendarGridProps {
   onCellUpdate: (roomId: number, date: string, field: string, value: any) => Promise<void>;
   getCellStatus: (roomId: number, date: string, field: string) => 'idle' | 'updating' | 'error';
   getCellError: (roomId: number, date: string, field: string) => string | undefined;
-  renderCell: (availability: SimpleAvailabilityView | null, roomId: number, date: string) => React.ReactNode;
 }
+
+type FieldType = 'rate' | 'availability' | 'min_stay' | 'closed_to_arrival' | 'closed_to_departure';
+
+const FIELDS: FieldType[] = [
+  'rate',
+  'availability', 
+  'min_stay',
+  'closed_to_arrival',
+  'closed_to_departure'
+];
+
+const FIELD_LABELS: Record<FieldType, string> = {
+  'rate': 'Preço',
+  'availability': 'Unidades',
+  'min_stay': 'Estadia Mínima',
+  'closed_to_arrival': 'Fechado p/ Chegada',
+  'closed_to_departure': 'Fechado p/ Saída'
+};
 
 export function CalendarGrid({
   rooms,
@@ -38,12 +56,10 @@ export function CalendarGrid({
   calendarMatrix,
   onCellUpdate,
   getCellStatus,
-  getCellError,
-  renderCell
+  getCellError
 }: CalendarGridProps) {
 
   const [selectedRooms, setSelectedRooms] = useState<Set<number>>(new Set());
-  const [hoveredCell, setHoveredCell] = useState<{ roomId: number; date: string } | null>(null);
 
   // ============== ROOM SELECTION ==============
 
@@ -87,14 +103,14 @@ export function CalendarGrid({
 
   const getSyncStatusIcon = (room: RoomSummary) => {
     if (!room.has_channel_mapping) {
-      return <WifiOff className="h-4 w-4 text-gray-400" title="Não mapeado" />;
+      return <WifiOff className="h-3 w-3 text-gray-400" title="Não mapeado" />;
     }
     
     if (room.sync_enabled) {
-      return <Wifi className="h-4 w-4 text-green-600" title="Sincronização ativa" />;
+      return <Wifi className="h-3 w-3 text-green-600" title="Sincronização ativa" />;
     }
     
-    return <WifiOff className="h-4 w-4 text-orange-500" title="Sincronização desabilitada" />;
+    return <WifiOff className="h-3 w-3 text-orange-500" title="Sincronização desabilitada" />;
   };
 
   const getRoomStatusBadge = (roomIndex: number) => {
@@ -102,33 +118,33 @@ export function CalendarGrid({
     
     if (stats.errors > 0) {
       return (
-        <Badge variant="destructive" className="text-xs">
-          <XCircle className="h-3 w-3 mr-1" />
-          {stats.errors} erro(s)
+        <Badge variant="destructive" className="text-xs py-0">
+          <XCircle className="h-2 w-2 mr-1" />
+          {stats.errors}
         </Badge>
       );
     }
     
     if (stats.pending > 0) {
       return (
-        <Badge variant="outline" className="text-xs border-orange-300 text-orange-700">
-          <AlertTriangle className="h-3 w-3 mr-1" />
-          {stats.pending} pendente(s)
+        <Badge variant="outline" className="text-xs border-orange-300 text-orange-700 py-0">
+          <AlertTriangle className="h-2 w-2 mr-1" />
+          {stats.pending}
         </Badge>
       );
     }
     
     if (stats.synced === stats.total) {
       return (
-        <Badge variant="secondary" className="text-xs bg-green-100 text-green-700">
-          <CheckCircle className="h-3 w-3 mr-1" />
-          Sincronizado
+        <Badge variant="secondary" className="text-xs bg-green-100 text-green-700 py-0">
+          <CheckCircle className="h-2 w-2 mr-1" />
+          OK
         </Badge>
       );
     }
     
     return (
-      <Badge variant="outline" className="text-xs">
+      <Badge variant="outline" className="text-xs py-0">
         {stats.synced}/{stats.total}
       </Badge>
     );
@@ -137,40 +153,38 @@ export function CalendarGrid({
   // ============== RENDER ==============
 
   return (
-    <div className="overflow-x-auto">
-      <div className="min-w-full">
-        
-        {/* ===== BULK SELECTION HEADER ===== */}
-        {selectedRooms.size > 0 && (
-          <div className="sticky top-0 z-20 bg-blue-50 border-b border-blue-200 p-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-medium text-blue-900">
-                  {selectedRooms.size} quarto(s) selecionado(s)
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSelectedRooms(new Set())}
-                  className="text-blue-700 border-blue-300"
-                >
-                  Limpar seleção
-                </Button>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <Button size="sm" variant="default">
-                  Edição em massa
-                </Button>
-              </div>
+    <div className="relative w-full">
+      
+      {/* ===== BULK SELECTION HEADER ===== */}
+      {selectedRooms.size > 0 && (
+        <div className="sticky top-0 z-20 bg-blue-50 border-b border-blue-200 p-3 mb-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-blue-900">
+                {selectedRooms.size} quarto(s) selecionado(s)
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSelectedRooms(new Set())}
+                className="text-blue-700 border-blue-300"
+              >
+                Limpar seleção
+              </Button>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="default">
+                Edição em massa
+              </Button>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* ===== ROOM ROWS ===== */}
-        <div className="space-y-px bg-gray-200">
-          
-          {rooms.map((room, roomIndex) => {
+      {/* ===== MAIN GRID WITH HORIZONTAL SCROLL ===== */}
+      <div className="w-full overflow-x-auto border rounded-lg">
+        <div className="inline-flex flex-col min-w-full">{rooms.map((room, roomIndex) => {
             const isSelected = selectedRooms.has(room.room_id);
             const stats = getRoomStats(roomIndex);
             
@@ -178,89 +192,127 @@ export function CalendarGrid({
               <div
                 key={room.room_id}
                 className={cn(
-                  "flex bg-white",
+                  "flex border-b border-gray-200",
                   isSelected && "bg-blue-50"
                 )}
               >
                 
-                {/* ===== ROOM INFO COLUMN ===== */}
+                {/* ===== ROOM INFO SIDEBAR ===== */}
                 <div className={cn(
-                  "flex-none w-64 border-r p-4 bg-gray-50",
+                  "w-48 flex-shrink-0 border-r bg-gray-50 sticky left-0 z-10",
                   isSelected && "bg-blue-100 border-blue-200"
                 )}>
-                  <div className="space-y-3">
+                  
+                  {/* Room Header compacto */}
+                  <div className="px-3 py-2 flex items-center gap-2 border-b bg-white">
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={(checked) => 
+                        handleRoomSelection(room.room_id, checked as boolean)
+                      }
+                    />
                     
-                    {/* Room Selection & Basic Info */}
-                    <div className="flex items-start gap-3">
-                      <Checkbox
-                        checked={isSelected}
-                        onCheckedChange={(checked) => 
-                          handleRoomSelection(room.room_id, checked as boolean)
-                        }
-                        className="mt-1"
-                      />
-                      
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-semibold text-gray-900 truncate">
-                            {room.room_number}
-                          </h4>
-                          {getSyncStatusIcon(room)}
-                        </div>
-                        
-                        <p className="text-sm text-gray-600 truncate">
-                          {room.room_name}
-                        </p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <h4 className="font-semibold text-xs text-gray-900 truncate">
+                          {room.room_number}
+                        </h4>
+                        {getSyncStatusIcon(room)}
                       </div>
+                      <p className="text-xs text-gray-600 truncate">
+                        {room.room_name}
+                      </p>
                     </div>
+                  </div>
 
-                    {/* Room Stats */}
-                    <div className="space-y-2">
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className="text-center">
-                          <div className="font-medium text-green-600">{stats.available}</div>
-                          <div className="text-gray-500">Disponível</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="font-medium text-gray-900">{stats.blocked}</div>
-                          <div className="text-gray-500">Bloqueado</div>
-                        </div>
+                  {/* Field rows com labels */}
+                  <div>
+                    {FIELDS.map((field, fieldIndex) => (
+                      <div 
+                        key={field}
+                        className="h-8 px-3 flex items-center justify-between border-b bg-gray-50"
+                      >
+                        <span className="text-xs font-medium text-gray-700">
+                          {FIELD_LABELS[field]}
+                        </span>
+                        {fieldIndex === 0 && (
+                          <div className="flex items-center gap-1">
+                            {getRoomStatusBadge(roomIndex)}
+                          </div>
+                        )}
                       </div>
-                      
-                      {/* Sync Status Badge */}
-                      <div className="flex justify-center">
-                        {getRoomStatusBadge(roomIndex)}
-                      </div>
-                    </div>
-
-                    {/* Channel Mapping Info */}
-                    {room.has_channel_mapping && (
-                      <div className="text-xs text-gray-500 text-center">
-                        <Building className="h-3 w-3 inline mr-1" />
-                        Mapeado para canal
-                      </div>
-                    )}
+                    ))}
                   </div>
                 </div>
 
-                {/* ===== DATE CELLS ===== */}
-                <div className="flex-1 flex">
+                {/* ===== DATE COLUMNS (cada coluna tem 5 células verticais) ===== */}
+                <div className="flex overflow-x-auto">
                   {dates.map((date, dateIndex) => {
                     const availability = calendarMatrix[roomIndex][dateIndex];
-                    const isHovered = hoveredCell?.roomId === room.room_id && hoveredCell?.date === date;
                     
                     return (
-                      <div
-                        key={`${room.room_id}-${date}`}
-                        className={cn(
-                          "flex-none w-32 border-r relative",
-                          isHovered && "bg-blue-50",
-                          isSelected && "bg-blue-25"
-                        )}
-                        onMouseEnter={() => setHoveredCell({ roomId: room.room_id, date })}
-                        onMouseLeave={() => setHoveredCell(null)}
-                      >
-                        {renderCell(availability, room.room_id, date)}
+                      <div key={`${room.room_id}-${date}`} className="w-24 flex-shrink-0 border-r">
+                        {/* Stack vertical das 5 células */}
+                        
+                        {/* Linha 1: Preço */}
+                        <CalendarCell
+                          availability={availability}
+                          roomId={room.room_id}
+                          date={date}
+                          field="rate"
+                          onUpdate={onCellUpdate}
+                          status={getCellStatus(room.room_id, date, 'rate')}
+                          error={getCellError(room.room_id, date, 'rate')}
+                          isSelected={isSelected}
+                        />
+                        
+                        {/* Linha 2: Unidades */}
+                        <CalendarCell
+                          availability={availability}
+                          roomId={room.room_id}
+                          date={date}
+                          field="availability"
+                          onUpdate={onCellUpdate}
+                          status={getCellStatus(room.room_id, date, 'availability')}
+                          error={getCellError(room.room_id, date, 'availability')}
+                          isSelected={isSelected}
+                        />
+                        
+                        {/* Linha 3: Estadia Mínima */}
+                        <CalendarCell
+                          availability={availability}
+                          roomId={room.room_id}
+                          date={date}
+                          field="min_stay"
+                          onUpdate={onCellUpdate}
+                          status={getCellStatus(room.room_id, date, 'min_stay')}
+                          error={getCellError(room.room_id, date, 'min_stay')}
+                          isSelected={isSelected}
+                        />
+                        
+                        {/* Linha 4: Fechado p/ Chegada */}
+                        <CalendarCell
+                          availability={availability}
+                          roomId={room.room_id}
+                          date={date}
+                          field="closed_to_arrival"
+                          onUpdate={onCellUpdate}
+                          status={getCellStatus(room.room_id, date, 'closed_to_arrival')}
+                          error={getCellError(room.room_id, date, 'closed_to_arrival')}
+                          isSelected={isSelected}
+                        />
+                        
+                        {/* Linha 5: Fechado p/ Saída */}
+                        <CalendarCell
+                          availability={availability}
+                          roomId={room.room_id}
+                          date={date}
+                          field="closed_to_departure"
+                          onUpdate={onCellUpdate}
+                          status={getCellStatus(room.room_id, date, 'closed_to_departure')}
+                          error={getCellError(room.room_id, date, 'closed_to_departure')}
+                          isSelected={isSelected}
+                        />
                       </div>
                     );
                   })}
@@ -268,31 +320,31 @@ export function CalendarGrid({
               </div>
             );
           })}
-        </div>
 
-        {/* ===== SELECT ALL FOOTER ===== */}
-        <div className="bg-gray-50 border-t p-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Checkbox
-                checked={isAllRoomsSelected}
-                ref={(ref) => {
-                  if (ref) ref.indeterminate = isSomeRoomsSelected;
-                }}
-                onCheckedChange={handleSelectAllRooms}
-              />
-              <span className="text-sm font-medium text-gray-700">
-                {isAllRoomsSelected 
-                  ? 'Desmarcar todos os quartos'
-                  : isSomeRoomsSelected
-                  ? `Selecionar todos (${rooms.length - selectedRooms.size} restantes)`
-                  : `Selecionar todos os quartos (${rooms.length})`
-                }
-              </span>
-            </div>
-            
-            <div className="text-sm text-gray-500">
-              {rooms.length} quartos • {dates.length} dias • {rooms.length * dates.length} células
+          {/* ===== SELECT ALL FOOTER ===== */}
+          <div className="bg-gray-50 border-t p-3 sticky left-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  checked={isAllRoomsSelected}
+                  ref={(ref) => {
+                    if (ref) ref.indeterminate = isSomeRoomsSelected;
+                  }}
+                  onCheckedChange={handleSelectAllRooms}
+                />
+                <span className="text-sm font-medium text-gray-700">
+                  {isAllRoomsSelected 
+                    ? 'Desmarcar todos os quartos'
+                    : isSomeRoomsSelected
+                    ? `Selecionar todos (${rooms.length - selectedRooms.size} restantes)`
+                    : `Selecionar todos os quartos (${rooms.length})`
+                  }
+                </span>
+              </div>
+              
+              <div className="text-sm text-gray-500">
+                {rooms.length} quartos × {dates.length} dias × 5 campos = {rooms.length * dates.length * 5} células
+              </div>
             </div>
           </div>
         </div>

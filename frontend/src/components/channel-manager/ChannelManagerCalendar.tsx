@@ -11,7 +11,6 @@ import { Button } from '@/components/ui/button';
 import { AlertTriangle, Building, Loader2 } from 'lucide-react';
 
 import { CalendarGrid } from './CalendarGrid';
-import { CalendarCell } from './CalendarCell';
 import { 
   AvailabilityCalendarResponse, 
   SimpleAvailabilityView,
@@ -113,14 +112,14 @@ export function ChannelManagerCalendar({
     return (
       <div className="space-y-4">
         {/* Header skeleton */}
-        <div className="flex">
-          <div className="w-64 p-4 border-r">
-            <Skeleton className="h-6 w-20 mb-2" />
+        <div className="flex border-b">
+          <div className="w-48 p-4 border-r">
+            <Skeleton className="h-6 w-24 mb-2" />
             <Skeleton className="h-4 w-16" />
           </div>
           <div className="flex-1 flex">
             {[1, 2, 3, 4, 5, 6, 7].map(i => (
-              <div key={i} className="w-32 p-3 border-r">
+              <div key={i} className="w-24 p-3 border-r">
                 <Skeleton className="h-4 w-8 mx-auto mb-2" />
                 <Skeleton className="h-6 w-6 mx-auto mb-1" />
                 <Skeleton className="h-3 w-10 mx-auto" />
@@ -129,24 +128,30 @@ export function ChannelManagerCalendar({
           </div>
         </div>
 
-        {/* Rows skeleton */}
-        {[1, 2, 3, 4, 5].map(row => (
-          <div key={row} className="flex border-t">
-            <div className="w-64 p-4 border-r">
-              <Skeleton className="h-5 w-20 mb-1" />
-              <Skeleton className="h-4 w-16" />
+        {/* Rows skeleton (5 linhas por quarto) */}
+        {[1, 2, 3].map(roomIdx => (
+          <div key={roomIdx} className="border-b">
+            {/* Room header */}
+            <div className="flex">
+              <div className="w-48 p-3 border-r">
+                <Skeleton className="h-5 w-20 mb-1" />
+                <Skeleton className="h-4 w-16" />
+              </div>
             </div>
-            <div className="flex-1 flex">
-              {[1, 2, 3, 4, 5, 6, 7].map(col => (
-                <div key={col} className="w-32 p-2 border-r">
-                  <div className="grid grid-cols-3 gap-1">
-                    <Skeleton className="h-6 w-full" />
-                    <Skeleton className="h-6 w-full" />
-                    <Skeleton className="h-6 w-full" />
-                  </div>
+            
+            {/* 5 field rows */}
+            {[1, 2, 3, 4, 5].map(lineIdx => (
+              <div key={lineIdx} className="flex">
+                <div className="w-48 border-r h-8"></div>
+                <div className="flex-1 flex">
+                  {[1, 2, 3, 4, 5, 6, 7].map(col => (
+                    <div key={col} className="w-24 h-8 border-r flex items-center justify-center">
+                      <Skeleton className="h-4 w-12" />
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </div>
         ))}
       </div>
@@ -199,7 +204,7 @@ export function ChannelManagerCalendar({
         </Alert>
       )}
 
-      {/* Calendar Grid */}
+      {/* Calendar Grid - Agora renderiza as células internamente */}
       <CalendarGrid
         rooms={rooms}
         dates={dates}
@@ -207,27 +212,11 @@ export function ChannelManagerCalendar({
         onCellUpdate={handleCellUpdate}
         getCellStatus={getCellStatus}
         getCellError={getCellError}
-        renderCell={(availability, roomId, date) => (
-          <CalendarCell
-            key={`${roomId}-${date}`}
-            availability={availability}
-            roomId={roomId}
-            date={date}
-            onUpdate={handleCellUpdate}
-            status={getCellStatus(roomId, date, 'general')}
-            error={getCellError(roomId, date, 'general')}
-            isSelected={uiState.selectedRooms.includes(roomId)}
-            isEditing={
-              uiState.editingCell?.roomId === roomId && 
-              uiState.editingCell?.date === date
-            }
-          />
-        )}
       />
 
       {/* Loading Overlay */}
       {loading && data && (
-        <div className="absolute inset-0 bg-white/50 flex items-center justify-center">
+        <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-30">
           <div className="bg-white border rounded-lg shadow-lg p-4 flex items-center gap-3">
             <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
             <span className="text-sm font-medium">Atualizando dados...</span>
@@ -247,7 +236,7 @@ export function ChannelManagerCalendar({
                 <strong>{dates.length}</strong> dias
               </span>
               <span>
-                <strong>{rooms.length * dates.length}</strong> células total
+                <strong>{rooms.length * dates.length * 5}</strong> células total
               </span>
             </div>
             
