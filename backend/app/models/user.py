@@ -25,6 +25,10 @@ class User(BaseModel, TenantMixin):
     is_superuser = Column(Boolean, default=False, nullable=False)
     email_verified = Column(Boolean, default=False, nullable=False)
     
+    # Controle de senha (NOVOS CAMPOS)
+    must_change_password = Column(Boolean, default=False, nullable=False)
+    password_changed_at = Column(DateTime, nullable=True)
+    
     # Datas importantes
     last_login = Column(DateTime, nullable=True)
     

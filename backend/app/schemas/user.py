@@ -61,6 +61,19 @@ class UserChangePassword(BaseModel):
         return v
 
 
+class AdminResetPassword(BaseModel):
+    """Schema para admin resetar senha de usuário"""
+    new_password: str
+    must_change_password: bool = True
+    
+    @field_validator('new_password')
+    @classmethod
+    def validate_new_password(cls, v):
+        if len(v) < 6:
+            raise ValueError('Nova senha deve ter pelo menos 6 caracteres')
+        return v
+
+
 class UserResponse(UserBase):
     """Schema para resposta de User"""
     id: int

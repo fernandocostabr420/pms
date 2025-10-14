@@ -82,7 +82,7 @@ export function CalendarToolbar({
 
   const clearFilters = () => {
     setFilters({
-      property_id: filters.property_id // Manter apenas property_id
+      property_id: filters.property_id
     });
   };
 
@@ -92,6 +92,30 @@ export function CalendarToolbar({
     filters.has_errors ||
     filters.search
   );
+
+  // ✅ NOVO: Validar se data range contém datas passadas
+  const handleDateRangeChange = (range: { from: Date; to: Date } | null) => {
+    if (!range) return;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // ✅ VALIDAÇÃO: Se from é passado, ajustar para hoje
+    let validFrom = range.from;
+    if (validFrom < today) {
+      console.warn('Data inicial está no passado. Ajustando para hoje.');
+      validFrom = today;
+    }
+    
+    // ✅ VALIDAÇÃO: Se to é passado, ajustar para hoje
+    let validTo = range.to;
+    if (validTo < today) {
+      console.warn('Data final está no passado. Ajustando para hoje.');
+      validTo = today;
+    }
+    
+    setDateRange({ from: validFrom, to: validTo });
+  };
 
   // ============== RENDER ==============
 
@@ -133,13 +157,14 @@ export function CalendarToolbar({
             </Button>
           </div>
 
-          {/* Date Range Picker - NOVO COMPONENTE */}
+          {/* ✅ CORREÇÃO: Date Range Picker com minDate */}
           <ChannelManagerDateRangePicker
             value={dateRange}
-            onChange={(range) => range && setDateRange(range)}
+            onChange={handleDateRangeChange}
             numberOfMonths={2}
             showPresets={true}
             maxDays={366}
+            minDate={new Date()}  // ✅ NOVO: Bloquear datas passadas
           />
 
         </div>

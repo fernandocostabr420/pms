@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.services.user_service import UserService
-from app.schemas.user import UserCreate, UserUpdate, UserResponse, UserChangePassword
+from app.schemas.user import UserCreate, UserUpdate, UserResponse, UserChangePassword, AdminResetPassword
 from app.schemas.common import MessageResponse
 from app.api.deps import get_current_active_user, get_current_superuser
 from app.models.user import User
@@ -161,3 +161,52 @@ def change_user_password(
     db.commit()
     
     return MessageResponse(message="Senha alterada com sucesso")
+
+
+@router.post("/{user_id}/admin-reset-password", response_model=MessageResponse)
+def admin_reset_user_password(
+    user_id: int,
+    reset_data: AdminResetPassword,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_superuser)
+):
+    """Admin reseta senha de qualquer usuário (apenas superuser)"""
+    from app.core.security import create_password_hash
+    from datetime import datetime
+    
+    # Buscar usuário
+    user_service = UserService(db)
+    user = user_service.get_user_by_id(user_id, current_user.tenant_id)
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuário não encontrado"
+        )
+    
+    # Não permitir resetar senha de outro superuser (segurança)
+    if user.is_superuser and user.id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Não é possível resetar senha de outro administrador"
+        )
+    
+    # Atualizar senha
+    user.hashed_password = create_password_hash(reset_data.new_password)
+    
+    # Forçar troca de senha no próximo login (se campo existir no model)
+    if hasattr(user, 'must_change_password'):
+        user.must_change_password = reset_data.must_change_password
+    
+    # Atualizar data de mudança de senha (se campo existir no model)
+    if hasattr(user, 'password_changed_at'):
+        user.password_changed_at = datetime.utcnow()
+    
+    db.commit()
+    
+    # Mensagem de retorno
+    message = "Senha resetada com sucesso."
+    if reset_data.must_change_password:
+        message += " Usuário deverá trocar senha no próximo login."
+    
+    return MessageResponse(message=message)

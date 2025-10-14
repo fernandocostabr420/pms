@@ -17,7 +17,7 @@ from app.models.wubook_room_mapping import WuBookRoomMapping
 from app.models.wubook_sync_log import WuBookSyncLog
 from app.integrations.wubook.sync_service import WuBookSyncService
 from app.utils.decorators import AuditContext
-from app.services.notification_service import notification_service  # ✅ NOVO
+from app.services.notification_service import notification_service
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +45,15 @@ class ManualSyncService:
             Dict com estatísticas de registros pendentes
         """
         try:
+            # ✅ CORREÇÃO: Adicionar filtro de data >= hoje
+            today = date.today()
+            
             # Query base para registros pendentes
             base_query = self.db.query(RoomAvailability).join(Room).join(Property).filter(
                 Property.tenant_id == tenant_id,
                 RoomAvailability.is_active == True,
-                RoomAvailability.sync_pending == True
+                RoomAvailability.sync_pending == True,
+                RoomAvailability.date >= today  # ✅ NOVO: Filtrar apenas datas futuras
             )
             
             # Filtrar por propriedade se especificado
@@ -69,7 +73,8 @@ class ManualSyncService:
                 ).select_from(Property).join(Room).join(RoomAvailability).filter(
                     Property.tenant_id == tenant_id,
                     RoomAvailability.is_active == True,
-                    RoomAvailability.sync_pending == True
+                    RoomAvailability.sync_pending == True,
+                    RoomAvailability.date >= today  # ✅ NOVO: Filtrar apenas datas futuras
                 ).group_by(Property.id, Property.name).all()
                 
                 by_property = {
@@ -78,7 +83,6 @@ class ManualSyncService:
                 }
             
             # Contagem por período (próximos 7, 30, 90 dias)
-            today = date.today()
             periods = {
                 "próximos_7_dias": today + timedelta(days=7),
                 "próximos_30_dias": today + timedelta(days=30),
@@ -99,7 +103,7 @@ class ManualSyncService:
             if oldest_record:
                 oldest_pending = oldest_record.created_at
             
-            # Contagem por tipo de alteração (baseado nos campos modificados)
+            # Contagem por tipo de alteração
             sync_types = {
                 "availability_changes": base_query.filter(
                     or_(
@@ -158,19 +162,18 @@ class ManualSyncService:
             property_id: ID da propriedade (opcional)
             
         Returns:
-            Dict com:
-                - date_from: primeira data pendente (formato ISO)
-                - date_to: última data pendente (formato ISO)
-                - total_pending: quantidade de registros pendentes
-                - rooms_affected: lista de IDs de quartos afetados
-                - has_pending: boolean indicando se há pendências
+            Dict com date_from, date_to, total_pending, rooms_affected
         """
         try:
+            # ✅ CORREÇÃO: Adicionar filtro de data >= hoje
+            today = date.today()
+            
             # Query base para registros pendentes
             base_query = self.db.query(RoomAvailability).join(Room).join(Property).filter(
                 Property.tenant_id == tenant_id,
                 RoomAvailability.is_active == True,
-                RoomAvailability.sync_pending == True
+                RoomAvailability.sync_pending == True,
+                RoomAvailability.date >= today  # ✅ NOVO: Filtrar apenas datas futuras
             )
             
             # Filtrar por propriedade se especificado
@@ -235,7 +238,7 @@ class ManualSyncService:
         Args:
             tenant_id: ID do tenant
             property_id: ID da propriedade específica (opcional)
-            force_all: Forçar sincronização de todos os registros (não apenas pendentes)
+            force_all: Forçar sincronização de todos os registros
             batch_size: Tamanho do batch para processamento
             
         Returns:
@@ -255,13 +258,13 @@ class ManualSyncService:
                     "Nenhuma configuração WuBook ativa encontrada"
                 )
             
-            # ✅ CORREÇÃO: Buscar registros para sincronizar (sem passar batch_size como limit)
+            # Buscar registros para sincronizar
             target_records = self._get_sync_target_records(
                 tenant_id, property_id, force_all
             )
             
             if not target_records:
-                # ✅ NOVO: Emitir SSE mesmo quando não há pendentes
+                # Emitir SSE mesmo quando não há pendentes
                 try:
                     notification_service.notify_sync_completed(
                         tenant_id=tenant_id,
@@ -331,7 +334,7 @@ class ManualSyncService:
                 "successful": total_successful,
                 "failed": total_failed,
                 "success_rate": (total_successful / total_processed * 100) if total_processed > 0 else 0,
-                "errors": errors[:10],  # Limitar a 10 erros
+                "errors": errors[:10],
                 "error_count": len(errors),
                 "started_at": started_at.isoformat(),
                 "completed_at": completed_at.isoformat(),
@@ -340,7 +343,7 @@ class ManualSyncService:
                 "force_all_used": force_all
             }
             
-            # ✅ NOVO: Notificar via SSE que sincronização foi concluída
+            # Notificar via SSE
             try:
                 notification_service.notify_sync_completed(
                     tenant_id=tenant_id,
@@ -351,10 +354,9 @@ class ManualSyncService:
                 )
                 logger.info(f"✅ SSE sync_completed enviado - tenant={tenant_id}, synced={total_successful}")
             except Exception as sse_error:
-                logger.warning(f"⚠️ Falha ao enviar SSE sync_completed: {sse_error}")
+                logger.warning(f"⚠️ Falha ao enviar SSE: {sse_error}")
             
-            logger.info(f"Sincronização manual {sync_id} concluída: "
-                       f"{total_successful}/{total_processed} sucessos")
+            logger.info(f"Sincronização manual {sync_id} concluída: {total_successful}/{total_processed} sucessos")
             
             return result
             
@@ -362,7 +364,7 @@ class ManualSyncService:
             logger.error(f"Erro crítico na sincronização manual {sync_id}: {str(e)}")
             logger.error(traceback.format_exc())
             
-            # ✅ NOVO: Notificar erro via SSE
+            # Notificar erro via SSE
             try:
                 notification_service.notify_sync_completed(
                     tenant_id=tenant_id,
@@ -371,24 +373,14 @@ class ManualSyncService:
                     success=False,
                     error=str(e)
                 )
-                logger.info(f"✅ SSE sync_completed (erro) enviado - tenant={tenant_id}")
             except Exception as sse_error:
                 logger.warning(f"⚠️ Falha ao enviar SSE de erro: {sse_error}")
             
             return self._create_error_result(sync_id, started_at, str(e))
     
     def get_sync_status(self, tenant_id: int) -> Dict[str, Any]:
-        """
-        Retorna status atual da sincronização para o tenant
-        
-        Args:
-            tenant_id: ID do tenant
-            
-        Returns:
-            Dict com status de sincronização
-        """
+        """Retorna status atual da sincronização para o tenant"""
         try:
-            # Verificar se há alguma sincronização em andamento
             is_running = False
             current_sync_id = None
             
@@ -478,19 +470,17 @@ class ManualSyncService:
         """
         Busca TODOS os registros alvo para sincronização.
         
-        Args:
-            tenant_id: ID do tenant
-            property_id: ID da propriedade específica (opcional)
-            force_all: Se True, busca todos os registros. Se False, apenas pendentes.
-            
-        Returns:
-            Lista com TODOS os registros encontrados (sem limite)
+        ✅ CORREÇÃO PRINCIPAL: Agora filtra apenas datas >= hoje
         """
+        # ✅ NOVO: Filtrar apenas datas futuras
+        today = date.today()
+        
         query = self.db.query(RoomAvailability).options(
             joinedload(RoomAvailability.room).joinedload(Room.property_obj)
         ).join(Room).join(Property).filter(
             Property.tenant_id == tenant_id,
-            RoomAvailability.is_active == True
+            RoomAvailability.is_active == True,
+            RoomAvailability.date >= today  # ✅ NOVO: Filtrar apenas datas futuras
         )
         
         # Filtrar por propriedade
@@ -507,7 +497,6 @@ class ManualSyncService:
             RoomAvailability.created_at
         )
         
-        # ✅ CORREÇÃO: Buscar TODOS os registros (sem limit)
         return query.all()
     
     def _filter_records_for_config(
@@ -542,7 +531,7 @@ class ManualSyncService:
             
             for date_str, records in date_groups.items():
                 try:
-                    # Usar o serviço de sincronização funcional
+                    # Usar o serviço de sincronização
                     room_ids = [r.room_id for r in records]
                     
                     result = self.wubook_sync_service.sync_availability_to_wubook(
@@ -555,7 +544,6 @@ class ManualSyncService:
                     
                     if result.get("success"):
                         successful += len(records)
-                        # Marcar como sincronizado
                         for record in records:
                             record.mark_sync_success()
                     else:
@@ -563,7 +551,6 @@ class ManualSyncService:
                         error_msg = result.get("message", "Erro desconhecido")
                         errors.append(f"Data {date_str}: {error_msg}")
                         
-                        # Marcar erro nos registros
                         for record in records:
                             record.mark_sync_error(error_msg)
                 
@@ -572,7 +559,6 @@ class ManualSyncService:
                     error_msg = f"Data {date_str}: {str(e)}"
                     errors.append(error_msg)
                     
-                    # Marcar erro nos registros
                     for record in records:
                         record.mark_sync_error(str(e))
             

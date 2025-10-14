@@ -1,6 +1,4 @@
 // frontend/src/components/channel-manager/CalendarGrid.tsx
-// Path: frontend/src/components/channel-manager/CalendarGrid.tsx
-
 'use client';
 
 import { useState } from 'react';
@@ -60,6 +58,16 @@ export function CalendarGrid({
 }: CalendarGridProps) {
 
   const [selectedRooms, setSelectedRooms] = useState<Set<number>>(new Set());
+
+  // ============== DATE VALIDATION ==============
+
+  // ✅ NOVA FUNÇÃO: Verificar se data é passada
+  const isPastDate = (dateString: string): boolean => {
+    const date = new Date(dateString + 'T00:00:00');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date < today;
+  };
 
   // ============== ROOM SELECTION ==============
 
@@ -250,13 +258,24 @@ export function CalendarGrid({
                 <div className="flex overflow-x-auto">
                   {dates.map((date, dateIndex) => {
                     const availability = calendarMatrix[roomIndex][dateIndex];
+                    // ✅ NOVO: Verificar se data é passada
+                    const isPast = isPastDate(date);
                     
                     return (
-                      <div key={`${room.room_id}-${date}`} className="w-24 flex-shrink-0 border-r">
+                      <div 
+                        key={`${room.room_id}-${date}`} 
+                        className={cn(
+                          "w-24 flex-shrink-0 border-r",
+                          isPast && "bg-gray-50"  // ✅ NOVO: Visual para datas passadas
+                        )}
+                      >
                         
-                        {/* 🆕 HEADER VAZIO - Alinha com o header da sidebar */}
-                        <div className="h-[52px] border-b bg-white flex items-center justify-center">
-                          {/* Espaço vazio para alinhar com o header do quarto na sidebar */}
+                        {/* Header - Alinha com o header da sidebar */}
+                        <div className={cn(
+                          "h-[52px] border-b bg-white flex items-center justify-center",
+                          isPast && "bg-gray-100"  // ✅ NOVO: Header cinza para datas passadas
+                        )}>
+                          {/* Espaço vazio para alinhamento */}
                         </div>
 
                         {/* Stack vertical das 5 células */}
@@ -271,6 +290,7 @@ export function CalendarGrid({
                           status={getCellStatus(room.room_id, date, 'rate')}
                           error={getCellError(room.room_id, date, 'rate')}
                           isSelected={isSelected}
+                          isPast={isPast}  // ✅ NOVO: Passar prop isPast
                         />
                         
                         {/* Linha 2: Unidades */}
@@ -283,6 +303,7 @@ export function CalendarGrid({
                           status={getCellStatus(room.room_id, date, 'availability')}
                           error={getCellError(room.room_id, date, 'availability')}
                           isSelected={isSelected}
+                          isPast={isPast}  // ✅ NOVO
                         />
                         
                         {/* Linha 3: Estadia Mínima */}
@@ -295,6 +316,7 @@ export function CalendarGrid({
                           status={getCellStatus(room.room_id, date, 'min_stay')}
                           error={getCellError(room.room_id, date, 'min_stay')}
                           isSelected={isSelected}
+                          isPast={isPast}  // ✅ NOVO
                         />
                         
                         {/* Linha 4: Fechado p/ Chegada */}
@@ -307,6 +329,7 @@ export function CalendarGrid({
                           status={getCellStatus(room.room_id, date, 'closed_to_arrival')}
                           error={getCellError(room.room_id, date, 'closed_to_arrival')}
                           isSelected={isSelected}
+                          isPast={isPast}  // ✅ NOVO
                         />
                         
                         {/* Linha 5: Fechado p/ Saída */}
@@ -319,6 +342,7 @@ export function CalendarGrid({
                           status={getCellStatus(room.room_id, date, 'closed_to_departure')}
                           error={getCellError(room.room_id, date, 'closed_to_departure')}
                           isSelected={isSelected}
+                          isPast={isPast}  // ✅ NOVO
                         />
                       </div>
                     );

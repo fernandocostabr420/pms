@@ -1,6 +1,4 @@
 // frontend/src/components/channel-manager/CalendarCell.tsx
-// Path: frontend/src/components/channel-manager/CalendarCell.tsx
-
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
@@ -12,8 +10,7 @@ import {
   AlertTriangle, 
   CheckCircle, 
   Clock,
-  Wifi,
-  WifiOff
+  Lock
 } from 'lucide-react';
 
 import { SimpleAvailabilityView } from '@/types/channel-manager';
@@ -29,6 +26,7 @@ interface CalendarCellProps {
   status: 'idle' | 'updating' | 'error';
   error?: string;
   isSelected: boolean;
+  isPast: boolean;  // ✅ NOVA PROP: Indica se é data passada
 }
 
 export function CalendarCell({
@@ -39,7 +37,8 @@ export function CalendarCell({
   onUpdate,
   status,
   error,
-  isSelected
+  isSelected,
+  isPast  // ✅ NOVO
 }: CalendarCellProps) {
 
   const [isEditing, setIsEditing] = useState(false);
@@ -74,12 +73,24 @@ export function CalendarCell({
   // ============== HANDLERS ==============
 
   const handleEdit = () => {
+    // ✅ BLOQUEIO: Não permitir edição se data é passada
+    if (isPast) {
+      console.warn('Não é possível editar datas passadas');
+      return;
+    }
+    
     if (['rate', 'availability', 'min_stay'].includes(field)) {
       setIsEditing(true);
     }
   };
 
   const handleSave = async () => {
+    // ✅ VALIDAÇÃO: Não salvar se data é passada
+    if (isPast) {
+      setIsEditing(false);
+      return;
+    }
+    
     try {
       let processedValue: any;
       let fieldName = field;
@@ -127,6 +138,12 @@ export function CalendarCell({
   };
 
   const handleCheckboxToggle = async (checkboxField: 'closed_to_arrival' | 'closed_to_departure') => {
+    // ✅ BLOQUEIO: Não permitir toggle se data é passada
+    if (isPast) {
+      console.warn('Não é possível alterar restrições de datas passadas');
+      return;
+    }
+    
     try {
       const currentValue = availability?.[checkboxField] || false;
       await onUpdate(roomId, date, checkboxField, !currentValue);
@@ -138,6 +155,9 @@ export function CalendarCell({
   // ============== RENDER HELPERS ==============
 
   const getCellBackgroundClass = () => {
+    // ✅ NOVO: Estilo específico para datas passadas
+    if (isPast) return 'bg-gray-100 border-gray-300';
+    
     if (status === 'error') return 'bg-red-50 border-red-200';
     if (status === 'updating') return 'bg-blue-50 border-blue-200';
     if (isSelected) return 'bg-blue-50';
@@ -152,7 +172,12 @@ export function CalendarCell({
   };
 
   const getSyncIndicator = () => {
-    if (field !== 'rate') return null; // Mostrar apenas na primeira linha
+    if (field !== 'rate') return null;
+    
+    // ✅ NOVO: Mostrar cadeado para datas passadas
+    if (isPast) {
+      return <Lock className="h-3 w-3 text-gray-400" title="Data passada - não editável" />;
+    }
     
     if (status === 'updating') {
       return <Loader2 className="h-3 w-3 animate-spin text-blue-600" />;
@@ -210,12 +235,18 @@ export function CalendarCell({
               onBlur={handleSave}
               className="h-6 text-xs p-1 w-full"
               placeholder="0.00"
+              disabled={isPast}  // ✅ NOVO: Desabilitar se passado
             />
           ) : (
             <button
               onClick={handleEdit}
-              disabled={status === 'updating'}
-              className="w-full h-full text-left hover:bg-blue-50 transition-colors text-xs"
+              disabled={status === 'updating' || isPast}  // ✅ NOVO: Desabilitar se passado
+              className={cn(
+                "w-full h-full text-left transition-colors text-xs",
+                isPast 
+                  ? "cursor-not-allowed text-gray-400"  // ✅ NOVO: Estilo desabilitado
+                  : "hover:bg-blue-50 cursor-pointer"
+              )}
             >
               {(() => {
                 const rateValue = getRateAsNumber(availability.rate);
@@ -254,16 +285,24 @@ export function CalendarCell({
               onKeyDown={handleKeyPress}
               onBlur={handleSave}
               className="h-6 text-xs p-1 w-full text-center"
+              disabled={isPast}  // ✅ NOVO
             />
           ) : (
             <button
               onClick={handleEdit}
-              disabled={status === 'updating'}
-              className="w-full h-full text-center hover:bg-blue-50 transition-colors"
+              disabled={status === 'updating' || isPast}  // ✅ NOVO
+              className={cn(
+                "w-full h-full text-center transition-colors",
+                isPast 
+                  ? "cursor-not-allowed"  // ✅ NOVO
+                  : "hover:bg-blue-50 cursor-pointer"
+              )}
             >
               <span className={cn(
                 "text-xs font-medium",
-                availability.is_available ? "text-gray-900" : "text-red-600"
+                isPast 
+                  ? "text-gray-400"  // ✅ NOVO: Texto cinza para passado
+                  : availability.is_available ? "text-gray-900" : "text-red-600"
               )}>
                 {availability.is_available ? '1' : '0'}
               </span>
@@ -293,12 +332,18 @@ export function CalendarCell({
               onKeyDown={handleKeyPress}
               onBlur={handleSave}
               className="h-6 text-xs p-1 w-full text-center"
+              disabled={isPast}  // ✅ NOVO
             />
           ) : (
             <button
               onClick={handleEdit}
-              disabled={status === 'updating'}
-              className="w-full h-full text-center hover:bg-blue-50 transition-colors text-xs"
+              disabled={status === 'updating' || isPast}  // ✅ NOVO
+              className={cn(
+                "w-full h-full text-center transition-colors text-xs",
+                isPast 
+                  ? "cursor-not-allowed text-gray-400"  // ✅ NOVO
+                  : "hover:bg-blue-50 cursor-pointer"
+              )}
             >
               {availability.min_stay || 1}
             </button>
@@ -319,8 +364,11 @@ export function CalendarCell({
           <Checkbox
             checked={availability.closed_to_arrival}
             onCheckedChange={() => handleCheckboxToggle('closed_to_arrival')}
-            disabled={status === 'updating'}
-            className="h-4 w-4"
+            disabled={status === 'updating' || isPast}  // ✅ NOVO: Desabilitar se passado
+            className={cn(
+              "h-4 w-4",
+              isPast && "cursor-not-allowed opacity-50"  // ✅ NOVO: Visual desabilitado
+            )}
           />
         </div>
       </div>
@@ -338,8 +386,11 @@ export function CalendarCell({
           <Checkbox
             checked={availability.closed_to_departure}
             onCheckedChange={() => handleCheckboxToggle('closed_to_departure')}
-            disabled={status === 'updating'}
-            className="h-4 w-4"
+            disabled={status === 'updating' || isPast}  // ✅ NOVO: Desabilitar se passado
+            className={cn(
+              "h-4 w-4",
+              isPast && "cursor-not-allowed opacity-50"  // ✅ NOVO: Visual desabilitado
+            )}
           />
         </div>
       </div>
