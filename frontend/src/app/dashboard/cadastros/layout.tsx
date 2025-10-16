@@ -14,7 +14,8 @@ import {
   Home,
   Settings,
   Search,
-  Filter
+  Filter,
+  Users
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
@@ -40,6 +41,13 @@ const cadastrosNavigation = [
     icon: Store,
     description: 'OTAs, site direto e parcerias',
     badge: 'API Ready'
+  },
+  {
+    name: 'Usuários',
+    href: '/dashboard/cadastros/usuarios',
+    icon: Users,
+    description: 'Gerenciar usuários do sistema',
+    badge: 'Admin'
   }
 ];
 
@@ -50,6 +58,7 @@ function getPageTitle(pathname: string): string {
   
   if (pathname.includes('metodos-pagamento')) return 'Métodos de Pagamento';
   if (pathname.includes('canais-venda')) return 'Canais de Venda';
+  if (pathname.includes('usuarios')) return 'Usuários';
   
   return 'Cadastros';
 }
@@ -61,6 +70,7 @@ function getPageDescription(pathname: string): string {
   
   if (pathname.includes('metodos-pagamento')) return 'Configure as formas de pagamento aceitas pelo seu estabelecimento';
   if (pathname.includes('canais-venda')) return 'Gerencie canais de venda, OTAs e integrações';
+  if (pathname.includes('usuarios')) return 'Gerencie usuários e permissões do sistema';
   
   return 'Gerencie métodos de pagamento e canais de venda';
 }
@@ -129,7 +139,13 @@ function CadastrosSidebar({ pathname }: { pathname: string }) {
                 <div className="flex items-center gap-2">
                   <span className="truncate">{item.name}</span>
                   {item.badge && (
-                    <Badge variant="secondary" className="text-xs px-1.5 py-0">
+                    <Badge 
+                      variant="secondary" 
+                      className={cn(
+                        "text-xs px-1.5 py-0",
+                        item.badge === 'Admin' && "bg-red-100 text-red-800"
+                      )}
+                    >
                       {item.badge}
                     </Badge>
                   )}
