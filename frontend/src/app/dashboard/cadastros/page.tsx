@@ -1,7 +1,6 @@
 // frontend/src/app/dashboard/cadastros/page.tsx
 'use client';
 
-import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -12,16 +11,11 @@ import {
   ArrowRight,
   Settings,
   Database,
-  Activity,
-  BarChart3,
-  Users,
-  Shield,
-  User
+  BarChart3
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePaymentMethods } from '@/hooks/use-payment-methods';
 import { useSalesChannels } from '@/hooks/use-sales-channels';
-import { useUsers } from '@/hooks/use-users';
 
 export default function CadastrosPage() {
   const { 
@@ -36,17 +30,10 @@ export default function CadastrosPage() {
     total: totalSalesChannels 
   } = useSalesChannels({ per_page: 5 });
 
-  const {
-    users,
-    loading: loadingUsers
-  } = useUsers();
-
   // Estatísticas rápidas
   const activePaymentMethods = paymentMethods.filter(pm => pm.is_active).length;
   const activeSalesChannels = salesChannels.filter(sc => sc.is_active).length;
   const externalChannels = salesChannels.filter(sc => sc.is_external).length;
-  const activeUsers = users.filter(u => u.is_active).length;
-  const adminUsers = users.filter(u => u.is_superuser).length;
 
   return (
     <div className="space-y-6">
@@ -55,7 +42,7 @@ export default function CadastrosPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Cadastros</h1>
           <p className="text-gray-600 mt-1">
-            Gerencie métodos de pagamento, canais de venda e usuários do sistema
+            Gerencie métodos de pagamento e canais de venda
           </p>
         </div>
         
@@ -72,7 +59,7 @@ export default function CadastrosPage() {
       </div>
 
       {/* Cards de estatísticas */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
@@ -118,27 +105,6 @@ export default function CadastrosPage() {
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-indigo-100 rounded-lg">
-                <Users className="h-5 w-5 text-indigo-600" />
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-gray-600">Usuários</p>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-2xl font-bold text-gray-900">
-                    {loadingUsers ? '-' : users.length}
-                  </span>
-                  <Badge variant="secondary" className="text-xs">
-                    {loadingUsers ? '-' : activeUsers} ativos
-                  </Badge>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
               <div className="p-2 bg-orange-100 rounded-lg">
                 <BarChart3 className="h-5 w-5 text-orange-600" />
               </div>
@@ -163,7 +129,7 @@ export default function CadastrosPage() {
       </div>
 
       {/* Cards principais de navegação */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
         {/* Métodos de Pagamento */}
         <Card className="hover:shadow-lg transition-shadow">
@@ -336,96 +302,6 @@ export default function CadastrosPage() {
             </Link>
           </CardContent>
         </Card>
-
-        {/* Usuários */}
-        <Card className="hover:shadow-lg transition-shadow">
-          <CardHeader className="pb-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-3 bg-indigo-100 rounded-lg">
-                  <Users className="h-6 w-6 text-indigo-600" />
-                </div>
-                <div>
-                  <CardTitle className="text-lg">Usuários</CardTitle>
-                  <CardDescription>
-                    Gerencie usuários e permissões
-                  </CardDescription>
-                </div>
-              </div>
-              <Link href="/dashboard/cadastros/usuarios">
-                <Button size="sm">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Novo
-                </Button>
-              </Link>
-            </div>
-          </CardHeader>
-          
-          <CardContent className="pt-0">
-            {/* Lista rápida dos últimos usuários */}
-            <div className="space-y-3 mb-4">
-              {loadingUsers ? (
-                <div className="space-y-2">
-                  {[...Array(3)].map((_, i) => (
-                    <div key={i} className="flex items-center gap-3 p-2 bg-gray-50 rounded animate-pulse">
-                      <div className="w-8 h-8 bg-gray-200 rounded-full"></div>
-                      <div className="flex-1">
-                        <div className="w-24 h-4 bg-gray-200 rounded mb-1"></div>
-                        <div className="w-16 h-3 bg-gray-200 rounded"></div>
-                      </div>
-                      <div className="w-12 h-5 bg-gray-200 rounded"></div>
-                    </div>
-                  ))}
-                </div>
-              ) : users.length > 0 ? (
-                users.slice(0, 3).map(user => (
-                  <div key={user.id} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded transition-colors">
-                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                      <span className="text-blue-600 font-semibold text-xs">
-                        {user.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
-                      </span>
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-medium text-gray-900 text-sm">{user.full_name}</p>
-                      <p className="text-xs text-gray-500">{user.email}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {user.is_superuser ? (
-                        <Badge className="bg-red-100 text-red-800 border-red-200 text-xs">
-                          <Shield className="h-3 w-3 mr-1" />
-                          Admin
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary" className="text-xs">
-                          <User className="h-3 w-3 mr-1" />
-                          User
-                        </Badge>
-                      )}
-                      <Badge 
-                        variant={user.is_active ? "default" : "secondary"}
-                        className="text-xs"
-                      >
-                        {user.is_active ? 'Ativo' : 'Inativo'}
-                      </Badge>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-6 text-gray-500">
-                  <Users className="h-12 w-12 mx-auto text-gray-300 mb-2" />
-                  <p className="text-sm">Nenhum usuário cadastrado</p>
-                </div>
-              )}
-            </div>
-            
-            <Link href="/dashboard/cadastros/usuarios">
-              <Button variant="outline" className="w-full" size="sm">
-                Ver todos os usuários
-                <ArrowRight className="h-4 w-4 ml-2" />
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Dicas e ações rápidas */}
@@ -437,7 +313,7 @@ export default function CadastrosPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Button variant="outline" className="h-auto p-4 justify-start">
               <div className="flex flex-col items-start">
                 <div className="flex items-center gap-2 mb-1">
@@ -458,18 +334,6 @@ export default function CadastrosPage() {
                 </div>
                 <span className="text-xs text-gray-500">
                   Configurar reservas diretas
-                </span>
-              </div>
-            </Button>
-            
-            <Button variant="outline" className="h-auto p-4 justify-start">
-              <div className="flex flex-col items-start">
-                <div className="flex items-center gap-2 mb-1">
-                  <Users className="h-4 w-4" />
-                  <span className="font-medium">Novo Usuário</span>
-                </div>
-                <span className="text-xs text-gray-500">
-                  Adicionar usuário ao sistema
                 </span>
               </div>
             </Button>

@@ -391,6 +391,15 @@ const UserMenu = memo(function UserMenu({
         <DropdownMenuSeparator />
         
         <DropdownMenuItem asChild>
+          <Link href="/dashboard/cadastros/usuarios" className="flex items-center">
+            <Users className="mr-2 h-4 w-4" />
+            Usuários
+          </Link>
+        </DropdownMenuItem>
+        
+        <DropdownMenuSeparator />
+        
+        <DropdownMenuItem asChild>
           <Link href="/dashboard/cadastros" className="flex items-center">
             <FolderOpen className="mr-2 h-4 w-4" />
             Cadastros
