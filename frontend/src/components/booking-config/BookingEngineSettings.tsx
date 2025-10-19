@@ -223,6 +223,7 @@ export default function BookingEngineSettings({
             <TabsContent value="branding" className="space-y-6">
               <BrandingSettings
                 config={formData}
+                propertyId={propertyId}
                 onChange={handleChange}
               />
             </TabsContent>

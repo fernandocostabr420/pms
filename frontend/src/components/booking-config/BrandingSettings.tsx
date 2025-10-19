@@ -15,13 +15,15 @@ import {
   Info,
   RefreshCw
 } from 'lucide-react';
+import { apiClient } from '@/lib/api';
 
 interface BrandingSettingsProps {
   config: any;
+  propertyId: number;
   onChange: (field: string, value: any) => void;
 }
 
-export default function BrandingSettings({ config, onChange }: BrandingSettingsProps) {
+export default function BrandingSettings({ config, propertyId, onChange }: BrandingSettingsProps) {
   const [uploadingLogo, setUploadingLogo] = useState(false);
 
   const handleColorChange = (field: string, value: string) => {
@@ -49,17 +51,19 @@ export default function BrandingSettings({ config, onChange }: BrandingSettingsP
     try {
       setUploadingLogo(true);
 
-      // TODO: Implementar upload real para servidor
-      // Por enquanto, usar base64 para demonstração
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64 = event.target?.result as string;
-        onChange('logo_url', base64);
-      };
-      reader.readAsDataURL(file);
+      // Upload real para o servidor usando a instância singleton
+      const result = await apiClient.uploadBookingEngineImage(
+        propertyId,
+        file,
+        'logo'
+      );
+      
+      // Atualizar config com a URL retornada pelo servidor
+      onChange('logo_url', result.url);
+      
     } catch (error) {
       console.error('Erro ao fazer upload:', error);
-      alert('Erro ao fazer upload da logo');
+      alert('Erro ao fazer upload da logo. Tente novamente.');
     } finally {
       setUploadingLogo(false);
     }
@@ -76,7 +80,7 @@ export default function BrandingSettings({ config, onChange }: BrandingSettingsP
 
   return (
     <div className="space-y-6">
-      {/* Logo */}
+      {/* ==================== LOGO ==================== */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -89,6 +93,7 @@ export default function BrandingSettings({ config, onChange }: BrandingSettingsP
         </CardHeader>
         <CardContent className="space-y-4">
           {config.logo_url ? (
+            // Logo já existe - mostrar preview e opção de substituir
             <div className="space-y-4">
               <div className="relative inline-block">
                 <img
@@ -123,6 +128,7 @@ export default function BrandingSettings({ config, onChange }: BrandingSettingsP
               </div>
             </div>
           ) : (
+            // Nenhuma logo - mostrar área de upload
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
               <div className="mx-auto w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                 <ImageIcon className="h-6 w-6 text-gray-400" />
@@ -165,7 +171,7 @@ export default function BrandingSettings({ config, onChange }: BrandingSettingsP
         </CardContent>
       </Card>
 
-      {/* Cores do Tema */}
+      {/* ==================== CORES DO TEMA ==================== */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -266,7 +272,7 @@ export default function BrandingSettings({ config, onChange }: BrandingSettingsP
         </CardContent>
       </Card>
 
-      {/* Preview de Cores */}
+      {/* ==================== PREVIEW DE CORES ==================== */}
       <Card>
         <CardHeader>
           <CardTitle>Preview das Cores</CardTitle>
