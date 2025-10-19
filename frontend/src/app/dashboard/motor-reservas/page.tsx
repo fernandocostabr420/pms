@@ -13,12 +13,10 @@ import {
   Loader2,
   AlertCircle,
   ExternalLink,
-  Eye,
-  TrendingUp,
-  Users,
   Link as LinkIcon,
   Copy,
-  Check
+  Check,
+  Eye
 } from 'lucide-react';
 import BookingEngineSettings from '@/components/booking-config/BookingEngineSettings';
 import { useToast } from '@/hooks/use-toast';
@@ -78,8 +76,7 @@ export default function MotorReservasPage() {
   const [config, setConfig] = useState<BookingEngineConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // ✅ MUDANÇA: Sempre mostra as configurações quando tem config
-  const [showSettings, setShowSettings] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -107,11 +104,8 @@ export default function MotorReservasPage() {
       if (response.ok) {
         const data = await response.json();
         setConfig(data);
-        // ✅ MUDANÇA: Automaticamente ativa o modo de configurações
-        setShowSettings(true);
       } else if (response.status === 404) {
         setConfig(null);
-        setShowSettings(false);
       } else {
         throw new Error('Erro ao carregar configuração');
       }
@@ -140,12 +134,7 @@ export default function MotorReservasPage() {
             is_active: true,
             primary_color: '#2563eb',
             check_in_time: '14:00',
-            check_out_time: '12:00',
-            default_min_stay: 1,
-            min_advance_booking_hours: 2,
-            max_advance_booking_days: 365,
-            instant_booking: true,
-            default_language: 'pt'
+            check_out_time: '12:00'
           })
         }
       );
@@ -221,7 +210,6 @@ export default function MotorReservasPage() {
     );
   }
 
-  // ✅ MUDANÇA: Mostra as configurações direto se existir config
   if (showSettings && config) {
     return (
       <BookingEngineSettings
@@ -233,7 +221,6 @@ export default function MotorReservasPage() {
     );
   }
 
-  // Tela inicial quando não tem config ainda
   if (!config) {
     return (
       <div className="space-y-6">
@@ -291,9 +278,9 @@ export default function MotorReservasPage() {
                     <Check className="h-4 w-4 text-green-600" />
                   </div>
                   <div>
-                    <p className="font-medium">Reservas Online</p>
+                    <p className="font-medium">Busca em Tempo Real</p>
                     <p className="text-sm text-gray-600">
-                      Sistema completo de busca, seleção e confirmação
+                      Disponibilidade e preços atualizados automaticamente
                     </p>
                   </div>
                 </div>
@@ -305,7 +292,7 @@ export default function MotorReservasPage() {
                   <div>
                     <p className="font-medium">Personalização Total</p>
                     <p className="text-sm text-gray-600">
-                      Cores, textos, fotos e políticas personalizadas
+                      Cores, logo, textos e políticas customizadas
                     </p>
                   </div>
                 </div>
@@ -321,30 +308,6 @@ export default function MotorReservasPage() {
                     </p>
                   </div>
                 </div>
-
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <Check className="h-4 w-4 text-green-600" />
-                  </div>
-                  <div>
-                    <p className="font-medium">Integração Automática</p>
-                    <p className="text-sm text-gray-600">
-                      Reservas entram direto no seu sistema
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <Check className="h-4 w-4 text-green-600" />
-                  </div>
-                  <div>
-                    <p className="font-medium">Analytics</p>
-                    <p className="text-sm text-gray-600">
-                      Google Analytics e Facebook Pixel integrados
-                    </p>
-                  </div>
-                </div>
               </div>
             </div>
           </CardContent>
@@ -353,9 +316,9 @@ export default function MotorReservasPage() {
     );
   }
 
-  // ✅ Overview do motor (só aparece se clicar em "Voltar" nas configurações)
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Motor de Reservas</h1>
@@ -374,80 +337,23 @@ export default function MotorReservasPage() {
         </div>
       </div>
 
-      <div className="grid md:grid-cols-3 gap-6">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-gray-600">
-              Total de Visitas
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-3xl font-bold">{config.total_visits.toLocaleString()}</div>
-                <p className="text-xs text-gray-500 mt-1">Acessos ao site</p>
-              </div>
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                <Eye className="h-6 w-6 text-blue-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-gray-600">
-              Reservas Geradas
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-3xl font-bold">{config.total_bookings.toLocaleString()}</div>
-                <p className="text-xs text-gray-500 mt-1">Reservas diretas</p>
-              </div>
-              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                <Users className="h-6 w-6 text-green-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-gray-600">
-              Taxa de Conversão
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-3xl font-bold">
-                  {config.total_visits > 0
-                    ? ((config.total_bookings / config.total_visits) * 100).toFixed(1)
-                    : '0.0'}%
-                </div>
-                <p className="text-xs text-gray-500 mt-1">Visitas → Reservas</p>
-              </div>
-              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                <TrendingUp className="h-6 w-6 text-purple-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
+      {/* Link Público */}
       <Card>
         <CardHeader>
-          <CardTitle>Link do Motor de Reservas</CardTitle>
+          <CardTitle>Link Público</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center gap-2">
-            <div className="flex-1 p-3 bg-gray-50 rounded-lg font-mono text-sm">
-              {getPublicUrl()}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 flex items-center gap-2 px-4 py-3 bg-gray-50 rounded-lg border">
+              <LinkIcon className="h-4 w-4 text-gray-400" />
+              <code className="text-sm flex-1 truncate">{getPublicUrl()}</code>
             </div>
-            <Button variant="outline" onClick={copyUrl}>
-              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+            <Button variant="outline" size="icon" onClick={copyUrl}>
+              {copied ? (
+                <Check className="h-4 w-4 text-green-600" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
             </Button>
             <Button asChild>
               <a href={getPublicUrl()} target="_blank" rel="noopener noreferrer">
@@ -457,11 +363,34 @@ export default function MotorReservasPage() {
             </Button>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-4 pt-4 border-t">
+          <p className="text-sm text-gray-600">
+            Compartilhe este link com seus clientes para que eles possam fazer reservas diretamente.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Prévia da Configuração */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Prévia da Configuração</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <p className="text-sm font-medium text-gray-700 mb-1">Cor Primária</p>
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-8 h-8 rounded-lg border"
+                  style={{ backgroundColor: config.primary_color }}
+                />
+                <code className="text-sm">{config.primary_color}</code>
+              </div>
+            </div>
+
             <div>
               <p className="text-sm font-medium text-gray-700 mb-1">Check-in / Check-out</p>
               <p className="text-sm text-gray-600">
-                {config.check_in_time} / {config.check_out_time}
+                {config.check_in_time} - {config.check_out_time}
               </p>
             </div>
 
@@ -476,13 +405,6 @@ export default function MotorReservasPage() {
               <p className="text-sm font-medium text-gray-700 mb-1">Antecedência Mínima</p>
               <p className="text-sm text-gray-600">
                 {config.min_advance_booking_hours} horas
-              </p>
-            </div>
-
-            <div>
-              <p className="text-sm font-medium text-gray-700 mb-1">Reserva Instantânea</p>
-              <p className="text-sm text-gray-600">
-                {config.instant_booking ? 'Ativada' : 'Desativada'}
               </p>
             </div>
           </div>
