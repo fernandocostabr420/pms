@@ -33,6 +33,9 @@ email-validator==2.1.0
 python-dotenv==1.0.0
 pytz==2023.3
 
+# ✅ ADICIONADO: HTTP Requests
+requests==2.31.0
+
 # ✅ ADICIONADO: Geração de PDFs (vouchers)
 reportlab==4.0.7
 

@@ -10,18 +10,33 @@ from app.core.config import settings
 # Configuração do contexto de criptografia de senhas
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# ✅ LIMITE DE BYTES DO BCRYPT
+BCRYPT_MAX_BYTES = 72
+
 
 def create_password_hash(password: str) -> str:
     """
-    Cria hash da senha usando bcrypt
+    Cria hash da senha usando bcrypt.
+    ✅ CORRIGIDO: Trunca automaticamente senhas > 72 bytes.
     """
+    # Truncar senha se necessário (bcrypt tem limite de 72 bytes)
+    password_bytes = password.encode('utf-8')
+    if len(password_bytes) > BCRYPT_MAX_BYTES:
+        password = password_bytes[:BCRYPT_MAX_BYTES].decode('utf-8', errors='ignore')
+    
     return pwd_context.hash(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
-    Verifica se a senha corresponde ao hash
+    Verifica se a senha corresponde ao hash.
+    ✅ CORRIGIDO: Trunca automaticamente senhas > 72 bytes.
     """
+    # Truncar senha se necessário (bcrypt tem limite de 72 bytes)
+    password_bytes = plain_password.encode('utf-8')
+    if len(password_bytes) > BCRYPT_MAX_BYTES:
+        plain_password = password_bytes[:BCRYPT_MAX_BYTES].decode('utf-8', errors='ignore')
+    
     return pwd_context.verify(plain_password, hashed_password)
 
 
