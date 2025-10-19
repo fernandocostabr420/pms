@@ -1,5 +1,9 @@
 // frontend/src/types/booking.ts
 
+/**
+ * Interface baseada na resposta REAL da API:
+ * GET /api/public/properties/{slug}
+ */
 export interface PropertyPublicInfo {
   property: {
     id: number;
@@ -7,66 +11,54 @@ export interface PropertyPublicInfo {
     slug: string;
     description: string;
     address: {
-      full: string;
+      street: string | null;
       city: string;
       state: string;
       country: string;
       postal_code: string;
+      full_address: string;
     };
     contact: {
       phone: string;
       email: string;
       website?: string;
     };
-    amenities: string[];
+    settings: Record<string, any>;
+  };
+  // ✅ NOME CORRETO: booking_engine (como vem da API)
+  booking_engine: {
+    logo_url: string | null;
+    primary_color: string;
+    welcome_text: string | null;
+    gallery_photos: string[];
+    testimonials: Array<{
+      name: string;
+      rating: number;
+      text: string;
+    }>;
+    social_links: Record<string, string>;
+    cancellation_policy: string | null;
+    house_rules: string | null;
     check_in_time: string;
     check_out_time: string;
-    has_parking: boolean;
   };
-  booking_config: {
+  room_types: Array<{
+    id: number;
+    name: string;
     slug: string;
-    is_active: boolean;
-    branding: {
-      logo_url?: string;
-      primary_color: string;
-      secondary_color?: string;
-    };
-    content: {
-      welcome_text?: string;
-      about_text?: string;
-      gallery_photos: string[];
-      hero_photos: string[];
-      testimonials: Array<{
-        name: string;
-        rating: number;
-        text: string;
-      }>;
-    };
-    social_links: {
-      facebook?: string;
-      instagram?: string;
-      whatsapp?: string;
-    };
-    policies: {
-      cancellation?: string;
-      house_rules?: string;
-      check_in_time: string;
-      check_out_time: string;
-    };
-    booking_settings: {
-      instant_booking: boolean;
-      require_prepayment: boolean;
-      prepayment_percentage?: number;
-      default_min_stay: number;
-      default_max_stay?: number;
-      min_advance_booking_hours: number;
-      max_advance_booking_days: number;
-    };
-    extras: Array<{
-      name: string;
-      price: number;
-      type: string;
-    }>;
+    description: string | null;
+    base_capacity: number;
+    max_capacity: number;
+    size_m2: number | null;
+    bed_configuration: Record<string, any> | null;
+    amenities: string[];
+  }>;
+  amenities: string[];
+  policies: {
+    cancellation: string | null;
+    house_rules: string | null;
+    check_in: string;
+    check_out: string;
   };
 }
 
@@ -75,34 +67,36 @@ export interface SearchParams {
   check_out: string; // YYYY-MM-DD
   adults: number;
   children: number;
-  rooms: number;
 }
 
+/**
+ * Interface baseada na resposta REAL da API:
+ * POST /api/public/availability/search
+ */
 export interface RoomAvailable {
-  room: {
-    id: number;
-    room_number: string;
-    room_type_id: number;
-    room_type_name: string;
-    description?: string;
-    max_occupancy: number;
-    base_price: number;
-    amenities: string[];
-    photos: string[];
-  };
-  pricing: {
-    base_rate: number;
-    total_amount: number;
-    nights: number;
-    rate_per_night: number;
-    taxes?: number;
-    fees?: number;
-  };
-  rate_plan?: {
+  room_id: number;
+  room_number: string;
+  room_name: string;
+  room_type: {
     id: number;
     name: string;
-    description?: string;
+    slug: string;
+    description: string | null;
+    base_capacity: number;
+    max_capacity: number;
+    size_m2: number | null;
+    bed_configuration: Record<string, any> | null;
+    amenities: string[];
   };
+  max_occupancy: number;
+  additional_amenities: string[];
+  pricing: {
+    total_amount: number;
+    nights: number;
+    average_per_night: number;
+    currency: string;
+  };
+  rate_plan: any | null;
   availability: {
     is_available: boolean;
     check_in: string;
@@ -123,18 +117,19 @@ export interface AvailabilityResponse {
 }
 
 export interface GuestData {
-  full_name: string;
+  first_name: string;
+  last_name: string;
   email: string;
   phone: string;
-  document_type: 'cpf' | 'rg' | 'passport' | 'other';
-  document_number: string;
+  document_type?: 'cpf' | 'rg' | 'passport' | 'other';
+  document_number?: string;
   nationality?: string;
   address?: string;
   city?: string;
   state?: string;
   country?: string;
   postal_code?: string;
-  special_requests?: string;
+  date_of_birth?: string;
 }
 
 export interface BookingRequest {
@@ -147,21 +142,49 @@ export interface BookingRequest {
   guest: GuestData;
   payment_method: string;
   special_requests?: string;
+  accepts_terms: boolean;
+  accepts_privacy_policy: boolean;
+  subscribe_newsletter?: boolean;
+  promo_code?: string;
+  source?: string;
+  referrer?: string;
   extras?: Array<{
     name: string;
     quantity: number;
+    price?: number;
   }>;
 }
 
 export interface BookingResponse {
   id: number;
   reservation_number: string;
+  public_token: string;
   status: string;
   check_in_date: string;
   check_out_date: string;
+  nights: number;
+  adults: number;
+  children: number;
+  total_guests: number;
   total_amount: number;
   guest_name: string;
   guest_email: string;
-  confirmation_token: string;
+  guest_phone: string;
+  room_info: {
+    room_id: number;
+    room_number: string;
+    room_name: string;
+    room_type_name: string;
+  };
+  payment_method: string;
+  special_requests?: string;
+  tracking_url: string;
+  property_info: {
+    name: string;
+    phone: string;
+    email: string;
+    address: string;
+  };
+  created_at: string;
   message: string;
 }

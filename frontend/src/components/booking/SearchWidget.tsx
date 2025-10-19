@@ -17,7 +17,7 @@ interface SearchWidgetProps {
   onSearch: (params: SearchParams) => void;
   loading?: boolean;
   initialParams?: SearchParams;
-  property: PropertyPublicInfo;
+  property?: PropertyPublicInfo;
 }
 
 export default function SearchWidget({
@@ -26,8 +26,9 @@ export default function SearchWidget({
   initialParams,
   property,
 }: SearchWidgetProps) {
-  const minStay = property.booking_config.booking_settings.default_min_stay || 1;
-  const maxStay = property.booking_config.booking_settings.default_max_stay || 90;
+  // ✅ Valores padrão caso property não esteja disponível
+  const minStay = 1;
+  const maxStay = 90;
   
   const [checkIn, setCheckIn] = useState<Date | undefined>(
     initialParams?.check_in ? new Date(initialParams.check_in) : undefined
@@ -37,7 +38,6 @@ export default function SearchWidget({
   );
   const [adults, setAdults] = useState(initialParams?.adults || 2);
   const [children, setChildren] = useState(initialParams?.children || 0);
-  const [rooms, setRooms] = useState(initialParams?.rooms || 1);
 
   const [checkInOpen, setCheckInOpen] = useState(false);
   const [checkOutOpen, setCheckOutOpen] = useState(false);
@@ -60,7 +60,6 @@ export default function SearchWidget({
       check_out: format(checkOut, 'yyyy-MM-dd'),
       adults,
       children,
-      rooms,
     };
 
     onSearch(params);
@@ -224,38 +223,6 @@ export default function SearchWidget({
                     </div>
                   </div>
 
-                  {/* Quartos */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Hotel className="h-4 w-4 text-gray-500" />
-                      <div>
-                        <p className="font-medium">Quartos</p>
-                        <p className="text-xs text-gray-500">Quantidade desejada</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setRooms(Math.max(1, rooms - 1))}
-                        disabled={rooms <= 1}
-                        className="h-8 w-8 p-0"
-                      >
-                        -
-                      </Button>
-                      <span className="w-8 text-center font-medium">{rooms}</span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setRooms(Math.min(5, rooms + 1))}
-                        disabled={rooms >= 5}
-                        className="h-8 w-8 p-0"
-                      >
-                        +
-                      </Button>
-                    </div>
-                  </div>
-
                   <Button
                     onClick={() => setGuestsOpen(false)}
                     className="w-full"
@@ -272,10 +239,10 @@ export default function SearchWidget({
             <Label className="text-sm font-medium">Informações</Label>
             <div className="flex flex-col justify-center h-10 px-3 bg-gray-50 rounded-md border">
               <p className="text-sm text-gray-600">
-                {nights > 0 && `${nights} ${nights === 1 ? 'noite' : 'noites'}`}
+                {nights > 0 ? `${nights} ${nights === 1 ? 'noite' : 'noites'}` : '-'}
               </p>
               <p className="text-xs text-gray-500">
-                {rooms} {rooms === 1 ? 'quarto' : 'quartos'}
+                {totalGuests} {totalGuests === 1 ? 'hóspede' : 'hóspedes'}
               </p>
             </div>
           </div>

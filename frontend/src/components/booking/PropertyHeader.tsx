@@ -7,14 +7,12 @@ import type { PropertyPublicInfo } from '@/types/booking';
 import Image from 'next/image';
 
 interface PropertyHeaderProps {
-  property: PropertyPublicInfo;
+  propertyInfo: PropertyPublicInfo;
 }
 
-export default function PropertyHeader({ property }: PropertyHeaderProps) {
-  const { property: propertyData, booking_config } = property;
-  const { branding, social_links } = booking_config;
-
-  const primaryColor = branding.primary_color || '#2563eb';
+export default function PropertyHeader({ propertyInfo }: PropertyHeaderProps) {
+  const { property: propertyData, booking_engine } = propertyInfo;
+  const primaryColor = booking_engine.primary_color || '#2563eb';
 
   return (
     <header 
@@ -29,10 +27,10 @@ export default function PropertyHeader({ property }: PropertyHeaderProps) {
           
           {/* Logo e Nome */}
           <div className="flex items-center gap-4">
-            {branding.logo_url && (
+            {booking_engine.logo_url && (
               <div className="relative w-16 h-16 flex-shrink-0">
                 <Image
-                  src={branding.logo_url}
+                  src={booking_engine.logo_url}
                   alt={propertyData.name}
                   fill
                   className="object-contain"
@@ -106,12 +104,12 @@ export default function PropertyHeader({ property }: PropertyHeaderProps) {
             )}
 
             {/* Divisor */}
-            {(social_links?.facebook || social_links?.instagram || social_links?.whatsapp) && (
+            {(booking_engine.social_links?.facebook || booking_engine.social_links?.instagram || booking_engine.social_links?.whatsapp) && (
               <div className="hidden md:block w-px h-6 bg-gray-300 mx-1" />
             )}
 
             {/* WhatsApp */}
-            {social_links?.whatsapp && (
+            {booking_engine.social_links?.whatsapp && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -119,7 +117,7 @@ export default function PropertyHeader({ property }: PropertyHeaderProps) {
                 className="h-8 w-8 p-0"
               >
                 <a
-                  href={`https://wa.me/${social_links.whatsapp.replace(/\D/g, '')}`}
+                  href={`https://wa.me/${booking_engine.social_links.whatsapp.replace(/\D/g, '')}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   title="WhatsApp"
@@ -130,7 +128,7 @@ export default function PropertyHeader({ property }: PropertyHeaderProps) {
             )}
 
             {/* Instagram */}
-            {social_links?.instagram && (
+            {booking_engine.social_links?.instagram && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -138,7 +136,7 @@ export default function PropertyHeader({ property }: PropertyHeaderProps) {
                 className="h-8 w-8 p-0"
               >
                 <a
-                  href={social_links.instagram}
+                  href={booking_engine.social_links.instagram}
                   target="_blank"
                   rel="noopener noreferrer"
                   title="Instagram"
@@ -149,7 +147,7 @@ export default function PropertyHeader({ property }: PropertyHeaderProps) {
             )}
 
             {/* Facebook */}
-            {social_links?.facebook && (
+            {booking_engine.social_links?.facebook && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -157,7 +155,7 @@ export default function PropertyHeader({ property }: PropertyHeaderProps) {
                 className="h-8 w-8 p-0"
               >
                 <a
-                  href={social_links.facebook}
+                  href={booking_engine.social_links.facebook}
                   target="_blank"
                   rel="noopener noreferrer"
                   title="Facebook"
@@ -170,11 +168,11 @@ export default function PropertyHeader({ property }: PropertyHeaderProps) {
         </div>
 
         {/* Hero Image/Gallery - Carousel simples */}
-        {booking_config.content.hero_photos.length > 0 && (
+        {booking_engine.gallery_photos && booking_engine.gallery_photos.length > 0 && (
           <div className="mt-6 rounded-lg overflow-hidden">
             <div className="relative h-64 md:h-96">
               <Image
-                src={booking_config.content.hero_photos[0]}
+                src={booking_engine.gallery_photos[0]}
                 alt={propertyData.name}
                 fill
                 className="object-cover"
@@ -183,10 +181,10 @@ export default function PropertyHeader({ property }: PropertyHeaderProps) {
               <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
               
               {/* Texto sobre a imagem */}
-              {booking_config.content.welcome_text && (
+              {booking_engine.welcome_text && (
                 <div className="absolute bottom-0 left-0 right-0 p-6 text-white">
                   <p className="text-lg md:text-xl font-medium max-w-2xl">
-                    {booking_config.content.welcome_text}
+                    {booking_engine.welcome_text}
                   </p>
                 </div>
               )}
