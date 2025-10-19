@@ -1,6 +1,4 @@
-// frontend/src/lib/api.ts
-// Path: frontend/src/lib/api.ts
-// src/lib/api.ts - REFATORADO + ESTACIONAMENTO + CHANNEL MANAGER + TODAS AS FUNCIONALIDADES MANTIDAS
+// frontend/src/lib/api.ts - COMPLETO COM BOOKING ENGINE
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import Cookies from 'js-cookie';
 
@@ -45,7 +43,6 @@ import type {
   CheckOutRequest,
   CancelReservationRequest,
   AvailabilityRequest,
-  // ✅ NOVOS IMPORTS - ESTACIONAMENTO
   ParkingConfigResponse,
   ParkingUpdateRequest,
   ParkingAvailabilityRequest,
@@ -103,7 +100,6 @@ import {
   PaymentSecurityWarning
 } from '@/types/payment';
 
-// ✅ NOVOS IMPORTS - CHANNEL MANAGER
 import {
   ChannelManagerOverview,
   AvailabilityCalendarRequest,
@@ -198,6 +194,7 @@ interface ReservationDetailedResponse {
  * - Cache inteligente
  * - Gestão de estacionamento
  * - Channel Manager integrado
+ * - Booking Engine configurável
  */
 class PMSApiClient {
   private client: AxiosInstance;
@@ -591,10 +588,6 @@ class PMSApiClient {
   }
 
   // ===== PARKING API =====
-  
-  /**
-   * Busca configuração de estacionamento de uma propriedade
-   */
   async getParkingConfiguration(propertyId: number): Promise<ParkingConfigResponse> {
     try {
       const response = await this.client.get<ParkingConfigResponse>(`/properties/${propertyId}/parking`);
@@ -605,9 +598,6 @@ class PMSApiClient {
     }
   }
 
-  /**
-   * Atualiza configuração de estacionamento de uma propriedade
-   */
   async updateParkingConfiguration(
     propertyId: number, 
     data: ParkingUpdateRequest
@@ -624,9 +614,6 @@ class PMSApiClient {
     }
   }
 
-  /**
-   * Verifica disponibilidade de estacionamento para um período específico
-   */
   async checkParkingAvailability(
     propertyId: number,
     data: ParkingAvailabilityRequest
@@ -643,11 +630,146 @@ class PMSApiClient {
     }
   }
 
-  // ===== CHANNEL MANAGER API =====
+  // ===== BOOKING ENGINE API =====
   
   /**
-   * Busca visão geral do Channel Manager com estatísticas e status
+   * Cria configuração do booking engine para uma propriedade
    */
+  async createBookingEngineConfig(
+    propertyId: number,
+    data: Partial<BookingEngineConfig>
+  ): Promise<BookingEngineConfig> {
+    try {
+      const response = await this.client.post<BookingEngineConfig>(
+        `/properties/${propertyId}/booking-engine`,
+        data
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao criar booking engine config:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Busca configuração do booking engine de uma propriedade
+   */
+  async getBookingEngineConfig(propertyId: number): Promise<BookingEngineConfig | null> {
+    try {
+      const response = await this.client.get<BookingEngineConfig>(
+        `/properties/${propertyId}/booking-engine`
+      );
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        return null;
+      }
+      console.error('Erro ao buscar booking engine config:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Atualiza configuração do booking engine
+   */
+  async updateBookingEngineConfig(
+    propertyId: number,
+    data: Partial<BookingEngineConfig>
+  ): Promise<BookingEngineConfig> {
+    try {
+      const response = await this.client.put<BookingEngineConfig>(
+        `/properties/${propertyId}/booking-engine`,
+        data
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao atualizar booking engine config:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Deleta configuração do booking engine
+   */
+  async deleteBookingEngineConfig(propertyId: number): Promise<void> {
+    try {
+      await this.client.delete(`/properties/${propertyId}/booking-engine`);
+    } catch (error) {
+      console.error('Erro ao deletar booking engine config:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Obtém estatísticas do booking engine
+   */
+  async getBookingEngineStats(propertyId: number): Promise<{
+    total_visits: number;
+    total_bookings: number;
+    conversion_rate: number;
+    property_id: number;
+    is_active: boolean;
+  }> {
+    try {
+      const response = await this.client.get(
+        `/properties/${propertyId}/booking-engine/stats`
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao buscar stats do booking engine:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Faz upload de imagem para o booking engine
+   */
+  async uploadBookingEngineImage(
+    propertyId: number,
+    file: File,
+    type: 'logo' | 'gallery' | 'hero'
+  ): Promise<{ url: string }> {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('type', type);
+
+      const response = await this.client.post(
+        `/properties/${propertyId}/booking-engine/upload`,
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao fazer upload de imagem:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Valida slug customizado (verifica se está disponível)
+   */
+  async validateCustomSlug(slug: string, propertyId?: number): Promise<{
+    is_available: boolean;
+    message: string;
+  }> {
+    try {
+      const response = await this.client.post(
+        '/booking-engine/validate-slug',
+        { slug, property_id: propertyId }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Erro ao validar slug:', error);
+      throw error;
+    }
+  }
+
+  // ===== CHANNEL MANAGER API =====
   async getChannelManagerOverview(params?: {
     date_from?: string;
     date_to?: string;
@@ -662,9 +784,6 @@ class PMSApiClient {
     }
   }
 
-  /**
-   * Busca dados do calendário de disponibilidade com status de sincronização
-   */
   async getChannelManagerCalendar(
     request: AvailabilityCalendarRequest
   ): Promise<AvailabilityCalendarResponse> {
@@ -680,9 +799,6 @@ class PMSApiClient {
     }
   }
 
-  /**
-   * Busca calendário simplificado via GET (para compatibilidade)
-   */
   async getChannelManagerCalendarRange(params: {
     date_from: string;
     date_to: string;
@@ -703,9 +819,6 @@ class PMSApiClient {
     }
   }
 
-  /**
-   * Inicia sincronização manual com WuBook e outros canais
-   */
   async syncWithWuBook(request: SyncRequest): Promise<SyncResult> {
     try {
       const response = await this.client.post<SyncResult>('/channel-manager/sync', request);
@@ -716,9 +829,6 @@ class PMSApiClient {
     }
   }
 
-  /**
-   * Busca status de sincronização por task_id
-   */
   async getChannelManagerSyncStatus(taskId: string): Promise<SyncResult> {
     try {
       const response = await this.client.get<SyncResult>(`/channel-manager/sync/status/${taskId}`);
@@ -729,9 +839,6 @@ class PMSApiClient {
     }
   }
 
-  /**
-   * Força sincronização completa de todos os dados
-   */
   async forceChannelManagerFullSync(params?: {
     room_ids?: number[];
     property_id?: number;
@@ -749,9 +856,6 @@ class PMSApiClient {
     }
   }
 
-  /**
-   * Lista configurações de canal do Channel Manager
-   */
   async getChannelManagerConfigurations(filters?: ChannelManagerFilters): Promise<{
     items: any[];
     total: number;
@@ -767,9 +871,6 @@ class PMSApiClient {
     }
   }
 
-  /**
-   * Verifica saúde geral das sincronizações
-   */
   async getChannelManagerHealthReport(): Promise<{
     overall_health: 'healthy' | 'warning' | 'critical';
     health_score: number;
@@ -791,9 +892,6 @@ class PMSApiClient {
     }
   }
 
-  /**
-   * Atualiza uma única célula do calendário (edição inline)
-   */
   async updateChannelManagerCell(data: {
     room_id: number;
     date: string;
@@ -801,7 +899,6 @@ class PMSApiClient {
     value: any;
   }): Promise<{ success: boolean; message?: string }> {
     try {
-      // Usar endpoint de bulk update com um único item para compatibilidade
       const bulkData = {
         room_ids: [data.room_id],
         date_from: data.date,
@@ -818,9 +915,6 @@ class PMSApiClient {
     }
   }
 
-  /**
-   * Valida operação de bulk edit antes de executar
-   */
   async validateChannelManagerBulkOperation(
     data: BulkAvailabilityUpdate
   ): Promise<{
@@ -843,7 +937,6 @@ class PMSApiClient {
       return response.data;
     } catch (error) {
       console.error('Erro na validação de bulk edit:', error);
-      // Retornar validação básica em caso de erro
       const startDate = new Date(data.date_from);
       const endDate = new Date(data.date_to);
       const totalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
@@ -926,56 +1019,7 @@ class PMSApiClient {
     }
   }
 
-  async getReservationsWithDetails(params?: {
-    page?: number;
-    per_page?: number;
-    status?: string;
-    source?: string;
-    property_id?: number;
-    guest_id?: number;
-    check_in_from?: string;
-    check_in_to?: string;
-    check_out_from?: string;
-    check_out_to?: string;
-    created_from?: string;
-    created_to?: string;
-    search?: string;
-    guest_email?: string;
-    guest_phone?: string;
-    guest_document_type?: string;
-    guest_nationality?: string;
-    guest_city?: string;
-    guest_state?: string;
-    guest_country?: string;
-    cancelled_from?: string;
-    cancelled_to?: string;
-    confirmed_from?: string;
-    confirmed_to?: string;
-    actual_checkin_from?: string;
-    actual_checkin_to?: string;
-    actual_checkout_from?: string;
-    actual_checkout_to?: string;
-    min_guests?: number;
-    max_guests?: number;
-    min_nights?: number;
-    max_nights?: number;
-    room_type_id?: number;
-    room_number?: string;
-    has_special_requests?: boolean;
-    has_internal_notes?: boolean;
-    deposit_paid?: boolean;
-    payment_status?: string;
-    marketing_source?: string;
-    is_current?: boolean;
-    can_check_in?: boolean;
-    can_check_out?: boolean;
-    can_cancel?: boolean;
-    min_amount?: number;
-    max_amount?: number;
-    is_paid?: boolean;
-    requires_deposit?: boolean;
-    is_group_reservation?: boolean;
-  }): Promise<ReservationListResponseWithDetails> {
+  async getReservationsWithDetails(params?: any): Promise<ReservationListResponseWithDetails> {
     const encodedParams = this.encodeSearchParams(params || {});
     
     const cleanParams = Object.fromEntries(
@@ -987,8 +1031,6 @@ class PMSApiClient {
     cleanParams.include_guest_details = true;
     cleanParams.include_room_details = true;
     cleanParams.include_payment_details = true;
-
-    console.log('Parâmetros enviados:', cleanParams);
 
     try {
       const response = await this.client.get<ReservationListResponseWithDetails>('/reservations/detailed', { params: cleanParams });
@@ -1051,7 +1093,6 @@ class PMSApiClient {
     return response.data;
   }
 
-  // ===== NOVO: DOWNLOAD VOUCHER =====
   async downloadReservationVoucher(id: number): Promise<Blob> {
     try {
       const response = await this.client.get(`/reservations/${id}/voucher`, {
@@ -1819,7 +1860,7 @@ class PMSApiClient {
     return response.data;
   }
 
-  async getCalendarRange(data: CalendarAvailabilityRequest): Promise<CalendarAvailabilityResponse[]> {
+  async getCalendarRangeAvailability(data: CalendarAvailabilityRequest): Promise<CalendarAvailabilityResponse[]> {
     const response = await this.post<CalendarAvailabilityResponse[]>(
       '/room-availability/calendar/range', 
       data
@@ -2033,7 +2074,6 @@ class PMSApiClient {
     return response.data;
   }
 
-  // ===== ADMIN PAYMENT OPERATIONS =====
   async getPaymentPermissions(id: number): Promise<PaymentPermissions> {
     const response = await this.get<PaymentPermissions>(`/payments/${id}/permissions`);
     return response.data;
@@ -2103,6 +2143,65 @@ class PMSApiClient {
     return response.data;
   }
 }
+
+// ===== TYPE EXPORTS =====
+export type BookingEngineConfig = {
+  id: number;
+  property_id: number;
+  tenant_id: number;
+  is_active: boolean;
+  custom_slug: string | null;
+  logo_url: string | null;
+  primary_color: string;
+  secondary_color: string | null;
+  welcome_text: string | null;
+  about_text: string | null;
+  gallery_photos: string[];
+  hero_photos: string[];
+  testimonials: Array<{
+    name: string;
+    rating: number;
+    text: string;
+  }>;
+  social_links: Record<string, string>;
+  cancellation_policy: string | null;
+  house_rules: string | null;
+  terms_and_conditions: string | null;
+  privacy_policy: string | null;
+  check_in_time: string;
+  check_out_time: string;
+  require_prepayment: boolean;
+  prepayment_percentage: number | null;
+  instant_booking: boolean;
+  default_min_stay: number;
+  default_max_stay: number | null;
+  min_advance_booking_hours: number;
+  max_advance_booking_days: number;
+  meta_title: string | null;
+  meta_description: string | null;
+  meta_keywords: string | null;
+  notification_emails: string | null;
+  send_sms_confirmation: boolean;
+  send_whatsapp_confirmation: boolean;
+  available_extras: Array<{
+    id: string;
+    name: string;
+    description: string;
+    price: number;
+    type: 'per_stay' | 'per_night';
+  }>;
+  available_languages: string[];
+  default_language: string;
+  google_analytics_id: string | null;
+  facebook_pixel_id: string | null;
+  custom_settings: Record<string, any>;
+  custom_css: string | null;
+  custom_js: string | null;
+  total_visits: number;
+  total_bookings: number;
+  created_at: string;
+  updated_at: string;
+};
 
 // Export singleton instance
 export const apiClient = new PMSApiClient();
