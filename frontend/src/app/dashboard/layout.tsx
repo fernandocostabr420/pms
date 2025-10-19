@@ -34,7 +34,8 @@ import {
   Loader2,
   FolderOpen,
   Car,
-  Radio
+  Radio,
+  Globe
 } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -48,6 +49,7 @@ const navigation = [
   { name: 'Hóspedes', href: '/dashboard/guests', icon: Users },
   { name: 'Disponibilidade', href: '/dashboard/room-availability', icon: Calendar },
   { name: 'Channel Manager', href: '/dashboard/channel-manager', icon: Radio },
+  { name: 'Motor de Reservas', href: '/dashboard/motor-reservas', icon: Globe },
 ];
 
 interface SearchResult {
@@ -390,7 +392,6 @@ const UserMenu = memo(function UserMenu({
         
         <DropdownMenuSeparator />
         
-        {/* ✅ CORRIGIDO: Rota de /dashboard/cadastros/usuarios para /dashboard/usuarios */}
         <DropdownMenuItem asChild>
           <Link href="/dashboard/usuarios" className="flex items-center">
             <Users className="mr-2 h-4 w-4" />
@@ -434,6 +435,15 @@ const UserMenu = memo(function UserMenu({
           <Link href="/dashboard/properties/parking" className="flex items-center">
             <Car className="mr-2 h-4 w-4" />
             Estacionamento
+          </Link>
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator />
+        
+        <DropdownMenuItem asChild>
+          <Link href="/dashboard/motor-reservas" className="flex items-center">
+            <Globe className="mr-2 h-4 w-4" />
+            Motor de Reservas
           </Link>
         </DropdownMenuItem>
         
