@@ -24,6 +24,7 @@ interface SeoSettingsProps {
 }
 
 export default function SeoSettings({ config, onChange }: SeoSettingsProps) {
+  // ✅ CORRIGIDO: Usando meta_title em vez de seo_title
   const getMetaTitleLength = () => (config.meta_title || '').length;
   const getMetaDescriptionLength = () => (config.meta_description || '').length;
 
@@ -51,7 +52,7 @@ export default function SeoSettings({ config, onChange }: SeoSettingsProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Meta Title */}
+          {/* ✅ CORRIGIDO: Meta Title usando meta_title */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label htmlFor="meta_title">
@@ -89,7 +90,7 @@ export default function SeoSettings({ config, onChange }: SeoSettingsProps) {
             </div>
           </div>
 
-          {/* Meta Description */}
+          {/* ✅ CORRIGIDO: Meta Description usando meta_description */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label htmlFor="meta_description">
@@ -128,7 +129,7 @@ export default function SeoSettings({ config, onChange }: SeoSettingsProps) {
             </div>
           </div>
 
-          {/* Meta Keywords */}
+          {/* ✅ CORRIGIDO: Meta Keywords usando meta_keywords */}
           <div className="space-y-2">
             <Label htmlFor="meta_keywords">
               Palavras-chave (opcional)
@@ -204,7 +205,7 @@ export default function SeoSettings({ config, onChange }: SeoSettingsProps) {
           <div className="bg-gray-50 rounded-lg p-4 space-y-3">
             <h4 className="font-medium text-sm">Como obter o ID do Google Analytics:</h4>
             <ol className="text-sm text-gray-700 space-y-2 list-decimal list-inside">
-              <li>Acesse <a href="https://analytics.google.com" target="_blank" className="text-blue-600 hover:underline">analytics.google.com</a></li>
+              <li>Acesse <a href="https://analytics.google.com" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">analytics.google.com</a></li>
               <li>Crie uma propriedade GA4 (se ainda não tiver)</li>
               <li>Vá em Admin → Fluxos de dados</li>
               <li>Copie o "ID de medição" (formato: G-XXXXXXXXXX)</li>
@@ -263,7 +264,7 @@ export default function SeoSettings({ config, onChange }: SeoSettingsProps) {
           <div className="bg-gray-50 rounded-lg p-4 space-y-3">
             <h4 className="font-medium text-sm">Como obter o Facebook Pixel ID:</h4>
             <ol className="text-sm text-gray-700 space-y-2 list-decimal list-inside">
-              <li>Acesse o <a href="https://business.facebook.com/events_manager" target="_blank" className="text-blue-600 hover:underline">Gerenciador de Eventos</a></li>
+              <li>Acesse o <a href="https://business.facebook.com/events_manager" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Gerenciador de Eventos</a></li>
               <li>Selecione seu pixel ou crie um novo</li>
               <li>Clique em "Configurar o pixel"</li>
               <li>Copie o ID do pixel (apenas os números)</li>
@@ -317,7 +318,7 @@ export default function SeoSettings({ config, onChange }: SeoSettingsProps) {
         </CardContent>
       </Card>
 
-      {/* SEO Preview */}
+      {/* SEO Preview - ✅ CORRIGIDO: Usando meta_title e meta_description */}
       <Card>
         <CardHeader>
           <CardTitle>Preview nos Resultados do Google</CardTitle>

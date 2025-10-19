@@ -49,7 +49,6 @@ const navigation = [
   { name: 'Hóspedes', href: '/dashboard/guests', icon: Users },
   { name: 'Disponibilidade', href: '/dashboard/room-availability', icon: Calendar },
   { name: 'Channel Manager', href: '/dashboard/channel-manager', icon: Radio },
-  { name: 'Motor de Reservas', href: '/dashboard/motor-reservas', icon: Globe },
 ];
 
 interface SearchResult {
