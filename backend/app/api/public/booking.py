@@ -284,20 +284,26 @@ def get_available_payment_methods(
                 detail="Propriedade não encontrada"
             )
         
-        # Buscar métodos de pagamento ativos do tenant
+        # Buscar métodos de pagamento ativos do tenant, ordenados
         payment_methods = db.query(PaymentMethod).filter(
             PaymentMethod.tenant_id == property_obj.tenant_id,
             PaymentMethod.is_active == True
-        ).all()
+        ).order_by(PaymentMethod.display_order, PaymentMethod.name).all()
         
         return {
             "property_name": property_obj.name,
+            "property_slug": slug,
             "payment_methods": [
                 {
                     "id": pm.id,
                     "name": pm.name,
+                    "code": pm.code,  # ✅ CORRIGIDO: usar 'code' ao invés de 'payment_type'
                     "description": pm.description,
-                    "icon": pm.settings.get("icon") if pm.settings else None
+                    "icon": pm.icon if pm.icon else (pm.settings.get("icon") if pm.settings else None),
+                    "color": pm.color if pm.color else (pm.settings.get("color") if pm.settings else None),
+                    "requires_reference": pm.requires_reference,
+                    "has_fees": pm.has_fees,
+                    "display_order": pm.display_order
                 }
                 for pm in payment_methods
             ],

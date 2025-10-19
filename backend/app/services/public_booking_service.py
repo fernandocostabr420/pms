@@ -220,7 +220,10 @@ class PublicBookingService:
         booking_data: PublicBookingCreate,
         tenant_id: int
     ) -> Guest:
-        """Cria novo hóspede ou atualiza existente"""
+        """
+        Cria novo hóspede ou atualiza existente.
+        ✅ CORRIGIDO: Usar campos corretos do modelo Guest
+        """
         
         # Buscar hóspede existente por email
         guest = self.db.query(Guest).filter(
@@ -238,14 +241,19 @@ class PublicBookingService:
             guest.first_name = first_name
             guest.last_name = last_name
             guest.phone = booking_data.guest_phone
+            
             if booking_data.guest_document:
                 guest.document_number = booking_data.guest_document
+                
             if booking_data.guest_country:
                 guest.nationality = booking_data.guest_country
+                
+            # ✅ CORRIGIDO: Usar address_line1 ao invés de address
             if booking_data.guest_address:
-                guest.address = booking_data.guest_address
+                guest.address_line1 = booking_data.guest_address
+                
         else:
-            # Criar novo hóspede
+            # ✅ CORRIGIDO: Criar novo hóspede com campos corretos
             guest = Guest(
                 tenant_id=tenant_id,
                 first_name=first_name,
@@ -253,9 +261,8 @@ class PublicBookingService:
                 email=booking_data.guest_email,
                 phone=booking_data.guest_phone,
                 document_number=booking_data.guest_document,
-                nationality=booking_data.guest_country,
-                address=booking_data.guest_address,
-                guest_type="individual"
+                nationality=booking_data.guest_country or "Brasil",
+                address_line1=booking_data.guest_address  # ✅ CORRIGIDO: Campo correto
             )
             self.db.add(guest)
         
@@ -319,9 +326,13 @@ class PublicBookingService:
         # Gerar token público único
         public_token = self._generate_public_token()
         
+        # Gerar número de reserva
+        reservation_number = self._generate_reservation_number(property_obj.tenant_id)
+        
         # Criar reserva
         reservation = Reservation(
             tenant_id=property_obj.tenant_id,
+            reservation_number=reservation_number,
             property_id=property_obj.id,
             room_id=room.id,
             guest_id=guest.id,
@@ -329,11 +340,12 @@ class PublicBookingService:
             # Datas
             check_in_date=booking_data.check_in_date,
             check_out_date=booking_data.check_out_date,
-            nights=nights,
+            # nights é calculado automaticamente pelo modelo
             
             # Hóspedes
             adults=booking_data.adults,
             children=booking_data.children,
+            total_guests=booking_data.adults + booking_data.children,
             
             # Valores
             total_amount=pricing['total'],
@@ -342,6 +354,7 @@ class PublicBookingService:
             status='pending_confirmation',
             
             # Canal de venda
+            source='public_booking_engine',
             sales_channel_name='Booking Engine',
             
             # Método de pagamento escolhido
@@ -382,7 +395,37 @@ class PublicBookingService:
         self.db.add(reservation)
         self.db.flush()
         
+        # ✅ CRÍTICO: Criar entrada em ReservationRoom para o mapa funcionar
+        from app.models.reservation import ReservationRoom
+        
+        reservation_room = ReservationRoom(
+            reservation_id=reservation.id,
+            room_id=room.id,
+            check_in_date=booking_data.check_in_date,
+            check_out_date=booking_data.check_out_date,
+            rate_per_night=pricing['subtotal'] / nights if nights > 0 else Decimal('0.00'),
+            total_amount=pricing['total'],
+            status='reserved',
+            notes=booking_data.special_requests
+        )
+        
+        self.db.add(reservation_room)
+        self.db.flush()
+        
         return reservation
+    
+    def _generate_reservation_number(self, tenant_id: int) -> str:
+        """Gera número único de reserva"""
+        from sqlalchemy import func
+        
+        year = datetime.now().year
+        count = self.db.query(func.count(Reservation.id)).filter(
+            Reservation.tenant_id == tenant_id,
+            func.extract('year', Reservation.created_at) == year
+        ).scalar()
+        
+        sequence = count + 1
+        return f"RES-{year}-{sequence:06d}"
     
     def _generate_public_token(self) -> str:
         """Gera token único para acompanhamento público da reserva"""
