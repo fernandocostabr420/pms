@@ -31,5 +31,13 @@ structlog==23.2.0
 # Utilitários
 email-validator==2.1.0
 python-dotenv==1.0.0
-
 pytz==2023.3
+
+# ✅ ADICIONADO: Geração de PDFs (vouchers)
+reportlab==4.0.7
+
+# ✅ ADICIONADO: Processamento de imagens
+Pillow==10.1.0
+
+# ✅ ADICIONADO: Operações assíncronas com arquivos
+aiofiles==23.2.1

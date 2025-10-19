@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 import logging
 import traceback
@@ -43,6 +44,11 @@ app = FastAPI(
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
 )
+
+# ✅ CONFIGURAR UPLOADS - Criar diretório e montar arquivos estáticos
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+logger.info("✅ Pasta de uploads configurada: /uploads")
 
 # ✅ ADICIONAR MIDDLEWARES (ORDEM IMPORTA!)
 # 1. Timezone primeiro
@@ -138,14 +144,16 @@ async def root():
         "environment": settings.ENVIRONMENT,
         "debug": settings.DEBUG,
         "api_v1_loaded": api_loaded,
-        "public_api_loaded": public_api_loaded,  # ✅ NOVO
+        "public_api_loaded": public_api_loaded,
         "cors_origins": cors_origins[:5],
         "docs": "/docs" if settings.DEBUG else "Documentação não disponível em produção",
         "timezone": "America/Sao_Paulo",
+        "uploads": "✅ Configurado em /uploads",
         "endpoints": {
             "private_api": "/api/v1",
-            "public_api": "/api/public",  # ✅ NOVO
+            "public_api": "/api/public",
             "health": "/health",
+            "uploads": "/uploads",
             "docs": "/docs" if settings.DEBUG else None
         }
     }
@@ -163,10 +171,11 @@ async def health_check():
         "status": "healthy" if db_status else "unhealthy",
         "database": "connected" if db_status else "disconnected",
         "api_v1_loaded": api_loaded,
-        "public_api_loaded": public_api_loaded,  # ✅ NOVO
+        "public_api_loaded": public_api_loaded,
         "version": settings.VERSION,
         "environment": settings.ENVIRONMENT,
-        "timezone": "America/Sao_Paulo"
+        "timezone": "America/Sao_Paulo",
+        "uploads": "active"
     }
 
 # Event handlers
@@ -178,8 +187,9 @@ async def startup_event():
     logger.info(f"🔍 Debug: {settings.DEBUG}")
     logger.info(f"🌐 CORS configurado para: {len(cors_origins)} origens")
     logger.info(f"📡 API v1 carregada: {api_loaded}")
-    logger.info(f"🌍 API Pública carregada: {public_api_loaded}")  # ✅ NOVO
+    logger.info(f"🌍 API Pública carregada: {public_api_loaded}")
     logger.info(f"🕐 Timezone: America/Sao_Paulo")
+    logger.info(f"📁 Uploads: /uploads → uploads/")
 
 @app.on_event("shutdown") 
 async def shutdown_event():

@@ -30,7 +30,7 @@ def validate_slug_format(slug: str) -> bool:
 
 def save_upload_file(file: UploadFile, upload_type: str, property_id: int) -> str:
     """
-    Salva arquivo de upload e retorna a URL
+    Salva arquivo de upload e retorna a URL COMPLETA
     
     Args:
         file: Arquivo para upload
@@ -38,8 +38,10 @@ def save_upload_file(file: UploadFile, upload_type: str, property_id: int) -> st
         property_id: ID da propriedade
         
     Returns:
-        URL do arquivo salvo
+        URL COMPLETA do arquivo salvo (incluindo domínio do backend)
     """
+    from app.core.config import settings
+    
     # Criar diretório se não existir
     upload_dir = f"uploads/booking-engine/property-{property_id}/{upload_type}"
     os.makedirs(upload_dir, exist_ok=True)
@@ -53,8 +55,17 @@ def save_upload_file(file: UploadFile, upload_type: str, property_id: int) -> st
     with open(file_path, "wb") as buffer:
         buffer.write(file.file.read())
     
-    # Retornar URL relativa
-    return f"/{file_path}"
+    # ✅ RETORNAR URL COMPLETA COM DOMÍNIO DO BACKEND
+    # Obter URL base do backend (variável de ambiente ou padrão)
+    backend_url = os.getenv('BACKEND_URL', 'http://72.60.50.223:8000')
+    
+    # Normalizar o caminho do arquivo (trocar \ por / no Windows)
+    normalized_path = file_path.replace('\\', '/')
+    
+    # Construir URL completa
+    full_url = f"{backend_url}/{normalized_path}"
+    
+    return full_url
 
 
 # ==================== CRUD OPERATIONS ====================
