@@ -12,6 +12,12 @@ import os
 from app.core.config import settings
 from app.core.database import check_db_connection
 
+# ✅ IMPORTAR MIDDLEWARES DA API PÚBLICA
+from app.api.public.middleware import (
+    RateLimitMiddleware,
+    PublicAPILoggingMiddleware
+)
+
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,13 +44,24 @@ app = FastAPI(
     redoc_url="/redoc" if settings.DEBUG else None,
 )
 
-# ✅ ADICIONAR MIDDLEWARE DE TIMEZONE (ANTES DO CORS)
+# ✅ ADICIONAR MIDDLEWARES (ORDEM IMPORTA!)
+# 1. Timezone primeiro
 app.add_middleware(TimezoneMiddleware)
 
-# Configurar CORS - Mais permissivo para desenvolvimento
+# 2. Middlewares da API pública
+app.add_middleware(PublicAPILoggingMiddleware)
+app.add_middleware(RateLimitMiddleware)
+
+# 3. CORS por último (para interceptar todas as respostas)
 cors_origins = settings.CORS_ORIGINS.split(",")
 if settings.DEBUG:
-    cors_origins.extend(["*", "http://72.60.50.223:3000", "http://72.60.50.223:8000"])
+    cors_origins.extend([
+        "*", 
+        "http://72.60.50.223:3000", 
+        "http://72.60.50.223:8000",
+        "http://localhost:3001",  # ✅ Frontend do booking engine
+        "http://127.0.0.1:3001"   # ✅ Frontend do booking engine
+    ])
 
 app.add_middleware(
     CORSMiddleware,
@@ -90,15 +107,26 @@ async def global_exception_handler(request, exc):
         }
     )
 
-# Incluir rotas da API com tratamento de erro
+# ✅ INCLUIR ROTAS DA API PRIVADA (V1) com tratamento de erro
 try:
     from app.api.v1.api import api_router
     app.include_router(api_router, prefix="/api/v1")
     api_loaded = True
-    logger.info("✅ API routes carregadas com sucesso")
+    logger.info("✅ API v1 routes carregadas com sucesso")
 except Exception as e:
-    logger.error(f"❌ Erro ao carregar API routes: {e}")
+    logger.error(f"❌ Erro ao carregar API v1 routes: {e}")
     api_loaded = False
+
+# ✅ INCLUIR ROTAS DA API PÚBLICA
+try:
+    from app.api.public import public_router
+    app.include_router(public_router, prefix="/api/public")
+    public_api_loaded = True
+    logger.info("✅ API pública carregada com sucesso")
+except Exception as e:
+    logger.error(f"❌ Erro ao carregar API pública: {e}")
+    logger.exception(e)  # Log completo do erro
+    public_api_loaded = False
 
 # Endpoints básicos
 @app.get("/")
@@ -109,10 +137,17 @@ async def root():
         "version": settings.VERSION,
         "environment": settings.ENVIRONMENT,
         "debug": settings.DEBUG,
-        "api_loaded": api_loaded,
-        "cors_origins": cors_origins[:5],  # Primeiras 5 para não sobrecarregar
+        "api_v1_loaded": api_loaded,
+        "public_api_loaded": public_api_loaded,  # ✅ NOVO
+        "cors_origins": cors_origins[:5],
         "docs": "/docs" if settings.DEBUG else "Documentação não disponível em produção",
-        "timezone": "America/Sao_Paulo"  # ✅ ADICIONAR INFO DE TIMEZONE
+        "timezone": "America/Sao_Paulo",
+        "endpoints": {
+            "private_api": "/api/v1",
+            "public_api": "/api/public",  # ✅ NOVO
+            "health": "/health",
+            "docs": "/docs" if settings.DEBUG else None
+        }
     }
 
 @app.get("/health")
@@ -127,10 +162,11 @@ async def health_check():
     return {
         "status": "healthy" if db_status else "unhealthy",
         "database": "connected" if db_status else "disconnected",
-        "api_loaded": api_loaded,
+        "api_v1_loaded": api_loaded,
+        "public_api_loaded": public_api_loaded,  # ✅ NOVO
         "version": settings.VERSION,
         "environment": settings.ENVIRONMENT,
-        "timezone": "America/Sao_Paulo"  # ✅ ADICIONAR INFO DE TIMEZONE
+        "timezone": "America/Sao_Paulo"
     }
 
 # Event handlers
@@ -141,8 +177,9 @@ async def startup_event():
     logger.info(f"📊 Ambiente: {settings.ENVIRONMENT}")
     logger.info(f"🔍 Debug: {settings.DEBUG}")
     logger.info(f"🌐 CORS configurado para: {len(cors_origins)} origens")
-    logger.info(f"📡 API carregada: {api_loaded}")
-    logger.info(f"🕐 Timezone: America/Sao_Paulo")  # ✅ LOG DE TIMEZONE
+    logger.info(f"📡 API v1 carregada: {api_loaded}")
+    logger.info(f"🌍 API Pública carregada: {public_api_loaded}")  # ✅ NOVO
+    logger.info(f"🕐 Timezone: America/Sao_Paulo")
 
 @app.on_event("shutdown") 
 async def shutdown_event():

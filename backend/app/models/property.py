@@ -15,14 +15,15 @@ class Property(BaseModel, TenantMixin):
     
     # Informações básicas
     name = Column(String(200), nullable=False, index=True)
-    slug = Column(String(100), nullable=False, index=True)  # URL-friendly
+    slug = Column(String(100), nullable=False, index=True, unique=True)  # URL-friendly
     description = Column(Text, nullable=True)
     
     # Tipo de propriedade
     property_type = Column(String(50), nullable=False, index=True)  # hotel, pousada, hostel, apartamento
     
     # Endereço
-    address_line1 = Column(String(200), nullable=False)
+    address = Column(String(200), nullable=False)  # ✅ Campo simplificado
+    address_line1 = Column(String(200), nullable=True)  # Compatibilidade
     address_line2 = Column(String(200), nullable=True)
     city = Column(String(100), nullable=False, index=True)
     state = Column(String(100), nullable=False)
@@ -42,7 +43,7 @@ class Property(BaseModel, TenantMixin):
     check_in_time = Column(String(10), default="14:00")   # Horário check-in padrão
     check_out_time = Column(String(10), default="12:00")  # Horário check-out padrão
     
-    # ✅ NOVO: Configurações de Estacionamento
+    # ✅ Configurações de Estacionamento
     parking_enabled = Column(Boolean, default=False, nullable=False)  # Se estacionamento está disponível
     parking_spots_total = Column(Integer, nullable=True)  # Número total de vagas
     parking_policy = Column(String(20), default="integral", nullable=True)  # "integral" ou "flexible"
@@ -55,9 +56,21 @@ class Property(BaseModel, TenantMixin):
     # Status operacional
     is_operational = Column(Boolean, default=True, nullable=False)  # Propriedade em funcionamento
     
-    # Relacionamentos (futuros)
-    # rooms = relationship("Room", back_populates="property")
-    # reservations = relationship("Reservation", back_populates="property")
+    # ============== RELACIONAMENTOS ==============
+    
+    # ✅ NOVO: Relacionamento com BookingEngineConfig
+    booking_engine_config = relationship(
+        "BookingEngineConfig",
+        back_populates="property_obj",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+    
+    # Outros relacionamentos
+    # rooms = relationship("Room", back_populates="property_obj")  # Removido - Room usa backref
+    reservations = relationship("Reservation", back_populates="property_obj")
+    
+    # ============== MÉTODOS ==============
     
     def __repr__(self):
         return f"<Property(id={self.id}, name='{self.name}', type='{self.property_type}')>"
@@ -65,7 +78,12 @@ class Property(BaseModel, TenantMixin):
     @property
     def full_address(self):
         """Endereço completo formatado"""
-        address = self.address_line1
+        # Usar campo 'address' se disponível, senão construir
+        if hasattr(self, 'address') and self.address:
+            return self.address
+        
+        # Fallback para campos separados
+        address = self.address_line1 or ""
         if self.address_line2:
             address += f", {self.address_line2}"
         address += f", {self.city}, {self.state}"
@@ -83,7 +101,7 @@ class Property(BaseModel, TenantMixin):
         """Verifica se propriedade está disponível para reservas"""
         return self.is_active and self.is_operational
     
-    # ✅ NOVO: Propriedades para Estacionamento
+    # ✅ Propriedades para Estacionamento
     @property
     def has_parking(self):
         """Verifica se a propriedade possui estacionamento configurado"""
@@ -108,3 +126,50 @@ class Property(BaseModel, TenantMixin):
         
         if self.parking_policy not in ["integral", "flexible"]:
             self.parking_policy = "integral"  # Fallback seguro
+    
+    # ✅ NOVOS MÉTODOS PARA BOOKING ENGINE
+    
+    @property
+    def has_booking_engine(self):
+        """Verifica se tem motor de reservas configurado"""
+        return self.booking_engine_config is not None and self.booking_engine_config.is_active
+    
+    @property
+    def booking_url(self):
+        """Retorna URL do motor de reservas (se configurado)"""
+        if not self.has_booking_engine:
+            return None
+        return self.booking_engine_config.booking_url
+    
+    def get_public_info(self) -> dict:
+        """
+        Retorna informações públicas da propriedade (seguras para expor).
+        Usado pela API pública do booking engine.
+        """
+        return {
+            "id": self.id,
+            "name": self.name,
+            "slug": self.slug,
+            "description": self.description,
+            "property_type": self.property_type,
+            "address": {
+                "full": self.full_address,
+                "city": self.city,
+                "state": self.state,
+                "country": self.country,
+                "postal_code": self.postal_code
+            },
+            "contact": {
+                "phone": self.phone,
+                "email": self.email,
+                "website": self.website
+            },
+            "amenities": self.amenities_list,
+            "check_in_time": self.check_in_time,
+            "check_out_time": self.check_out_time,
+            "has_parking": self.has_parking,
+            "coordinates": {
+                "latitude": float(self.latitude) if self.latitude else None,
+                "longitude": float(self.longitude) if self.longitude else None
+            } if self.latitude and self.longitude else None
+        }

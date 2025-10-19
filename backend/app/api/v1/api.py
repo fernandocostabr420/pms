@@ -7,9 +7,10 @@ from app.api.v1.endpoints import (
     room_types, rooms, guests, reservations,
     room_availability, map, payments,
     payment_methods, sales_channels, channel_manager,
-    rate_plans,  # ✅ ADICIONADO
-    restrictions,  # ✅ NOVO: Adicionado para sistema de restrições
-    sse  # ✅ SSE: Adicionado para notificações em tempo real
+    rate_plans,
+    restrictions,
+    sse,
+    booking_engine
 )
 
 api_router = APIRouter()
@@ -116,14 +117,14 @@ api_router.include_router(
     tags=["Canais de Venda"]
 )
 
-# ✅ NOVO: Incluir rotas de planos de tarifa
+# Incluir rotas de planos de tarifa
 api_router.include_router(
     rate_plans.router,
     prefix="/rate-plans", 
     tags=["Planos de Tarifa"]
 )
 
-# ✅ NOVO: Incluir rotas de restrições de reserva
+# Incluir rotas de restrições de reserva
 api_router.include_router(
     restrictions.router,
     prefix="/restrictions", 
@@ -137,9 +138,15 @@ api_router.include_router(
     tags=["Channel Manager"]
 )
 
-# ✅ SSE: Incluir rotas de Server-Sent Events (notificações em tempo real)
+# SSE: Incluir rotas de Server-Sent Events (notificações em tempo real)
 api_router.include_router(
     sse.router,
     prefix="/sse", 
     tags=["SSE - Notificações em Tempo Real"]
+)
+
+# ✅ NOVO: Booking Engine Configuration
+api_router.include_router(
+    booking_engine.router,
+    tags=["Booking Engine Config"]
 )

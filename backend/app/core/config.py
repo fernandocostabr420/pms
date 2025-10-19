@@ -39,6 +39,33 @@ class Settings(BaseSettings):
     SMTP_USER: Optional[str] = None
     SMTP_PASSWORD: Optional[str] = None
     
+    # ============== PUBLIC BOOKING ENGINE SETTINGS ==============
+    
+    # Frontend URL
+    FRONTEND_URL: Optional[str] = "http://localhost:3000"
+    BOOKING_ENGINE_URL: Optional[str] = "http://localhost:3001"
+    
+    # Public API Settings
+    PUBLIC_API_RATE_LIMIT_PER_MINUTE: int = 100
+    PUBLIC_API_RATE_LIMIT_WINDOW: int = 60  # segundos
+    PUBLIC_API_CACHE_TTL: int = 300  # 5 minutos
+    
+    # Booking Settings
+    MAX_BOOKING_NIGHTS: int = 90
+    MIN_ADVANCE_BOOKING_HOURS: int = 2
+    MAX_ADVANCE_BOOKING_DAYS: int = 365
+    DEFAULT_CHECK_IN_TIME: str = "14:00"
+    DEFAULT_CHECK_OUT_TIME: str = "12:00"
+    
+    # Email Templates (para notificações de reservas públicas)
+    BOOKING_CONFIRMATION_EMAIL_ENABLED: bool = True
+    BOOKING_NOTIFICATION_EMAIL_TO_PROPERTY: bool = True
+    
+    # WhatsApp Integration (opcional - para futuro)
+    WHATSAPP_API_ENABLED: bool = False
+    WHATSAPP_API_URL: Optional[str] = None
+    WHATSAPP_API_TOKEN: Optional[str] = None
+    
     # ============== WUBOOK INTEGRATION ==============
     
     # WuBook API
@@ -175,6 +202,11 @@ class Settings(BaseSettings):
     ENABLE_RESTRICTION_SYNC: bool = True
     ENABLE_BOOKING_SYNC: bool = True
     
+    # ✅ NOVO: Public Booking Engine Features
+    ENABLE_PUBLIC_BOOKING_ENGINE: bool = True
+    ENABLE_PUBLIC_API: bool = True
+    ENABLE_BOOKING_NOTIFICATIONS: bool = True
+    
     # Advanced Features
     ENABLE_YIELD_MANAGEMENT: bool = False
     ENABLE_DYNAMIC_PRICING: bool = False
@@ -215,7 +247,13 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self):
         """Retorna lista de origens CORS"""
-        return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
+        origins = [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
+        
+        # ✅ ADICIONAR URLs do booking engine automaticamente
+        if self.BOOKING_ENGINE_URL:
+            origins.append(self.BOOKING_ENGINE_URL)
+        
+        return origins
     
     @property
     def is_production(self) -> bool:
@@ -270,6 +308,25 @@ class Settings(BaseSettings):
             return []
         return [email.strip() for email in self.ALERT_EMAIL_RECIPIENTS.split(",")]
     
+    # ✅ NOVO: Configurações do Booking Engine
+    @property
+    def booking_engine_enabled(self) -> bool:
+        """Verifica se o booking engine está habilitado"""
+        return self.ENABLE_PUBLIC_BOOKING_ENGINE and self.ENABLE_PUBLIC_API
+    
+    @property
+    def public_api_config(self) -> dict:
+        """Retorna configuração da API pública"""
+        return {
+            "enabled": self.ENABLE_PUBLIC_API,
+            "rate_limit_per_minute": self.PUBLIC_API_RATE_LIMIT_PER_MINUTE,
+            "rate_limit_window": self.PUBLIC_API_RATE_LIMIT_WINDOW,
+            "cache_ttl": self.PUBLIC_API_CACHE_TTL,
+            "max_booking_nights": self.MAX_BOOKING_NIGHTS,
+            "min_advance_hours": self.MIN_ADVANCE_BOOKING_HOURS,
+            "max_advance_days": self.MAX_ADVANCE_BOOKING_DAYS
+        }
+    
     # ============== VALIDATION METHODS ==============
     
     def validate_wubook_config(self) -> bool:
@@ -320,6 +377,7 @@ class Settings(BaseSettings):
             "availability_ttl": self.AVAILABILITY_CACHE_TTL_SECONDS,
             "configuration_ttl": self.CONFIGURATION_CACHE_TTL_SECONDS,
             "room_mapping_ttl": self.ROOM_MAPPING_CACHE_TTL_SECONDS,
+            "public_api_ttl": self.PUBLIC_API_CACHE_TTL,  # ✅ NOVO
             "redis_url": self.REDIS_URL
         }
     
@@ -391,10 +449,13 @@ def get_environment_info() -> dict:
         "timezone": settings.TIMEZONE,
         "wubook_configured": settings.wubook_configured,
         "sync_enabled": settings.sync_enabled,
+        "booking_engine_enabled": settings.booking_engine_enabled,  # ✅ NOVO
         "features": {
             "channel_manager": settings.ENABLE_CHANNEL_MANAGER,
             "auto_sync": settings.ENABLE_AUTO_SYNC,
             "bulk_operations": settings.ENABLE_BULK_OPERATIONS,
-            "yield_management": settings.ENABLE_YIELD_MANAGEMENT
+            "yield_management": settings.ENABLE_YIELD_MANAGEMENT,
+            "public_booking_engine": settings.ENABLE_PUBLIC_BOOKING_ENGINE,  # ✅ NOVO
+            "public_api": settings.ENABLE_PUBLIC_API  # ✅ NOVO
         }
     }

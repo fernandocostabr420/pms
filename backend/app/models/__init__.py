@@ -36,6 +36,9 @@ from .wubook_room_mapping import WuBookRoomMapping
 from .wubook_rate_plan import WuBookRatePlan
 from .wubook_sync_log import WuBookSyncLog
 
+# ✅ NOVO: Public Booking Engine
+from .booking_engine_config import BookingEngineConfig
+
 
 # Exportar todos os modelos
 __all__ = [
@@ -70,4 +73,7 @@ __all__ = [
     "WuBookRoomMapping",
     "WuBookRatePlan",
     "WuBookSyncLog",
+    
+    # ✅ NOVO: Public Booking Engine
+    "BookingEngineConfig",
 ]

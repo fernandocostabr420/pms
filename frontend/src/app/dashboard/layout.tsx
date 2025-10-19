@@ -390,8 +390,9 @@ const UserMenu = memo(function UserMenu({
         
         <DropdownMenuSeparator />
         
+        {/* ✅ CORRIGIDO: Rota de /dashboard/cadastros/usuarios para /dashboard/usuarios */}
         <DropdownMenuItem asChild>
-          <Link href="/dashboard/cadastros/usuarios" className="flex items-center">
+          <Link href="/dashboard/usuarios" className="flex items-center">
             <Users className="mr-2 h-4 w-4" />
             Usuários
           </Link>

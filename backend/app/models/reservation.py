@@ -1,4 +1,4 @@
-# app/models/reservation.py - CORRIGIDO PARA MAPEAMENTOS
+# backend/app/models/reservation.py
 
 from sqlalchemy import Column, String, Date, DateTime, Numeric, Integer, Text, JSON, Boolean, ForeignKey
 from sqlalchemy.orm import relationship, validates
@@ -18,9 +18,13 @@ class Reservation(BaseModel, TenantMixin):
     # Identificação da reserva
     reservation_number = Column(String(50), nullable=False, unique=True, index=True)  # RES-2025-001
     
+    # ✅ NOVO: Token público para acompanhamento via booking engine
+    public_token = Column(String(100), nullable=True, unique=True, index=True)
+    
     # Relacionamentos principais
     guest_id = Column(Integer, ForeignKey('guests.id'), nullable=False, index=True)
     property_id = Column(Integer, ForeignKey('properties.id'), nullable=False, index=True)
+    room_id = Column(Integer, ForeignKey('rooms.id'), nullable=True, index=True)  # ✅ Adicionado
     
     # Período da reserva
     check_in_date = Column(Date, nullable=False, index=True)
@@ -28,12 +32,18 @@ class Reservation(BaseModel, TenantMixin):
     
     # Status da reserva
     status = Column(String(20), nullable=False, default="pending", index=True)
-    # pending, confirmed, checked_in, checked_out, cancelled, no_show, booking
+    # pending, confirmed, checked_in, checked_out, cancelled, no_show, booking, pending_confirmation
     
     # Informações dos hóspedes
     adults = Column(Integer, default=1, nullable=False)
     children = Column(Integer, default=0, nullable=False) 
     total_guests = Column(Integer, default=1, nullable=False)
+    
+    # ✅ NOVOS CAMPOS: Dados do hóspede principal (denormalizado para facilitar consultas)
+    guest_name = Column(String(200), nullable=True)
+    guest_email = Column(String(255), nullable=True)
+    guest_phone = Column(String(20), nullable=True)
+    guest_document = Column(String(20), nullable=True)
     
     # Valores financeiros
     room_rate = Column(Numeric(10, 2), nullable=True)        # Diária base
@@ -43,10 +53,16 @@ class Reservation(BaseModel, TenantMixin):
     taxes = Column(Numeric(10, 2), default=0, nullable=False)        # Impostos/taxas
     
     # Origem da reserva
-    source = Column(String(50), nullable=True, index=True)   # direct, booking, airbnb, room_map, etc.
+    source = Column(String(50), nullable=True, index=True)   # direct, booking, airbnb, room_map, booking_engine, etc.
     source_reference = Column(String(100), nullable=True)   # ID externo da reserva
     
-    # ✅ NOVO: Estacionamento
+    # ✅ NOVOS CAMPOS: Informações do booking engine
+    booking_source = Column(String(50), nullable=True)  # 'public_booking_engine', 'admin', 'api', etc.
+    sales_channel_name = Column(String(100), nullable=True)  # Nome do canal de venda
+    payment_method = Column(String(100), nullable=True)  # Método de pagamento escolhido
+    special_requests = Column(Text, nullable=True)  # Pedidos especiais
+    
+    # Estacionamento
     parking_requested = Column(Boolean, default=False, nullable=False)  # Solicita estacionamento
     
     # Datas importantes
@@ -64,6 +80,7 @@ class Reservation(BaseModel, TenantMixin):
     # Metadados flexíveis
     extra_data = Column(JSON, nullable=True)  # Dados extras específicos do canal/integração
     preferences = Column(JSON, nullable=True)  # Preferências específicas desta reserva
+    booking_metadata = Column(JSON, nullable=True)  # ✅ NOVO: Metadata geral (renomeado para evitar conflito)
     
     # Flags de controle
     is_group_reservation = Column(Boolean, default=False)  # Reserva em grupo
@@ -72,33 +89,37 @@ class Reservation(BaseModel, TenantMixin):
     
     # Relacionamentos
     guest = relationship("Guest", back_populates="reservations")
-    property_obj = relationship("Property")
+    property_obj = relationship("Property", back_populates="reservations")
+    room = relationship("Room")  # Sem back_populates pois Room não define o relacionamento reverso ainda
     reservation_rooms = relationship("ReservationRoom", back_populates="reservation", cascade="all, delete-orphan")
     payments = relationship("Payment", back_populates="reservation", cascade="all, delete-orphan")
     
-    # ✅ NOVOS MAPEAMENTOS PARA CORRIGIR PROBLEMAS
+    # ============== MAPEAMENTOS PARA NORMALIZAÇÃO ==============
     
     # Mapeamento de status válidos
     _VALID_STATUSES = {
-        'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 'no_show', 'booking'
+        'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 
+        'no_show', 'booking', 'pending_confirmation'
     }
     
     # Mapeamento de status para display
     _STATUS_DISPLAY_MAP = {
         'pending': 'Pendente',
+        'pending_confirmation': 'Aguardando Confirmação',
         'confirmed': 'Confirmada',
         'checked_in': 'Check-in Realizado',
         'checked_out': 'Check-out Realizado',
         'cancelled': 'Cancelada',
         'no_show': 'No-show',
-        'booking': 'Reserva Externa'  # ✅ NOVO: Para booking.com não confirmadas
+        'booking': 'Reserva Externa'
     }
     
     # Mapeamento de origens válidas
     _VALID_SOURCES = {
         'direct', 'direct_booking', 'website', 'phone', 'email', 'walk_in',
         'booking', 'booking.com', 'airbnb', 'expedia', 'hotels.com', 'agoda',
-        'room_map', 'dashboard', 'admin', 'agent', 'social_media', 'referral'
+        'room_map', 'dashboard', 'admin', 'agent', 'social_media', 'referral',
+        'booking_engine'  # ✅ NOVO
     }
     
     # Mapeamento de origens para display
@@ -106,6 +127,7 @@ class Reservation(BaseModel, TenantMixin):
         'direct': 'Reserva Direta',
         'direct_booking': 'Reserva Direta',
         'website': 'Site Próprio',
+        'booking_engine': 'Motor de Reservas',  # ✅ NOVO
         'phone': 'Telefone',
         'email': 'Email',
         'walk_in': 'Walk-in',
@@ -115,7 +137,7 @@ class Reservation(BaseModel, TenantMixin):
         'expedia': 'Expedia',
         'hotels.com': 'Hotels.com',
         'agoda': 'Agoda',
-        'room_map': 'Mapa de Quartos',  # ✅ NOVO: Para reservas criadas pelo mapa
+        'room_map': 'Mapa de Quartos',
         'dashboard': 'Dashboard',
         'admin': 'Administração',
         'agent': 'Agente/Operadora',
@@ -136,14 +158,17 @@ class Reservation(BaseModel, TenantMixin):
         'e-mail': 'email',
         'walk-in': 'walk_in',
         'walkin': 'walk_in',
+        'motor_reservas': 'booking_engine',
+        'booking_engine': 'booking_engine',
     }
 
     def __repr__(self):
+        guest_name = self.guest_name or (self.guest.full_name if self.guest else 'N/A')
         return (f"<Reservation(id={self.id}, number='{self.reservation_number}', "
-                f"guest='{self.guest.full_name if self.guest else 'N/A'}', "
+                f"guest='{guest_name}', "
                 f"dates={self.check_in_date}-{self.check_out_date}, status='{self.status}')>")
     
-    # ✅ VALIDADORES PARA NORMALIZAÇÃO AUTOMÁTICA
+    # ============== VALIDADORES ==============
     
     @validates('status')
     def validate_status(self, key, status):
@@ -169,6 +194,7 @@ class Reservation(BaseModel, TenantMixin):
             'no-show': 'no_show',
             'noshow': 'no_show',
             'reserva_externa': 'booking',
+            'aguardando': 'pending_confirmation',
         }
         
         normalized = status_aliases.get(status_lower)
@@ -204,7 +230,7 @@ class Reservation(BaseModel, TenantMixin):
         logger.warning(f"Origem desconhecida: {source}")
         return source_lower
 
-    # ✅ PROPRIEDADES MELHORADAS
+    # ============== PROPRIEDADES ==============
 
     @property
     def nights(self):
@@ -279,12 +305,12 @@ class Reservation(BaseModel, TenantMixin):
     
     @property
     def status_display(self):
-        """Status formatado para exibição - CORRIGIDO"""
+        """Status formatado para exibição"""
         return self._STATUS_DISPLAY_MAP.get(self.status, self.status.replace('_', ' ').title())
     
     @property
     def source_display(self):
-        """✅ NOVO: Origem formatada para exibição"""
+        """Origem formatada para exibição"""
         if not self.source:
             return 'Não Informado'
         return self._SOURCE_DISPLAY_MAP.get(self.source, self.source.replace('_', ' ').title())
@@ -294,7 +320,7 @@ class Reservation(BaseModel, TenantMixin):
         """Verifica se pode fazer check-in"""
         today = date.today()
         return (
-            self.status in ["pending", "confirmed"] and 
+            self.status in ["pending", "confirmed", "pending_confirmation"] and 
             self.check_in_date <= today and
             self.is_active
         )
@@ -307,7 +333,7 @@ class Reservation(BaseModel, TenantMixin):
     @property
     def can_cancel(self):
         """Verifica se pode ser cancelada"""
-        return self.status in ["pending", "confirmed"] and self.is_active
+        return self.status in ["pending", "confirmed", "pending_confirmation"] and self.is_active
     
     @property
     def is_current(self):
@@ -319,13 +345,58 @@ class Reservation(BaseModel, TenantMixin):
             self.is_active
         )
     
-    # ✅ NOVO: Propriedade para identificação visual de estacionamento
     @property
     def parking_display(self):
         """Status do estacionamento formatado para exibição"""
         return "Solicitado" if self.parking_requested else None
     
-    # ✅ NOVOS MÉTODOS PARA SUPORTE A FILTROS FLEXÍVEIS
+    # ✅ NOVOS MÉTODOS PARA BOOKING ENGINE
+    
+    @property
+    def is_public_booking(self):
+        """Verifica se é uma reserva feita via booking engine público"""
+        return self.booking_source == 'public_booking_engine' or bool(self.public_token)
+    
+    @property
+    def tracking_url(self):
+        """URL para acompanhamento público da reserva"""
+        if not self.public_token:
+            return None
+        from app.core.config import settings
+        base_url = settings.BOOKING_ENGINE_URL or "http://localhost:3001"
+        return f"{base_url}/track/{self.public_token}"
+    
+    def get_public_info(self) -> dict:
+        """
+        Retorna informações públicas da reserva (seguras para expor).
+        Usado para tracking via token público.
+        """
+        return {
+            "reservation_number": self.reservation_number,
+            "status": self.status,
+            "status_display": self.status_display,
+            "guest_name": self.guest_name or (self.guest.full_name if self.guest else None),
+            "check_in_date": self.check_in_date.isoformat() if self.check_in_date else None,
+            "check_out_date": self.check_out_date.isoformat() if self.check_out_date else None,
+            "nights": self.nights,
+            "adults": self.adults,
+            "children": self.children,
+            "total_amount": float(self.total_amount) if self.total_amount else 0.0,
+            "payment_method": self.payment_method,
+            "special_requests": self.special_requests,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "room_info": {
+                "room_number": self.room.room_number if self.room else None,
+                "room_name": self.room.name if self.room else None
+            } if self.room else None,
+            "property_info": {
+                "name": self.property_obj.name if self.property_obj else None,
+                "phone": self.property_obj.phone if self.property_obj else None,
+                "email": self.property_obj.email if self.property_obj else None
+            } if self.property_obj else None
+        }
+    
+    # ============== MÉTODOS DE CLASSE ==============
     
     @classmethod
     def normalize_status_for_search(cls, status: str) -> str:
@@ -335,9 +406,9 @@ class Reservation(BaseModel, TenantMixin):
         
         status_lower = status.lower().strip()
         
-        # Mapeamentos de busca flexível
         search_map = {
             'pendente': 'pending',
+            'aguardando': 'pending_confirmation',
             'confirmada': 'confirmed',
             'check-in': 'checked_in',
             'checkin': 'checked_in',
@@ -363,7 +434,6 @@ class Reservation(BaseModel, TenantMixin):
         
         source_lower = source.lower().strip()
         
-        # Mapeamentos de busca flexível
         search_map = {
             'booking.com': 'booking',
             'bookingcom': 'booking',
@@ -381,6 +451,8 @@ class Reservation(BaseModel, TenantMixin):
             'walk-in': 'walk_in',
             'walkin': 'walk_in',
             'presencial': 'walk_in',
+            'motor_reservas': 'booking_engine',
+            'booking_engine': 'booking_engine',
         }
         
         return search_map.get(source_lower, source_lower)
@@ -390,6 +462,7 @@ class Reservation(BaseModel, TenantMixin):
         """Retorna todas as variações possíveis de um status para busca"""
         variations_map = {
             'pending': ['pending', 'pendente'],
+            'pending_confirmation': ['pending_confirmation', 'aguardando'],
             'confirmed': ['confirmed', 'confirmada'],
             'checked_in': ['checked_in', 'check_in', 'checkin', 'check-in'],
             'checked_out': ['checked_out', 'check_out', 'checkout', 'check-out'],
@@ -405,6 +478,7 @@ class Reservation(BaseModel, TenantMixin):
         """Retorna todas as variações possíveis de uma origem para busca"""
         variations_map = {
             'booking': ['booking', 'booking.com', 'bookingcom'],
+            'booking_engine': ['booking_engine', 'motor_reservas'],
             'room_map': ['room_map', 'roommap', 'mapa_quartos', 'mapa'],
             'direct': ['direct', 'direct_booking', 'direto'],
             'phone': ['phone', 'telefone', 'fone'],
